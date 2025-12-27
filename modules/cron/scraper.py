@@ -4,7 +4,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, wait
 from modules.object import batch_run, batch_run_log
 from modules.parse.scrape import process_source
-from modules.object import collect_source
+from modules.object import provider
 
 MAX_PER_RUN = 50
 PAGE_SIZE = 50
@@ -16,7 +16,7 @@ def run(start_time: datetime) -> tuple[str, list[int] | None]:
         if batch_run_id is None:
             batch_run_id = batch_run.insert(batch_run.BatchRun('scraper', 'auto'))
 
-        to_scrape = collect_source.fetch_for_scraping(limit=MAX_PER_RUN)
+        to_scrape = provider.fetch_for_scraping(limit=MAX_PER_RUN)
 
         log.record_status(f"Running scraper batch job ID {batch_run_id} - will proccess {len(to_scrape)} items.")
 
@@ -55,7 +55,7 @@ def run(start_time: datetime) -> tuple[str, list[int] | None]:
         batch_run.update_completed_at(batch_run_id)
 
         scrape_ids = [s.id for s in to_scrape if s.id is not None]
-        stats = collect_source.get_collection_stats(scrape_ids, start_time)
+        stats = provider.get_collection_stats(scrape_ids, start_time)
         stats_scraper = ""
         for line in stats:
             stats_scraper += (f"{line['count']}\t{line['domain']}\n")
