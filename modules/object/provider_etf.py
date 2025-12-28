@@ -3,6 +3,8 @@ from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
 from modules.core.db import db_pool_instance
+from modules.object.provider import Provider 
+
 
 @dataclass
 class ProviderEtf:
@@ -19,13 +21,20 @@ class ProviderEtf:
     trading_since: datetime | None
     number_of_managers: int | None
     url: str | None
-    file_format: str | None
-    column_mapping: dict | None
     wait_pre_events: str | None
     wait_post_events: str | None
     events: dict | None
     trigger_download: dict | None
+    mapping: dict | None
+    file_format: str | None
     last_downloaded: datetime | None
+
+@dataclass
+class EtfDownload:
+    provider: Provider
+    etf: ProviderEtf
+    file_name: str | None
+    data: bytes | str | None
 
 def fetch_by_id(id: int):
     with db_pool_instance.get_connection() as conn:

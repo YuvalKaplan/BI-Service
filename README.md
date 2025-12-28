@@ -18,7 +18,7 @@ This can then be ctivated with:
 
 ### Modules
 #### Currently using modules:
-dotenv psycopg psycopg-pool psycopg_binary tld bcrypt playwright playwright-stealth mailgun pandas openpyxl
+dotenv psycopg psycopg-pool psycopg_binary tld bcrypt playwright playwright-stealth mailgun pydantic pandas openpyxl
 
 #### Package manager
 The packages are installed using the `pip` command, for example:

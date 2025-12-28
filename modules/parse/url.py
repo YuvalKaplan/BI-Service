@@ -1,15 +1,14 @@
 import os
-import io
 import log
 import re
 import tempfile
+from datetime import datetime
 from typing import List
 from dataclasses import dataclass
 from playwright.sync_api import sync_playwright, Download, Browser, BrowserContext, Page
 from playwright_stealth import Stealth
-import pandas as pd
-from modules.object.file import File
-from modules.object import provider, provider_etf
+from modules.object.provider import Provider 
+from modules.object.provider_etf import EtfDownload, fetch_by_provider_id
 
 ENV_TYPE = os.environ.get("ENV_TYPE")
 
@@ -128,8 +127,8 @@ def open_page(page: Page, url: str, wait_pre_events: str | None, wait_post_event
         return False
 
 
-def scrape_provider(cp: provider.Provider):
-    files: List[File] = []
+def scrape_provider(cp: Provider):
+    downloads: List[EtfDownload] = []
     open_browser: OpenBrowser = OpenBrowser(browser=None, context=None, page=None)
 
     try:
@@ -156,29 +155,21 @@ def scrape_provider(cp: provider.Provider):
                 raise Exception('Missing URL for provider.')
             
             if cp.id and open_page(page=open_browser.page, url=cp.url_start, wait_pre_events=cp.wait_pre_events, wait_post_events=cp.wait_post_events, events=cp.events):
-                etf_list = provider_etf.fetch_by_provider_id(cp.id)
+                etf_list = fetch_by_provider_id(cp.id)
                 for etf in etf_list:
-                    if etf.id == None or etf.url == None or etf.trigger_download == None:
-                        raise Exception('Missing URL for provider etf.')
+                    trigger_download = etf.trigger_download or cp.trigger_download
+
+                    if etf.id == None or etf.url == None or trigger_download == None:
+                        raise Exception('Missing URL or Trigger Method for provider etf.')
                     
                     open_page(page=open_browser.page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events)
-                    file_name, data = get_holdings(page=open_browser.page, trigger_download=etf.trigger_download)
-                    
-                    if file_name and data:
-                        with open("./.downloads/" + file_name, "wb") as f:
-                            f.write(data)
-
-                    if data:
-                        print("Got download file data...need to process...")
-                        if (cp.file_format == 'xlsx'):
-                            file_buffer = io.BytesIO(data)
-                            df = pd.read_excel(file_buffer)
-                            print(df.head())
+                    file_name, data = get_holdings(page=open_browser.page, trigger_download=trigger_download)
+                    downloads.append(EtfDownload(provider=cp, etf=etf, file_name=file_name, data=data))
 
             open_browser.context.close()
             open_browser.browser.close()
 
-            return files
+            return downloads
         
     except Exception as e:
         raise Exception(f"Failed to extract URLs and subsequent files from webpage content and related links: {e}")

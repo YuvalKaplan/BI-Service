@@ -2,9 +2,9 @@ from datetime import datetime
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
+from pydantic import BaseModel
+from typing import Dict, Optional
 from modules.core.db import db_pool_instance
-
-GAP_DAYS_BETWEEN_SCRAPES = 7
 
 @dataclass
 class Provider:
@@ -18,9 +18,29 @@ class Provider:
     wait_pre_events: str | None
     wait_post_events: str | None
     events: dict | None
-    column_mapping: dict | None
+    trigger_download: dict | None
+    mapping: dict | None
     file_format: str | None
 
+# 1. Define the nested structures first
+class WeightConfig(BaseModel):
+    is_percent: bool
+
+class FormatConfig(BaseModel):
+    date: str
+    weight: WeightConfig
+
+# 2. Define the main model
+class Mapping(BaseModel):
+    sheet: Optional[str]
+    columns: Dict[str, str]
+    format: FormatConfig
+    header_row: int
+    skip_rows: int
+    remove_tickers: list[str]
+
+def getMappingFromJson(data: dict) -> Mapping:
+    return Mapping.model_validate(data)
 
 def fetch_by_id(id: int):
     try:
