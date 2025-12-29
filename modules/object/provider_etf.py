@@ -59,12 +59,12 @@ def fetch_by_provider_id(provider_id: int):
         raise Exception(f"Error fetching the Provider ETFs for provider ID from the DB: {e}")
 
 
-def update_last_download(item: ProviderEtf):
+def update_last_download(id: int):
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 insert_query = "UPDATE provider_etf SET last_downloaded = %s WHERE id = %s;"
-                cur.execute(insert_query, (datetime.now(timezone.utc), item.id))
+                cur.execute(insert_query, (datetime.now(timezone.utc), id))
                 conn.commit()
                 return
 

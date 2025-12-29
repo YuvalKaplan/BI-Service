@@ -1,6 +1,6 @@
 from datetime import datetime
 from psycopg.errors import Error
-from psycopg.rows import class_row
+from psycopg.rows import class_row, dict_row
 from dataclasses import dataclass
 from pydantic import BaseModel
 from typing import Dict, Optional
@@ -22,19 +22,11 @@ class Provider:
     mapping: dict | None
     file_format: str | None
 
-# 1. Define the nested structures first
-class WeightConfig(BaseModel):
-    is_percent: bool
 
-class FormatConfig(BaseModel):
-    date: str
-    weight: WeightConfig
-
-# 2. Define the main model
 class Mapping(BaseModel):
     sheet: Optional[str]
     columns: Dict[str, str]
-    format: FormatConfig
+    date_format: str
     header_row: int
     skip_rows: int
     remove_tickers: list[str]
@@ -79,3 +71,34 @@ def update_domain(item: Provider):
         raise Exception(f"Failed to update provider domain")
     except Error as e:
         raise Exception(f"Error updating the Provider item into the DB: {e}")
+
+def fetch_active_providers():
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Provider)) as cur:
+                query_str = "SELECT * FROM provider WHERE disabled = false;"
+                cur.execute(query_str)
+                items = cur.fetchall()
+        return items
+    except Error as e:
+        raise Exception(f"Error fetching the Provider list page from the DB: {e}")
+
+
+def get_collection_stats(ids: list[int], start: datetime) -> list[dict]:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                query_str = """
+                    SELECT p.name, COUNT(ped.id) AS downloaded, COUNT(pe.id) AS available 
+                    FROM provider as p
+                    LEFT OUTER JOIN provider_etf as ped ON p.id = ped.provider_id AND ped.last_downloaded >= %s
+                    LEFT OUTER JOIN provider_etf as pe ON p.id = pe.provider_id
+                    WHERE p.id = ANY(%s)
+                    GROUP BY p.name
+                    ORDER BY available
+                """
+                cur.execute(query_str, (start, ids))
+                items = cur.fetchall()
+        return items
+    except Error as e:
+        raise Exception(f"Error fetching the Provider list stats from the DB: {e}")

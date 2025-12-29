@@ -3,10 +3,9 @@ import os
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, wait
 from modules.object import batch_run, batch_run_log
-from modules.parse.scrape import process_source
+from modules.parse.download import process_provider
 from modules.object import provider
 
-MAX_PER_RUN = 50
 PAGE_SIZE = 50
 MAX_WORKERS = 10
 
@@ -14,11 +13,11 @@ def run(start_time: datetime) -> tuple[str, list[int] | None]:
     try:
         batch_run_id = None
         if batch_run_id is None:
-            batch_run_id = batch_run.insert(batch_run.BatchRun('scraper', 'auto'))
+            batch_run_id = batch_run.insert(batch_run.BatchRun('downloader', 'auto'))
 
-        to_scrape = provider.fetch_for_scraping(limit=MAX_PER_RUN)
+        to_scrape = provider.fetch_active_providers()
 
-        log.record_status(f"Running scraper batch job ID {batch_run_id} - will proccess {len(to_scrape)} items.")
+        log.record_status(f"Running downloader batch job ID {batch_run_id} - will proccess {len(to_scrape)} items.")
 
         completed = 0
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -46,7 +45,7 @@ def run(start_time: datetime) -> tuple[str, list[int] | None]:
                 current_batch.extend(group)
 
                 if current_batch:
-                    futures = [executor.submit(process_source, item) for item in current_batch]
+                    futures = [executor.submit(process_provider, item) for item in current_batch]
                     wait(futures)
 
                     batch_run_log.insert(batch_run_log.BatchRunLog(batch_run_id=batch_run_id, note=f"Page {str(page_number)} with {len(to_scrape)} items"))
@@ -54,15 +53,18 @@ def run(start_time: datetime) -> tuple[str, list[int] | None]:
 
         batch_run.update_completed_at(batch_run_id)
 
-        scrape_ids = [s.id for s in to_scrape if s.id is not None]
-        stats = provider.get_collection_stats(scrape_ids, start_time)
-        stats_scraper = ""
+        provider_ids = [s.id for s in to_scrape if s.id is not None]
+        stats = provider.get_collection_stats(provider_ids, start_time)
+        stats_downloader = ""
         for line in stats:
-            stats_scraper += (f"{line['count']}\t{line['domain']}\n")
+            if line['downloaded'] == line['available']:
+                stats_downloader += (f"All\t{line['name']}\n")
+            else:
+                stats_downloader += (f"{line['downloaded']} out of {line['available']}\t{line['name']}\n")
 
-        log.record_status(f"Finished scraper batch run on {completed} items.\n{stats_scraper}")
-        return stats_scraper, scrape_ids
+        log.record_status(f"Finished downloader batch run on {completed} items.\n{stats_downloader}")
+        return stats_downloader, provider_ids
 
     except Exception as e:
-        log.record_error(f"Error in scraper batch run: {e}")
+        log.record_error(f"Error in downloader batch run: {e}")
         raise e

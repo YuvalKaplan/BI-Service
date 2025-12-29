@@ -7,7 +7,7 @@ from modules.object.provider_etf import EtfDownload
 FILE_FOLDER = "./.downloads/"
 
 def read_excel_from_buffer(file_buffer: io.BytesIO, mapping: Mapping) -> pd.DataFrame:
-    dfs = pd.read_excel(file_buffer, sheet_name=None, skiprows=mapping.skip_rows, header=mapping.header_row)
+    dfs = pd.read_excel(file_buffer, engine="openpyxl", sheet_name=None, skiprows=mapping.skip_rows, header=mapping.header_row)
     if mapping.sheet:
         df = dfs[mapping.sheet]
     else:
@@ -46,18 +46,23 @@ def convert_data(df, mapping: Mapping) -> pd.DataFrame:
     df = df[inverse_map.keys()]
     df = df.rename(columns=inverse_map)
     df = df.dropna(how="all")
-    required_cols = ["date", "isin", "weight"]
+    required_cols = ["trade_date", "isin", "weight"]
     df = df.dropna(subset=required_cols)
-    df["date"] = pd.to_datetime(df["date"], format=mapping.format.date, errors="coerce")
-    df["value"] = clean_numeric_column(df, "value")
+    df["trade_date"] = pd.to_datetime(df["trade_date"], format=mapping.date_format, errors="coerce")
+    df["market_value"] = clean_numeric_column(df, "market_value")
     df["weight"] = clean_numeric_column(df, "weight")
 
     # We are using a weighting that sums up to 1 (not 100%)
-    if mapping.format.weight.is_percent:
+    total_weight = df["weight"].sum()
+    if total_weight > 1:
         df["weight"] = df["weight"] / 100
+        df["weight"] = df["weight"].round(6)
 
-    df = df[~df["ticker"].isin(mapping.remove_tickers)]
-    
+    df["ticker"] = df["ticker"].astype(str)
+    df = df[
+        ~df["ticker"].isin(mapping.remove_tickers) &
+        df["ticker"].str.strip().ne("")
+    ]
     return df    
 
 def transform(download: EtfDownload, save: bool = False) -> pd.DataFrame:

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from modules.init.exit import cleanup
 from modules.core.db import db_pool_instance
 from modules.core import sender
-from modules.cron import scraper
+from modules.cron import downloader
 
 atexit.register(cleanup)
 
@@ -21,19 +21,19 @@ if __name__ == '__main__':
         start_time = datetime.now(timezone.utc)
         message_actions = ""
 
-        if 1 <= start_time.weekday() <= 5: # Tuesday to Saturday
+        if 0 <= start_time.weekday() <= 4: # Monday to Friday
             try:
-                stats_scraper, scrape_ids, = scraper.run(start_time)
+                stats_downloader, provider_ids, = downloader.run(start_time)
             except Exception as e:
-                sender.send_admin(subject="Cron Failed", message=f"Cron Failed on scraper with error:\n{e}\n")
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
                 raise e
             
             # Inform admin that batch has completed.
-            message_actions += f"Scraping\n-------------\n{stats_scraper}\n\n"
+            message_actions += f"Holdings Download\n--------------------------------\n{stats_downloader}\n\n"
 
         end = datetime.now(timezone.utc)
         message_full = f"Activated at {start_time.strftime("%H:%M:%S")}\nCompleted at {end.strftime("%H:%M:%S")}.\n\n"
-        sender.send_admin(subject="Cron Completed", message=message_full + message_actions)
+        sender.send_admin(subject="Best Ideas Cron Completed", message=message_full + message_actions)
 
     except Exception as e:
         log.record_error(f"Error starting cron service: {e}")

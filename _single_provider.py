@@ -1,6 +1,6 @@
 import atexit
 from modules.init.exit import cleanup
-from modules.object import provider
+from modules.object import provider, provider_etf_holding
 from modules.parse.url import scrape_provider
 from modules.parse.convert import transform
 
@@ -13,11 +13,12 @@ if __name__ == '__main__':
         if p and p.url_start and p.mapping:            
             downloads = scrape_provider(p)
             for d in downloads:
-                df = transform(d, True)
-                
-                print(df.head())
-                print("... ------------ ...")
-                print(df.tail())
+                if d.etf and d.etf.id:
+                    df = transform(d, True)
+                    print(df.head())
+                    print("... ------------ ...")
+                    print(df.tail())
+                    provider_etf_holding.insert_all_holdings(d.etf.id, df)
 
     except Exception as e:
         print(f"Error in scraping and processing single provider: {e}")
