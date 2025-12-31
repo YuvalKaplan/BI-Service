@@ -34,7 +34,7 @@ class EtfDownload:
     provider: Provider
     etf: ProviderEtf
     file_name: str | None
-    data: bytes | str | None
+    data: bytes | None
 
 def fetch_by_id(id: int):
     with db_pool_instance.get_connection() as conn:
@@ -50,6 +50,7 @@ def fetch_by_provider_id(provider_id: int):
                 query_str = """
                     SELECT * FROM provider_etf
                     WHERE provider_id = %s
+                    LIMIT 2
                     ;
                 """
                 cur.execute(query_str, (provider_id,))

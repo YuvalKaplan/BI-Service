@@ -1,14 +1,14 @@
 import atexit
 from modules.init.exit import cleanup
-from modules.object import provider, provider_etf, provider_etf_holding
-from modules.parse.convert import read_file, convert_data
+from modules.object import provider, provider_etf
+from modules.parse.convert import read_file, map_data
 
 atexit.register(cleanup)
 
 if __name__ == '__main__':
     try:
-        provider_id = 1
-        filename = 'Goldman Sachs ActiveBeta U.S. Large Cap Equity ETF.xlsx'
+        provider_id = 11
+        filename = 'positions_bbc.xls'
         p = provider.fetch_by_id(provider_id)
         if p and p.id:
             etf_list = provider_etf.fetch_by_provider_id(p.id)
@@ -22,8 +22,8 @@ if __name__ == '__main__':
                     raise Exception('Missing file type or mapping information in database for data trasformation.')
 
                 mapping = provider.getMappingFromJson(use_mapping)
-                df = read_file(file_name=filename, format=file_format, mapping=mapping)
-                df = convert_data(df=df, mapping=mapping)
+                full_rows = read_file(file_name=filename, format=file_format, mapping=mapping)
+                df = map_data(full_rows=full_rows, mapping=mapping)
             
                 print(df.head())
                 print("... ------------ ...")

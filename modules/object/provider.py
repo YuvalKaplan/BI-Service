@@ -22,14 +22,20 @@ class Provider:
     mapping: dict | None
     file_format: str | None
 
-
+class DateSingle(BaseModel):
+    row: int
+    col: int
+    
 class Mapping(BaseModel):
-    sheet: Optional[str]
-    columns: Dict[str, str]
+    sheet: Optional[str] = None
+    columns: Dict[str, Optional[str]]
     date_format: str
-    header_row: int
-    skip_rows: int
-    remove_tickers: list[str]
+    date_single: Optional[DateSingle] = None
+    header_row: int = 0
+    skip_rows: int = 0
+    remove_tickers: list[str] = []
+    multi_row_header: Optional[int] = 1
+    no_prefix_headers: list[str] = []
 
 def getMappingFromJson(data: dict) -> Mapping:
     return Mapping.model_validate(data)

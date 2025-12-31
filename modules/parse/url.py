@@ -68,8 +68,9 @@ def save_and_get_data(download: Download) -> bytes:
 
 def get_holdings(page: Page, trigger_download: dict) -> tuple[str | None, bytes | None]:
     try:
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(6000)
         dispatch(page, { 'name': 'scroll_to_first', 'selector': trigger_download['selector'] })
+        page.wait_for_timeout(2000)
 
         # # Perform the click
         with page.expect_download() as download_info:

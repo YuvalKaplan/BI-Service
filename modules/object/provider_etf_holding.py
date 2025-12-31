@@ -12,7 +12,6 @@ class ProviderEtfHolding:
     created_at: datetime
     provider_etf_id: int
     trade_date: datetime
-    isin: str
     ticker: str
     shares: float
     market_value: float
@@ -41,16 +40,13 @@ def insert_all_holdings(etf_id: int, df: pd.DataFrame):
         df = df[[
             "provider_etf_id",
             "trade_date",
-            "isin",
             "ticker",
             "shares",
             "market_value",
             "weight"
         ]]
-        rows = list(df.itertuples(index=False, name=None))
+        rows = list(df.itertuples(index=False, name=None)).copy()
 
-        td = df["trade_date"][0]
-        print (td)
         #  Delete the Holdings data for a ETF on a Trade Date to prevent duplicates
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
@@ -59,12 +55,12 @@ def insert_all_holdings(etf_id: int, df: pd.DataFrame):
                     WHERE peh.provider_etf_id = %s 
                     AND peh.trade_date = %s;
                 """
-                cur.execute(delete_query, (etf_id, df["trade_date"][0]))    
+                cur.execute(delete_query, (etf_id, df["trade_date"].iat[0]))    
                 conn.commit()
 
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
-                insert_query = "INSERT INTO provider_etf_holding (provider_etf_id, trade_date, isin, ticker, shares, market_value, weight) VALUES (%s, %s, %s, %s, %s, %s, %s);"
+                insert_query = "INSERT INTO provider_etf_holding (provider_etf_id, trade_date, ticker, shares, market_value, weight) VALUES (%s, %s, %s, %s, %s, %s);"
                 cur.executemany(insert_query, rows)
                 conn.commit()
 

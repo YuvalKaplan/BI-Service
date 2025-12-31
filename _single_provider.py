@@ -8,13 +8,14 @@ atexit.register(cleanup)
 
 if __name__ == '__main__':
     try:
-        provider_id = 1
+        provider_id = 11
         p = provider.fetch_by_id(provider_id)
         if p and p.url_start and p.mapping:            
             downloads = scrape_provider(p)
             for d in downloads:
                 if d.etf and d.etf.id:
                     df = transform(d, True)
+                    print(f"{d.etf.name}\t{d.file_name}")
                     print(df.head())
                     print("... ------------ ...")
                     print(df.tail())
