@@ -22,11 +22,12 @@ class OpenBrowser:
     page: Page | None
 
 def dispatch(page: Page, event: dict):
+        action_timout = 5000
         name: str = event.get("name", "")
         selector: str = event.get("selector", "")
 
         if name == "navigate":
-            page.goto(event["url"], wait_until="domcontentloaded", timeout=5000)
+            page.goto(event["url"], wait_until="domcontentloaded", timeout=action_timout)
             return;
 
         if name == "mouse":
@@ -37,21 +38,21 @@ def dispatch(page: Page, event: dict):
             return;
 
         elif name == "click":
-            page.click(selector, button=event.get("button", "left"), click_count=event.get("clickCount", 1), timeout=3000, force=True)
+            page.click(selector, button=event.get("button", "left"), click_count=event.get("clickCount", 1), timeout=action_timout, force=True)
 
         elif name == "check":
-            page.check(selector, timeout=3000)
+            page.check(selector, timeout=action_timout)
 
         elif name == "fill":
             # focus first for robustness
-            page.click(selector, timeout=3000)
-            page.fill(selector, event["text"], timeout=3000)
+            page.click(selector, timeout=action_timout)
+            page.fill(selector, event["text"], timeout=action_timout)
 
         elif name == "select":
-            page.select_option(selector, value=event["options"], timeout=3000)
+            page.select_option(selector, value=event["options"], timeout=action_timout)
 
         elif name == "scroll_to_first":
-            page.locator(selector).first.scroll_into_view_if_needed(timeout=3000)
+            page.locator(selector).first.scroll_into_view_if_needed(timeout=action_timout)
 
         else:
             raise NotImplementedError(f"Unsupported action: {name}")
@@ -68,9 +69,9 @@ def save_and_get_data(download: Download) -> bytes:
 
 def get_holdings(page: Page, trigger_download: dict) -> tuple[str | None, bytes | None]:
     try:
-        page.wait_for_timeout(6000)
+        page.wait_for_timeout(4000)
         dispatch(page, { 'name': 'scroll_to_first', 'selector': trigger_download['selector'] })
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(1000)
 
         # # Perform the click
         with page.expect_download() as download_info:

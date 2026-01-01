@@ -29,6 +29,8 @@ class DateSingle(BaseModel):
 class Mapping(BaseModel):
     sheet: Optional[str] = None
     columns: Dict[str, Optional[str]]
+    header_data_gap: int = 0
+    date_none: bool = False
     date_format: str
     date_single: Optional[DateSingle] = None
     header_row: int = 0

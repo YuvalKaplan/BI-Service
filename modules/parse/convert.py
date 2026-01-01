@@ -1,7 +1,7 @@
 import io
 import os
 import csv
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 from openpyxl import load_workbook
 import xlrd
@@ -61,7 +61,7 @@ def clean_numeric_column(df: pd.DataFrame, column: str, as_type: str = "float") 
     
     return col_numeric
 
-def clean_date(dirty: str, format: str) -> datetime | None:
+def clean_date(dirty: str, format: str) -> datetime:
     format_to_regex = {
         "%Y": r"\d{4}",
         "%y": r"\d{2}",
@@ -77,6 +77,8 @@ def clean_date(dirty: str, format: str) -> datetime | None:
     match = re.search(pattern, dirty)
     if match:
         return datetime.strptime(match.group(), format)
+    
+    raise Exception("Date could not be parsed")
 
 def map_data(full_rows: list[list[str]], mapping: Mapping) -> pd.DataFrame:
     skip = mapping.skip_rows
@@ -107,22 +109,20 @@ def map_data(full_rows: list[list[str]], mapping: Mapping) -> pd.DataFrame:
             else:
                 header.append(f"{top} {sub}".strip())
 
-        data_start = skip + 2
+        data_start = skip + mapping.header_data_gap + 2
     else:
         # Single header row
         header = [str(h).strip() if h is not None else "" for h in full_rows[skip]]
-        data_start = skip + 1
+        data_start = skip + mapping.header_data_gap + 1
 
     data = full_rows[data_start:]
     df = pd.DataFrame(data, columns=header)
-    print(df.head())
 
-    # header = full_rows[mapping.skip_rows]
-    # data = full_rows[mapping.skip_rows+1:] 
-    # df = pd.DataFrame(data, columns=header)
+    good_date: datetime | None = None
+    if mapping.date_none:
+        good_date = datetime.now(timezone.utc)
 
     # If the date is not a part of the table or is only in the first row - grab it:
-    good_date: datetime | None = None
     if mapping.date_single:
         dirty = full_rows[mapping.date_single.row][mapping.date_single.col]
         good_date = clean_date(dirty, format=mapping.date_format) 
@@ -143,11 +143,8 @@ def map_data(full_rows: list[list[str]], mapping: Mapping) -> pd.DataFrame:
 
     df = df.dropna(how="all")
 
-    if mapping.date_single:
-        if good_date:
-            df.loc[:, "trade_date"] = pd.to_datetime(good_date, format=mapping.date_format, errors="coerce")
-        else:
-            raise Exception("Date could not be parsed")
+    if good_date:
+        df.loc[:, "trade_date"] = good_date
     else:
         df["trade_date"] = pd.to_datetime(df["trade_date"], format=mapping.date_format, errors="coerce")
 
@@ -159,9 +156,10 @@ def map_data(full_rows: list[list[str]], mapping: Mapping) -> pd.DataFrame:
     df["shares"] = clean_numeric_column(df, "shares")
     df['ticker'] = df['ticker'].str.split(' ').str[0]
 
+    
     # drop rows where the shares is empty or 0 (used for cash holdings)
-    df = df[df["shares"].notna() & (df["shares"] != 0)]
-    df = df[df["weight"].notna() & (df["weight"] != 0)]
+    df = df[df["shares"].notna() & (df["shares"] > 0)]
+    df = df[df["weight"].notna() & (df["weight"] > 0)]
 
     # We are using a weighting that sums up to 1 (not 100%)
     total_weight = df["weight"].sum()

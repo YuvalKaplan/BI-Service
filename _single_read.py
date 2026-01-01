@@ -7,8 +7,8 @@ atexit.register(cleanup)
 
 if __name__ == '__main__':
     try:
-        provider_id = 11
-        filename = 'positions_bbc.xls'
+        provider_id = 16
+        filename = 'NBCR-12_30_2025.xlsx'
         p = provider.fetch_by_id(provider_id)
         if p and p.id:
             etf_list = provider_etf.fetch_by_provider_id(p.id)
