@@ -7,8 +7,8 @@ atexit.register(cleanup)
 
 if __name__ == '__main__':
     try:
-        provider_id = 16
-        filename = 'NBCR-12_30_2025.xlsx'
+        provider_id = 24
+        filename = 'Harbor_Active_Small_Cap_ETF_holdings_20251230.csv'
         p = provider.fetch_by_id(provider_id)
         if p and p.id:
             etf_list = provider_etf.fetch_by_provider_id(p.id)
@@ -23,7 +23,7 @@ if __name__ == '__main__':
 
                 mapping = provider.getMappingFromJson(use_mapping)
                 full_rows = read_file(file_name=filename, format=file_format, mapping=mapping)
-                df = map_data(full_rows=full_rows, mapping=mapping)
+                df = map_data(full_rows=full_rows, file_name=filename, mapping=mapping)
             
                 print(df.head())
                 print("... ------------ ...")

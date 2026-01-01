@@ -80,7 +80,8 @@ def clean_date(dirty: str, format: str) -> datetime:
     
     raise Exception("Date could not be parsed")
 
-def map_data(full_rows: list[list[str]], mapping: Mapping) -> pd.DataFrame:
+def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.DataFrame:
+    
     skip = mapping.skip_rows
     if mapping.multi_row_header == 2:
         # Two header rows
@@ -118,14 +119,23 @@ def map_data(full_rows: list[list[str]], mapping: Mapping) -> pd.DataFrame:
     data = full_rows[data_start:]
     df = pd.DataFrame(data, columns=header)
 
+    df.columns = df.columns.str.replace('\ufeff', '', regex=True)
+
     good_date: datetime | None = None
-    if mapping.date_none:
+    if mapping.date.none:
         good_date = datetime.now(timezone.utc)
 
+    if mapping.date.in_file_name:
+        good_date = clean_date(file_name, format=mapping.date.format)
+
     # If the date is not a part of the table or is only in the first row - grab it:
-    if mapping.date_single:
-        dirty = full_rows[mapping.date_single.row][mapping.date_single.col]
-        good_date = clean_date(dirty, format=mapping.date_format) 
+    if mapping.date.single:
+        dirty = full_rows[mapping.date.single.row][mapping.date.single.col]
+        good_date = clean_date(dirty, format=mapping.date.format) 
+
+    # select only the rows of the product (if this is a multi-product sheet)
+    if mapping.product_column:
+        df = df[df[mapping.product_column] == mapping.product_symbol]
 
     # Select only columns that exist in the original dataframe
     inverse_map = {src.lower(): tgt for tgt, src in mapping.columns.items() if src is not None}
@@ -146,11 +156,11 @@ def map_data(full_rows: list[list[str]], mapping: Mapping) -> pd.DataFrame:
     if good_date:
         df.loc[:, "trade_date"] = good_date
     else:
-        df["trade_date"] = pd.to_datetime(df["trade_date"], format=mapping.date_format, errors="coerce")
+        df["trade_date"] = pd.to_datetime(df["trade_date"], format=mapping.date.format, errors="coerce")
 
     required_cols = ["trade_date", "ticker", "shares", "market_value", "weight"]
     df = df.dropna(subset=required_cols)
-    
+
     df["market_value"] = clean_numeric_column(df, "market_value")
     df["weight"] = clean_numeric_column(df, "weight")
     df["shares"] = clean_numeric_column(df, "shares")
@@ -172,6 +182,14 @@ def map_data(full_rows: list[list[str]], mapping: Mapping) -> pd.DataFrame:
         ~df["ticker"].isin(mapping.remove_tickers) &
         df["ticker"].str.strip().ne("")
     ]
+
+    # Sum up holdings that have the same ticker
+    df = df.groupby('ticker', as_index=False).agg({
+        'market_value': 'sum',
+        'shares': 'sum',
+        'weight': 'sum',
+        'trade_date': 'first'
+    })
     return df    
 
 def transform(download: EtfDownload, save: bool = False) -> pd.DataFrame:
@@ -198,13 +216,13 @@ def transform(download: EtfDownload, save: bool = False) -> pd.DataFrame:
                         f.write(download.data)
                 full_rows = read_xlsx_from_buffer(download.data, mapping)
             elif file_format == 'csv':
-                data = download.data.decode('utf-8')
+                data = download.data.decode('utf-8-sig')
                 if save:
                     with open(os.path.join(FILE_FOLDER, download.file_name), "w", encoding="utf-8") as f:
                         f.write(data)
                 full_rows = read_csv_from_buffer(data, mapping)
 
-            df = map_data(full_rows=full_rows, mapping=mapping)
+            df = map_data(full_rows=full_rows, file_name=download.file_name, mapping=mapping)
 
         return df
         

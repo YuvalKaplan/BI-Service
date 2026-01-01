@@ -50,6 +50,7 @@ def fetch_by_provider_id(provider_id: int):
                 query_str = """
                     SELECT * FROM provider_etf
                     WHERE provider_id = %s
+                    AND NOT disabled
                     ORDER BY created_at
                     LIMIT 2
                     ;

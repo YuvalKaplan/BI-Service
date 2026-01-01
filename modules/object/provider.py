@@ -22,22 +22,29 @@ class Provider:
     mapping: dict | None
     file_format: str | None
 
-class DateSingle(BaseModel):
+class DatePosition(BaseModel):
     row: int
     col: int
+
+class DateFormat(BaseModel):
+    none: bool = False
+    in_file_name: bool = False
+    format: str
+    single: Optional[DatePosition] = None
     
 class Mapping(BaseModel):
     sheet: Optional[str] = None
-    columns: Dict[str, Optional[str]]
-    header_data_gap: int = 0
-    date_none: bool = False
-    date_format: str
-    date_single: Optional[DateSingle] = None
-    header_row: int = 0
+    product_column: Optional[str] = None
+    product_symbol: Optional[str] = None
     skip_rows: int = 0
-    remove_tickers: list[str] = []
+    header_row: int = 0
+    header_data_gap: int = 0
     multi_row_header: Optional[int] = 1
     no_prefix_headers: list[str] = []
+    columns: Dict[str, Optional[str]]
+    date: DateFormat
+    remove_tickers: list[str] = []
+    
 
 def getMappingFromJson(data: dict) -> Mapping:
     return Mapping.model_validate(data)
@@ -84,7 +91,7 @@ def fetch_active_providers():
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Provider)) as cur:
-                query_str = "SELECT * FROM provider WHERE disabled = false;"
+                query_str = "SELECT * FROM provider WHERE NOT disabled;"
                 cur.execute(query_str)
                 items = cur.fetchall()
         return items
