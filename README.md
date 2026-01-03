@@ -6,7 +6,7 @@ Services to scrape active ETF holdings and analyse the data.
 ### Vertual Environment
 Install a vertual environment at the command prompt with:
 `python -m venv .venv`
-This can then be ctivated with:
+This can then be activated with:
 `.venv/Scripts/activate`
 
 #### Reset the Virtual Environment:
@@ -15,6 +15,11 @@ This can then be ctivated with:
 - Run at the terminal: `python -m venv .venv`
 - Re-install all the dependancies: `pip install ...list above...`
 - Generate a new requirements.txt
+
+#### Tell VS Code to use the venv’s Python interpreter
+- Press `Ctrl+Shift+P`
+- Type Python: Select Interpreter
+- Choose: `.venv\Scripts\python.exe` (Windows)
 
 ### Modules
 #### Currently using modules:

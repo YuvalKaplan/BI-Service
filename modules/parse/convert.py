@@ -1,7 +1,7 @@
 import io
 import os
 import csv
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import re
 from openpyxl import load_workbook
 import xlrd
@@ -123,7 +123,7 @@ def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.
 
     good_date: datetime | None = None
     if mapping.date.none:
-        good_date = datetime.now(timezone.utc)
+        good_date = (datetime.now(timezone.utc) - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
     if mapping.date.in_file_name:
         good_date = clean_date(file_name, format=mapping.date.format)
@@ -150,22 +150,20 @@ def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.
 
     # Maintain the exact order defined in mapping
     df = df[list(mapping.columns.keys())]
-
     df = df.dropna(how="all")
 
     if good_date:
         df.loc[:, "trade_date"] = good_date
     else:
         df["trade_date"] = pd.to_datetime(df["trade_date"], format=mapping.date.format, errors="coerce")
-
-    required_cols = ["trade_date", "ticker", "shares", "market_value", "weight"]
+    
+    required_cols = ["trade_date", "ticker", "weight"]
     df = df.dropna(subset=required_cols)
 
     df["market_value"] = clean_numeric_column(df, "market_value")
     df["weight"] = clean_numeric_column(df, "weight")
     df["shares"] = clean_numeric_column(df, "shares")
     df['ticker'] = df['ticker'].str.split(' ').str[0]
-
     
     # drop rows where the shares is empty or 0 (used for cash holdings)
     df = df[df["shares"].notna() & (df["shares"] > 0)]
@@ -190,6 +188,7 @@ def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.
         'weight': 'sum',
         'trade_date': 'first'
     })
+
     return df    
 
 def transform(download: EtfDownload, save: bool = False) -> pd.DataFrame:

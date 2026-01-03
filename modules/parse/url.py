@@ -57,7 +57,7 @@ def dispatch(page: Page, event: dict):
         else:
             raise NotImplementedError(f"Unsupported action: {name}")
         
-        page.wait_for_timeout(300)
+        page.wait_for_timeout(750)
 
 def save_and_get_data(download: Download) -> bytes:
         temp_path = os.path.join(tempfile.gettempdir(), download.suggested_filename or "download.bin")

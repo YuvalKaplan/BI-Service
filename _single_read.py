@@ -7,8 +7,8 @@ atexit.register(cleanup)
 
 if __name__ == '__main__':
     try:
-        provider_id = 24
-        filename = 'Harbor_Active_Small_Cap_ETF_holdings_20251230.csv'
+        provider_id = 27
+        filename = 'DIVZ_Holdings - DIVZ_Holdings.csv'
         p = provider.fetch_by_id(provider_id)
         if p and p.id:
             etf_list = provider_etf.fetch_by_provider_id(p.id)
