@@ -21,7 +21,7 @@ if __name__ == '__main__':
         start_time = datetime.now(timezone.utc)
         message_actions = ""
 
-        if 0 <= start_time.weekday() <= 4: # Monday to Friday
+        if 0 <= start_time.weekday() <= 6: # Monday to Friday
             try:
                 stats_downloader, provider_ids, = downloader.run(start_time)
             except Exception as e:
