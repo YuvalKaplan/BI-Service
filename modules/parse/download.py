@@ -32,13 +32,16 @@ def process_provider(provider: Provider):
             log.record_notice(f"No holdings downloads identified when scraping URL '{provider.name}'")
             return
 
-        log.record_status(f"Storing holdings for {len(downloads)} etfs for analysis of provider '{provider.name}'.")
+        log.record_status(f"Storing holdings for {len(downloads)} ETFs for analysis of provider '{provider.name}'.")
 
         for d in downloads:
             if d.etf and d.etf.id:
-                df = transform(d, True)
-                insert_all_holdings(d.etf.id, df)
-                update_last_download(d.etf.id)
+                try:
+                    df = transform(d)
+                    insert_all_holdings(d.etf.id, df)
+                    update_last_download(d.etf.id)
+                except Exception as e:
+                    log.record_error(f"Failed to parse the data for ETF '{d.etf.name}'. {e}")
 
         log.record_status(f"Completed collection for the provider '{provider.name}'")
 

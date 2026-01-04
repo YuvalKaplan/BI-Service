@@ -15,7 +15,7 @@ def send_admin(subject: str, message: str):
         mgData = {
             "from": f"MI admin <admin@{DOMAIN}>",
             "to": f"yuval.kaplan@{DOMAIN}",
-             "cc": f"oren.kaplan@{DOMAIN}",
+            "cc": f"oren.kaplan@{DOMAIN}",
             "subject": subject,
             "text": message,
         }

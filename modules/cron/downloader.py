@@ -7,7 +7,7 @@ from modules.parse.download import process_provider
 from modules.object import provider
 
 PAGE_SIZE = 50
-MAX_WORKERS = 10
+MAX_WORKERS = 5
 
 def run(start_time: datetime) -> tuple[str, list[int] | None]:
     try:

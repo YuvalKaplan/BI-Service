@@ -69,7 +69,11 @@ def save_and_get_data(download: Download) -> bytes:
 
 def get_holdings(page: Page, trigger_download: dict) -> tuple[str | None, bytes | None]:
     try:
-        page.wait_for_timeout(4000)
+        page.wait_for_timeout(1500)
+        page.locator(trigger_download['selector']).first.wait_for(
+            state="visible",
+            timeout=15000
+        )
         dispatch(page, { 'name': 'scroll_to_first', 'selector': trigger_download['selector'] })
         page.wait_for_timeout(1000)
 
@@ -164,9 +168,10 @@ def scrape_provider(cp: Provider):
                     if etf.id == None or etf.url == None or trigger_download == None:
                         raise Exception('Missing URL or Trigger Method for provider etf.')
                     
-                    open_page(page=open_browser.page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events)
-                    file_name, data = get_holdings(page=open_browser.page, trigger_download=trigger_download)
-                    downloads.append(EtfDownload(provider=cp, etf=etf, file_name=file_name, data=data))
+                    if open_page(page=open_browser.page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
+                        file_name, data = get_holdings(page=open_browser.page, trigger_download=trigger_download)
+                        if file_name and data:
+                            downloads.append(EtfDownload(provider=cp, etf=etf, file_name=file_name, data=data))
 
             open_browser.context.close()
             open_browser.browser.close()

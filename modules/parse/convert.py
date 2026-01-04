@@ -1,6 +1,7 @@
 import io
 import os
 import csv
+import warnings
 from datetime import datetime, timezone, timedelta
 import re
 from openpyxl import load_workbook
@@ -13,25 +14,29 @@ FILE_FOLDER = "./.downloads/"
 DECIMAL_PRECISION = 10
 
 def read_xls_from_buffer(file_buffer: bytes, mapping: Mapping) -> list[list[str]]:
-    book = xlrd.open_workbook(file_contents=file_buffer)
-    sheet_name = mapping.sheet if mapping.sheet is not None else book.sheet_names()[0]
-    sheet = book.sheet_by_name(sheet_name)
-    full_rows = []
-    for r in range(sheet.nrows):
-        full_rows.append([sheet.cell_value(r, c) for c in range(sheet.ncols)])
-    return full_rows
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Workbook contains no default style*")
+        book = xlrd.open_workbook(file_contents=file_buffer)
+        sheet_name = mapping.sheet if mapping.sheet is not None else book.sheet_names()[0]
+        sheet = book.sheet_by_name(sheet_name)
+        full_rows = []
+        for r in range(sheet.nrows):
+            full_rows.append([sheet.cell_value(r, c) for c in range(sheet.ncols)])
+        return full_rows
     
 def read_xlsx_from_buffer(file_buffer: bytes, mapping: Mapping) -> list[list[str]]:
-    wb = load_workbook(io.BytesIO(file_buffer), data_only=True)
-    sheet = mapping.sheet if mapping.sheet is not None else wb.sheetnames[0]
-    ws = wb[sheet]
-    full_rows = []
-    if not ws:
-        raise Exception('Could not read raw data from Excel holdings file')
-    
-    for row in ws.iter_rows(values_only=True):
-        full_rows.append(list(row))
-    return full_rows
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Workbook contains no default style*")
+        book = load_workbook(io.BytesIO(file_buffer), data_only=True)
+        sheet = mapping.sheet if mapping.sheet is not None else book.sheetnames[0]
+        ws = book[sheet]
+        full_rows = []
+        if not ws:
+            raise Exception('Could not read raw data from Excel holdings file')
+        
+        for row in ws.iter_rows(values_only=True):
+            full_rows.append(list(row))
+        return full_rows
     
 def read_csv_from_buffer(file_buffer: str, mapping: Mapping) -> list[list[str]]:
     reader = csv.reader(io.StringIO(file_buffer))

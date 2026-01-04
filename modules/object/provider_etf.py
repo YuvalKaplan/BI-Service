@@ -52,7 +52,6 @@ def fetch_by_provider_id(provider_id: int):
                     WHERE provider_id = %s
                     AND NOT disabled
                     ORDER BY created_at
-                    LIMIT 2
                     ;
                 """
                 cur.execute(query_str, (provider_id,))

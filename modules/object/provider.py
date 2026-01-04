@@ -91,7 +91,7 @@ def fetch_active_providers():
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Provider)) as cur:
-                query_str = "SELECT * FROM provider WHERE NOT disabled;"
+                query_str = "SELECT * FROM provider WHERE NOT disabled ORDER BY name;"
                 cur.execute(query_str)
                 items = cur.fetchall()
         return items
@@ -110,7 +110,7 @@ def get_collection_stats(ids: list[int], start: datetime) -> list[dict]:
                     LEFT OUTER JOIN provider_etf as pe ON p.id = pe.provider_id
                     WHERE p.id = ANY(%s)
                     GROUP BY p.name
-                    ORDER BY available
+                    ORDER BY p.name
                 """
                 cur.execute(query_str, (start, ids))
                 items = cur.fetchall()
