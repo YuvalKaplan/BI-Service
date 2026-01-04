@@ -91,7 +91,7 @@ def fetch_active_providers():
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Provider)) as cur:
-                query_str = "SELECT * FROM provider WHERE NOT disabled ORDER BY name;"
+                query_str = "SELECT * FROM provider WHERE NOT disabled AND id = 1 ORDER BY name;"
                 cur.execute(query_str)
                 items = cur.fetchall()
         return items
