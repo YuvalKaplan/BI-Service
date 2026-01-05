@@ -25,6 +25,7 @@ class Provider:
 class DatePosition(BaseModel):
     row: int
     col: int
+    max_row_scan: Optional[int] = 0
 
 class DateFormat(BaseModel):
     none: bool = False
@@ -106,8 +107,8 @@ def get_collection_stats(ids: list[int], start: datetime) -> list[dict]:
                 query_str = """
                     SELECT p.name, COUNT(DISTINCT ped.id) AS downloaded, COUNT(DISTINCT pe.id) AS available 
                     FROM provider as p
-                    LEFT OUTER JOIN provider_etf as ped ON p.id = ped.provider_id AND ped.last_downloaded IS NOT NULL AND ped.last_downloaded >= %s
-                    LEFT OUTER JOIN provider_etf as pe ON p.id = pe.provider_id
+                    LEFT OUTER JOIN provider_etf as ped ON p.id = ped.provider_id AND NOT ped.disabled AND ped.last_downloaded >= %s
+                    LEFT OUTER JOIN provider_etf as pe ON p.id = pe.provider_id AND NOT pe.disabled 
                     WHERE p.id = ANY(%s)
                     GROUP BY p.name
                     ORDER BY p.name

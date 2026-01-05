@@ -56,6 +56,67 @@ def read_file(file_name: str, format: str, mapping: Mapping) -> list[list[str]]:
             data = f.read()
             return read_csv_from_buffer(data, mapping)
 
+def detect_single_header_row(
+    full_rows: list[list[str]],
+    expected_headers: set[str],
+    start_row: int = 0,
+    max_scan: int = 30,
+    min_match_ratio: float = 0.6,
+) -> int | None:
+    """
+    Detect the header row by matching expected column names.
+    """
+    expected = {h.lower().strip() for h in expected_headers if h}
+
+    for i in range(start_row, min(start_row + max_scan, len(full_rows))):
+        row = full_rows[i]
+        if not row:
+            continue
+
+        normalized = {
+            str(cell).lower().strip()
+            for cell in row
+            if cell not in (None, "", "nan")
+        }
+
+        matches = expected & normalized
+        if expected and len(matches) / len(expected) >= min_match_ratio:
+            return i
+
+    return None
+
+from datetime import datetime
+from typing import Optional
+
+
+def detect_shifted_single_date(
+    full_rows: list[list[str]],
+    start_row: int,
+    col: int,
+    date_format: str,
+    max_scan: int = 0,
+) -> Optional[datetime]:
+    """
+    Attempt to detect a date in a fixed column by scanning downward
+    from a starting row.
+    """
+    for i in range(start_row, min(start_row + max_scan + 1, len(full_rows))):
+        try:
+            cell = full_rows[i][col]
+        except IndexError:
+            continue
+
+        if cell in (None, "", "nan"):
+            continue
+
+        text = str(cell).strip()
+        try:
+            return datetime.strptime(text, date_format)
+        except ValueError:
+            continue
+
+    return None
+
 def clean_numeric_column(df: pd.DataFrame, column: str, as_type: str = "float") -> pd.Series:
     col = df[column].astype(str).str.strip()
     col_clean = col.str.replace(r"[$€£,%]", "", regex=True)
@@ -84,6 +145,7 @@ def clean_date(dirty: str, format: str) -> datetime:
         return datetime.strptime(match.group(), format)
     
     raise Exception("Date could not be parsed")
+
 
 def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.DataFrame:
     
@@ -117,7 +179,14 @@ def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.
 
         data_start = skip + mapping.header_data_gap + 2
     else:
-        # Single header row
+        expected_headers = {
+            src for src in mapping.columns.values() if src is not None
+        }
+
+        detected = detect_single_header_row(full_rows, expected_headers, start_row=mapping.skip_rows)
+
+        skip = detected if detected is not None else mapping.skip_rows
+
         header = [str(h).strip() if h is not None else "" for h in full_rows[skip]]
         data_start = skip + mapping.header_data_gap + 1
 
@@ -135,8 +204,20 @@ def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.
 
     # If the date is not a part of the table or is only in the first row - grab it:
     if mapping.date.single:
-        dirty = full_rows[mapping.date.single.row][mapping.date.single.col]
-        good_date = clean_date(dirty, format=mapping.date.format) 
+        if mapping.date.single.max_row_scan:
+            detected_date = detect_shifted_single_date(
+                full_rows,
+                start_row=mapping.date.single.row,
+                col=mapping.date.single.col,
+                date_format=mapping.date.format,
+                max_scan=mapping.date.single.max_row_scan
+            )
+
+            if detected_date:
+                good_date = detected_date
+        else:
+            dirty = full_rows[mapping.date.single.row][mapping.date.single.col]
+            good_date = clean_date(dirty, format=mapping.date.format) 
 
     # select only the rows of the product (if this is a multi-product sheet)
     if mapping.product_column:
