@@ -51,8 +51,7 @@ def fetch_by_provider_id(provider_id: int):
                     SELECT * FROM provider_etf
                     WHERE provider_id = %s
                     AND NOT disabled
-                    ORDER BY created_at
-                    ;
+                    ORDER BY created_at;
                 """
                 cur.execute(query_str, (provider_id,))
                 items = cur.fetchall()
