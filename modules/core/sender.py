@@ -13,9 +13,9 @@ def send_admin(subject: str, message: str):
     try:
         mg_client = mailgun_client_instance.get_client();
         mgData = {
-            "from": f"MI admin <admin@{DOMAIN}>",
+            "from": f"Best Ideas Admin <admin@{DOMAIN}>",
             "to": f"yuval.kaplan@{DOMAIN}",
-            "cc": f"oren.kaplan@{DOMAIN}",
+            # "cc": f"oren.kaplan@{DOMAIN}",
             "subject": subject,
             "text": message,
         }
