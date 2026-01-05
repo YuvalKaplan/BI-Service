@@ -139,7 +139,7 @@ def scrape_provider(cp: Provider):
 
     try:
         with Stealth().use_sync(sync_playwright()) as p:
-            open_browser.browser = p.chromium.launch(headless=False,
+            open_browser.browser = p.chromium.launch(headless=True,
             # Add extra launch arguments to mimic real Chrome
             args=[
                 "--disable-blink-features=AutomationControlled",
