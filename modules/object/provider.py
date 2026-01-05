@@ -91,7 +91,7 @@ def fetch_active_providers():
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Provider)) as cur:
-                query_str = "SELECT * FROM provider WHERE NOT disabled AND id = 4 ORDER BY name;"
+                query_str = "SELECT * FROM provider WHERE NOT disabled ORDER BY name;"
                 cur.execute(query_str)
                 items = cur.fetchall()
         return items
@@ -104,9 +104,9 @@ def get_collection_stats(ids: list[int], start: datetime) -> list[dict]:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 query_str = """
-                    SELECT p.name, COUNT(ped.id) AS downloaded, COUNT(pe.id) AS available 
+                    SELECT p.name, COUNT(DISTINCT ped.id) AS downloaded, COUNT(DISTINCT pe.id) AS available 
                     FROM provider as p
-                    LEFT OUTER JOIN provider_etf as ped ON p.id = ped.provider_id AND ped.last_downloaded >= %s
+                    LEFT OUTER JOIN provider_etf as ped ON p.id = ped.provider_id AND ped.last_downloaded IS NOT NULL AND ped.last_downloaded >= %s
                     LEFT OUTER JOIN provider_etf as pe ON p.id = pe.provider_id
                     WHERE p.id = ANY(%s)
                     GROUP BY p.name

@@ -162,6 +162,7 @@ def scrape_provider(cp: Provider):
             
             if cp.id and open_page(page=open_browser.page, url=cp.url_start, wait_pre_events=cp.wait_pre_events, wait_post_events=cp.wait_post_events, events=cp.events):
                 etf_list = fetch_by_provider_id(cp.id)
+                log.record_status(f"Scraping {len(etf_list)} ETFs from provider '{cp.name}'")
                 for etf in etf_list:
                     trigger_download = etf.trigger_download or cp.trigger_download
 
