@@ -105,12 +105,13 @@ def get_collection_stats(ids: list[int], start: datetime) -> list[dict]:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 query_str = """
-                    SELECT p.name, COUNT(DISTINCT ped.id) AS downloaded, COUNT(DISTINCT pe.id) AS available 
+                    SELECT p.id, p.name, COUNT(DISTINCT ped.id) AS downloaded, COUNT(DISTINCT pe.id) AS available 
                     FROM provider as p
                     LEFT OUTER JOIN provider_etf as ped ON p.id = ped.provider_id AND NOT ped.disabled AND ped.last_downloaded >= %s
-                    LEFT OUTER JOIN provider_etf as pe ON p.id = pe.provider_id AND NOT pe.disabled 
+                    LEFT OUTER JOIN provider_etf as pe ON p.id = pe.provider_id AND NOT pe.disabled
                     WHERE p.id = ANY(%s)
-                    GROUP BY p.name
+                    GROUP BY p.id, p.name
+                    HAVING COUNT(DISTINCT pe.id) > 0
                     ORDER BY p.name
                 """
                 cur.execute(query_str, (start, ids))

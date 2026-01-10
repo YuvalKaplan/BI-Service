@@ -57,7 +57,7 @@ def dispatch(page: Page, event: dict):
         else:
             raise NotImplementedError(f"Unsupported action: {name}")
         
-        page.wait_for_timeout(750)
+        page.wait_for_timeout(1000)
 
 def save_and_get_data(download: Download) -> bytes:
         temp_path = os.path.join(tempfile.gettempdir(), download.suggested_filename or "download.bin")
@@ -69,13 +69,13 @@ def save_and_get_data(download: Download) -> bytes:
 
 def get_holdings(page: Page, trigger_download: dict) -> tuple[str | None, bytes | None]:
     try:
-        page.wait_for_timeout(1500)
+        page.wait_for_timeout(2000)
         page.locator(trigger_download['selector']).first.wait_for(
             state="visible",
             timeout=15000
         )
         dispatch(page, { 'name': 'scroll_to_first', 'selector': trigger_download['selector'] })
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(2000)
 
         # # Perform the click
         with page.expect_download() as download_info:
@@ -115,10 +115,10 @@ def open_page(page: Page, url: str, wait_pre_events: str | None, wait_post_event
         if events:
             for event in events:
                 dispatch(page, event)
-                page.wait_for_timeout(1000)  # final paint
+                page.wait_for_timeout(2000)  # final paint
 
 
-        page.wait_for_timeout(1000)  # final paint
+        page.wait_for_timeout(2000)  # final paint
 
         if wait_post_events:
             page.locator(wait_post_events).first.wait_for(

@@ -249,8 +249,22 @@ def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.
     df["market_value"] = clean_numeric_column(df, "market_value")
     df["weight"] = clean_numeric_column(df, "weight")
     df["shares"] = clean_numeric_column(df, "shares")
-    df['ticker'] = df['ticker'].str.split(' ').str[0]
     
+    # Normalize ticker
+    df['ticker'] = (
+        df['ticker']
+        .astype(str)
+        .str.strip()
+        .str.split().str[0]   # take first token (e.g. "APL G001" → "APL")
+    )
+
+    # Apply filters
+    df = df[
+        df['ticker'].str.fullmatch(r'[A-Z]+', na=False) &   # only A–Z
+        ~df['ticker'].isin(['USD', 'CAD']) &                # exclude currencies
+        ~df['ticker'].isin(mapping.remove_tickers)          # exclude custom list
+    ]
+
     # drop rows where the shares is empty or 0 (used for cash holdings)
     df = df[df["shares"].notna() & (df["shares"] > 0)]
     df = df[df["weight"].notna() & (df["weight"] > 0)]
@@ -260,12 +274,6 @@ def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.
     if total_weight > 1:
         df["weight"] = df["weight"] / 100
         df["weight"] = df["weight"].round(DECIMAL_PRECISION)
-
-    df.loc[:,"ticker"] = df["ticker"].astype(str)
-    df = df[
-        ~df["ticker"].isin(mapping.remove_tickers) &
-        df["ticker"].str.strip().ne("")
-    ]
 
     # Sum up holdings that have the same ticker
     df = df.groupby('ticker', as_index=False).agg({
@@ -301,7 +309,12 @@ def transform(download: EtfDownload, save: bool = False) -> pd.DataFrame:
                         f.write(download.data)
                 full_rows = read_xlsx_from_buffer(download.data, mapping)
             elif file_format == 'csv':
-                data = download.data.decode('utf-8-sig')
+                try:
+                    data = download.data.decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    data = download.data.decode("cp1252", errors="replace")
+
+                data = data.replace("\x00", "")
                 if save:
                     with open(os.path.join(FILE_FOLDER, download.file_name), "w", encoding="utf-8") as f:
                         f.write(data)

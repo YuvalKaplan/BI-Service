@@ -23,13 +23,15 @@ if __name__ == '__main__':
 
         if 0 <= start_time.weekday() <= 6: # Monday to Friday
             try:
-                stats_downloader, provider_ids, = downloader.run(start_time)
+                stats_downloader, total_downloaded, provider_ids, = downloader.run(start_time)
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
                 raise e
             
             # Inform admin that batch has completed.
             message_actions += f"Holdings Download\n--------------------------------\n{stats_downloader}\n\n"
+            message_actions += f"--------------------------------\n"
+            message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
 
         end = datetime.now(timezone.utc)
         message_full = f"Activated at {start_time.strftime("%H:%M:%S")}\nCompleted at {end.strftime("%H:%M:%S")}.\n\n"
