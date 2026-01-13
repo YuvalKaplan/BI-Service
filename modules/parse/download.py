@@ -1,12 +1,12 @@
 import log
 from modules.core import sender
 from modules.core.util import get_domain_from_url
-from modules.object.provider import Provider, update_domain
+from modules.object.provider import Provider, update_domain, getMappingFromJson
 from modules.object.provider_etf import update_last_download
 from modules.object.provider_etf_holding import insert_all_holdings
 
 from modules.parse.url import scrape_provider
-from modules.parse.convert import transform
+from modules.parse.convert import load, map_data
 
 def process_provider(provider: Provider):
     if provider.id is None or provider.url_start is None:
@@ -37,9 +37,15 @@ def process_provider(provider: Provider):
         for d in downloads:
             if d.etf and d.etf.id:
                 try:
-                    df = transform(d)
-                    insert_all_holdings(d.etf.id, df)
-                    update_last_download(d.etf.id)
+                    file_format = d.etf.file_format or d.provider.file_format
+                    mapping  = d.etf.mapping or d.provider.mapping
+                    if mapping and d.file_name:
+                        map = getMappingFromJson(mapping)
+                        full_rows = load(etf_name=d.etf.name, file_format=file_format, mapping=map, file_name=d.file_name, raw_data=d.data)
+                        df = map_data(full_rows=full_rows, file_name=d.file_name, mapping=map)
+                        insert_all_holdings(d.etf.id, df)
+                        update_last_download(d.etf.id)
+
                 except Exception as e:
                     log.record_error(f"Failed to parse the data for ETF '{d.etf.name}'. {e}")
 

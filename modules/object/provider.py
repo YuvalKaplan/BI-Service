@@ -81,7 +81,6 @@ def update_domain(item: Provider):
             with conn.cursor() as cur:
                 insert_query = "UPDATE provider SET domain = %s WHERE id = %s;"
                 cur.execute(insert_query, (item.domain, item.id))
-                conn.commit()
                 return
 
         raise Exception(f"Failed to update provider domain")

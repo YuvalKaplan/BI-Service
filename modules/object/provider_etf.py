@@ -66,7 +66,6 @@ def update_last_download(id: int):
             with conn.cursor() as cur:
                 insert_query = "UPDATE provider_etf SET last_downloaded = %s WHERE id = %s;"
                 cur.execute(insert_query, (datetime.now(timezone.utc), id))
-                conn.commit()
                 return
 
         raise Exception(f"Failed to update last download")

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from modules.init.exit import cleanup
 from modules.core.db import db_pool_instance
 from modules.core import sender
-from modules.cron import downloader
+from modules.cron import downloader, categorize_tickers
 
 atexit.register(cleanup)
 
@@ -32,6 +32,16 @@ if __name__ == '__main__':
             message_actions += f"Holdings Download\n--------------------------------\n{stats_downloader}\n\n"
             message_actions += f"--------------------------------\n"
             message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
+
+        if start_time.day == 15: # middle of each month
+            try:
+                total_symbols = categorize_tickers.run()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on categorize tickers with error:\n{e}\n")
+                raise e
+            
+            # Inform admin that batch has completed.
+            message_actions += f"Categorized tickers: {total_symbols}\n\n"
 
         end = datetime.now(timezone.utc)
         message_full = f"Activated at {start_time.strftime("%H:%M:%S")}\nCompleted at {end.strftime("%H:%M:%S")}.\n\n"

@@ -28,7 +28,6 @@ def insert(item: Log):
                 cur.execute(insert_query, (item.process, item.log_type, item.code, item.msg))
                 row = cur.fetchone()
                 new_id = row[0] if row is not None else None
-                conn.commit()
                 return new_id
     except Error as e:
         print(f"Error inserting the log record into the DB: {e}")

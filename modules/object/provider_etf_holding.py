@@ -32,6 +32,16 @@ def fetch_by_provider_etf_id(provider_etf_id: int):
     except Error as e:
         raise Exception(f"Error fetching the Provider ETFs Holdings for provider ETF ID from the DB: {e}")
 
+def fetch_tickers_in_holdings() -> List[str]:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                query = "SELECT DISTINCT ticker FROM public.provider_etf_holding LIMIT 50;"
+                cur.execute(query)
+                return [row[0] for row in cur.fetchall()]
+    except Error as e:
+        raise Exception(f"Error retrieving TickerMarketCap data: {e}")
+    
 
 def insert_all_holdings(etf_id: int, df: pd.DataFrame):
     try:
@@ -56,13 +66,11 @@ def insert_all_holdings(etf_id: int, df: pd.DataFrame):
                     AND peh.trade_date = %s;
                 """
                 cur.execute(delete_query, (etf_id, df["trade_date"].iat[0]))    
-                conn.commit()
 
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 insert_query = "INSERT INTO provider_etf_holding (provider_etf_id, trade_date, ticker, shares, market_value, weight) VALUES (%s, %s, %s, %s, %s, %s);"
                 cur.executemany(insert_query, rows)
-                conn.commit()
 
     except Error as e:
         raise Exception(f"Error inserting the Provider ETF Holdings into the DB: {e}")

@@ -29,7 +29,6 @@ def insert(item: BatchRunLog) -> int:
                 cur.execute(insert_query, (item.batch_run_id, item.note))
                 row = cur.fetchone()
                 new_id = row[0] if row is not None else None
-                conn.commit()
                 if new_id is not None:
                     return int(new_id)
 

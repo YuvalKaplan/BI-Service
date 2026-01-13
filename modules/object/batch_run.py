@@ -37,7 +37,6 @@ def insert(item: BatchRun) -> int:
                 cur.execute(insert_query, (item.process, item.activation))
                 row = cur.fetchone()
                 new_id = row[0] if row is not None else None
-                conn.commit()
                 if new_id is not None:
                     return int(new_id)
 
@@ -52,7 +51,6 @@ def update_completed_at(id: int):
             with conn.cursor() as cur:
                 insert_query = "UPDATE batch_run SET completed_at = %s WHERE id = %s;"
                 cur.execute(insert_query, (datetime.now(timezone.utc), id))
-                conn.commit()
                 return
 
         raise Exception(f"Failed to update Batch completed at")

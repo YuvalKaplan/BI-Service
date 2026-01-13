@@ -8,7 +8,6 @@ from openpyxl import load_workbook
 import xlrd
 import pandas as pd
 from modules.object.provider import Mapping, getMappingFromJson
-from modules.object.provider_etf import EtfDownload
 
 FILE_FOLDER = "./.downloads/"
 DECIMAL_PRECISION = 10
@@ -146,9 +145,7 @@ def clean_date(dirty: str, format: str) -> datetime:
     
     raise Exception("Date could not be parsed")
 
-
-def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.DataFrame:
-    
+def convert_to_data_frame(full_rows: list[list[str]], mapping: Mapping) -> pd.DataFrame:
     skip = mapping.skip_rows
     if mapping.multi_row_header == 2:
         # Two header rows
@@ -194,6 +191,11 @@ def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.
     df = pd.DataFrame(data, columns=header)
 
     df.columns = df.columns.str.replace('\ufeff', '', regex=True)
+
+    return df
+
+def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.DataFrame:
+    df = convert_to_data_frame(full_rows=full_rows, mapping=mapping)
 
     good_date: datetime | None = None
     if mapping.date.none:
@@ -285,45 +287,58 @@ def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.
 
     return df    
 
-def transform(download: EtfDownload, save: bool = False) -> pd.DataFrame:
-    try: 
-        file_format = download.etf.file_format or download.provider.file_format
-        use_mapping  = download.etf.mapping or download.provider.mapping
+def get_tickers(full_rows: list[list[str]], mapping: Mapping) -> list[str]:
+    df = convert_to_data_frame(full_rows=full_rows, mapping=mapping)
+    ticker_col_name = mapping.columns['ticker']
+    
+    # Normalize ticker
+    df[ticker_col_name] = (
+        df[ticker_col_name]
+        .astype(str)
+        .str.strip()
+        .str.split().str[0]   # take first token (e.g. "APL G001" → "APL")
+    )
 
-        if file_format == None or use_mapping == None:
+    # Apply filters
+    df = df[
+        df[ticker_col_name].str.fullmatch(r'[A-Z]+', na=False) &   # only A–Z
+        ~df[ticker_col_name].isin(['USD', 'CAD', 'TICKER']) &                # exclude currencies
+        ~df[ticker_col_name].isin(mapping.remove_tickers)          # exclude custom list
+    ]
+    distinct_tickers = df[ticker_col_name].unique().tolist()    
+    return distinct_tickers
+
+def load(etf_name: str | None, file_format: str | None, mapping: Mapping | None, file_name: str | None, raw_data: bytes | None, save: bool = False) -> list[list[str]]:
+    try: 
+
+        if file_format == None or mapping == None:
             raise Exception('Missing file type or mapping information in database for data trasformation.')
 
-        mapping = getMappingFromJson(use_mapping)
-
-        full_rows: list[list[str]] = []
-        df = pd.DataFrame()
-        if download.file_name and download.data:
+        if file_name and raw_data:
             if file_format == 'xls':
                 if save:
-                    with open(os.path.join(FILE_FOLDER, download.file_name), "wb") as f:
-                        f.write(download.data)
-                full_rows = read_xls_from_buffer(download.data, mapping)
+                    with open(os.path.join(FILE_FOLDER, file_name), "wb") as f:
+                        f.write(raw_data)
+                return read_xls_from_buffer(raw_data, mapping)
             if file_format == 'xlsx':
                 if save:
-                    with open(os.path.join(FILE_FOLDER, download.file_name), "wb") as f:
-                        f.write(download.data)
-                full_rows = read_xlsx_from_buffer(download.data, mapping)
+                    with open(os.path.join(FILE_FOLDER, file_name), "wb") as f:
+                        f.write(raw_data)
+                return read_xlsx_from_buffer(raw_data, mapping)
             elif file_format == 'csv':
                 try:
-                    data = download.data.decode("utf-8-sig")
+                    str_data = raw_data.decode("utf-8-sig")
                 except UnicodeDecodeError:
-                    data = download.data.decode("cp1252", errors="replace")
+                    str_data = raw_data.decode("cp1252", errors="replace")
 
-                data = data.replace("\x00", "")
+                str_data = str_data.replace("\x00", "")
                 if save:
-                    with open(os.path.join(FILE_FOLDER, download.file_name), "w", encoding="utf-8") as f:
-                        f.write(data)
-                full_rows = read_csv_from_buffer(data, mapping)
-
-            df = map_data(full_rows=full_rows, file_name=download.file_name, mapping=mapping)
-
-        return df
+                    with open(os.path.join(FILE_FOLDER, file_name), "w", encoding="utf-8") as f:
+                        f.write(str_data)
+                return read_csv_from_buffer(str_data, mapping)
+            
+        raise Exception('Unsupported file format for loading ETF file.')
         
     except Exception as e:
-        raise Exception(f"Failed to convert downloaded ETF ({download.etf.name}) to Data Frame table data: {e}")
+        raise Exception(f"Failed to convert downloaded ETF ({etf_name}) to Data Frame table data: {e}")
 

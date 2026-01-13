@@ -9,6 +9,7 @@ from playwright.sync_api import sync_playwright, Download, Browser, BrowserConte
 from playwright_stealth import Stealth
 from modules.object.provider import Provider 
 from modules.object.provider_etf import EtfDownload, fetch_by_provider_id
+from modules.object.categorize_etf import CategorizeEtf, CategorizeEtfDownload
 
 ENV_TYPE = os.environ.get("ENV_TYPE")
 
@@ -106,7 +107,7 @@ def open_page(page: Page, url: str, wait_pre_events: str | None, wait_post_event
         if wait_pre_events:
             page.locator(wait_pre_events).first.wait_for(
                 state="visible",
-                timeout=20000
+                timeout=30000
             )
 
         page.wait_for_timeout(1000)  # final paint
@@ -181,4 +182,45 @@ def scrape_provider(cp: Provider):
         
     except Exception as e:
         raise Exception(f"Failed to extract URLs and subsequent files from webpage content and related links: {e}")
+
+def scrape_categorizer(etf: CategorizeEtf):
+    download: CategorizeEtfDownload = CategorizeEtfDownload(etf=etf)
+    open_browser: OpenBrowser = OpenBrowser(browser=None, context=None, page=None)
+
+    try:
+        with Stealth().use_sync(sync_playwright()) as p:
+            open_browser.browser = p.chromium.launch(headless=True,
+            # Add extra launch arguments to mimic real Chrome
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--disable-web-security",
+                "--disable-site-isolation-trials",
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+                "--ignore-certificate-errors"
+            ])
+            open_browser.context = open_browser.browser.new_context(
+                user_agent=REAL_USER_AGENT,
+                viewport={'width': 1920, 'height': 1080},
+                accept_downloads=True
+            )      
+            open_browser.page = open_browser.context.new_page()
+            
+            if etf.id == None or etf.url == None or etf.trigger_download == None:
+                raise Exception('Missing URL or Trigger Method for categorizer etf.')
+            
+            if open_page(page=open_browser.page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
+                file_name, data = get_holdings(page=open_browser.page, trigger_download=etf.trigger_download)
+                if file_name and data:
+                    download.file_name = file_name
+                    download.data = data
+
+            open_browser.context.close()
+            open_browser.browser.close()
+
+            return download
+        
+    except Exception as e:
+        raise Exception(f"Failed to extract URLs and subsequent files from categorizer ETF links: {e}")
 
