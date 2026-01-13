@@ -4,13 +4,11 @@ from modules.object import provider, categorize_etf, ticker
 from modules.parse.url import scrape_categorizer
 from modules.parse.convert import load, get_tickers
 
-MAX_WORKERS = 5
-
 def run() -> int:
     try:
         batch_run_id = None
         if batch_run_id is None:
-            batch_run_id = batch_run.insert(batch_run.BatchRun('downloader', 'auto'))
+            batch_run_id = batch_run.insert(batch_run.BatchRun('categorize_tickers', 'auto'))
 
         ticker.sync_tickers_with_etf_holdings()
 
@@ -22,7 +20,7 @@ def run() -> int:
         for etf in etfs:
             d = scrape_categorizer(etf)
             log.record_status(f"Processing '{etf.name}' ETF for categorization.")
-            if d.etf.file_format and d.etf.mapping and d.file_name:
+            if etf.id and d.etf.file_format and d.etf.mapping and d.file_name:
                 map = provider.getMappingFromJson(d.etf.mapping)
                 full_rows = load(etf_name=d.etf.name, file_format=d.etf.file_format, mapping=map, file_name=d.file_name, raw_data=d.data)
                 symbols = get_tickers(full_rows=full_rows, mapping=map)
@@ -30,6 +28,8 @@ def run() -> int:
                 if etf.cap_type and etf.style_type:
                     total_symbols += len(symbols)
                     ticker.upsert_tickers_style_and_cap(symbols=symbols, cap_type=etf.cap_type, style_type=etf.style_type)
+                
+                categorize_etf.update_last_download(etf.id)
 
         batch_run.update_completed_at(batch_run_id)       
         log.record_status(f"Finished categorize tickers batch run on {len(etfs)} items.\n")

@@ -36,7 +36,7 @@ def fetch_tickers_in_holdings() -> List[str]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
-                query = "SELECT DISTINCT ticker FROM public.provider_etf_holding LIMIT 50;"
+                query = "SELECT DISTINCT ticker FROM public.provider_etf_holding;"
                 cur.execute(query)
                 return [row[0] for row in cur.fetchall()]
     except Error as e:

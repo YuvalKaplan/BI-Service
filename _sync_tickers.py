@@ -6,7 +6,8 @@ atexit.register(cleanup)
 
 if __name__ == '__main__':
     try:
-        run()
+        total_symbols = run()
+        print(f"Categorized tickers: {total_symbols}")
 
     except Exception as e:
         print(f"Error in ticker categorization: {e}")

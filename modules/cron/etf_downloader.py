@@ -12,7 +12,7 @@ def run(start_time: datetime) -> tuple[str, int, list[int] | None]:
     try:
         batch_run_id = None
         if batch_run_id is None:
-            batch_run_id = batch_run.insert(batch_run.BatchRun('downloader', 'auto'))
+            batch_run_id = batch_run.insert(batch_run.BatchRun('etf_downloader', 'auto'))
 
         to_scrape = provider.fetch_active_providers()
 

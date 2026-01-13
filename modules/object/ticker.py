@@ -8,15 +8,33 @@ from modules.core.db import db_pool_instance
 class Ticker:
     symbol: str
     created_at: datetime | None
-    style: str | None
-    cap: str | None
     source: str | None
+    style_type: str | None
+    cap_type: str | None
+    type_from: str | None
     isin: str | None
     cik: str | None
     exchange: str | None
     name: str | None
     industry: str | None
     sector: str | None
+
+    def __init__(self, symbol: str, created_at: datetime | None = None, 
+                 source: str | None = None, style_type: str | None = None, cap_type: str | None = None, type_from: str | None = None, 
+                 isin: str | None = None, cik: str | None = None, exchange: str | None = None, 
+                 name: str | None = None, industry: str | None = None, sector: str | None = None):
+        self.symbol = symbol 
+        self.created_at = created_at
+        self.source = source
+        self.style_type = style_type
+        self.cap_type = cap_type
+        self.type_from = type_from
+        self.isin = isin
+        self.cik = cik
+        self.exchange = exchange
+        self.name = name
+        self.industry = industry
+        self.sector = sector
 
 def sync_tickers_with_etf_holdings():
     try:
@@ -59,16 +77,16 @@ def upsert_tickers_style_and_cap(symbols: list[str], cap_type: str, style_type: 
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 query = """
-                    INSERT INTO ticker (symbol, cap, style, source)
-                    SELECT unnest(%s::text[]), %s, %s, 'cat_etf'
+                    INSERT INTO ticker (symbol, cap_type, style_type, source, type_from)
+                    SELECT unnest(%s::text[]), %s, %s, 'cat_etf', 'cat_etf'
                     ON CONFLICT (symbol)
                     DO UPDATE
                     SET
-                        cap = EXCLUDED.cap,
-                        style = EXCLUDED.style,
-                        source = 'cat_etf'
-                    WHERE ticker.cap IS DISTINCT FROM EXCLUDED.cap
-                       OR ticker.style IS DISTINCT FROM EXCLUDED.style;
+                        cap_type = EXCLUDED.cap_type,
+                        style_type = EXCLUDED.style_type,
+                        type_from = 'cat_etf'
+                    WHERE ticker.cap_type IS DISTINCT FROM EXCLUDED.cap_type
+                       OR ticker.style_type IS DISTINCT FROM EXCLUDED.style_type;
                 """
 
                 cur.execute(query, (symbols, cap_type, style_type))
