@@ -14,7 +14,7 @@ def run() -> int:
 
         etfs = categorize_etf.fetch_all()
         
-        log.record_status(f"Running categorize tickers batch job ID {batch_run_id} - will proccess {len(etfs)} items.")
+        log.record_status(f"Running Categorize Tickers batch job ID {batch_run_id} - will proccess {len(etfs)} items.")
 
         total_symbols = 0
         for etf in etfs:
@@ -32,7 +32,7 @@ def run() -> int:
                 categorize_etf.update_last_download(etf.id)
 
         batch_run.update_completed_at(batch_run_id)       
-        log.record_status(f"Finished categorize tickers batch run on {len(etfs)} items.\n")
+        log.record_status(f"Finished Categorize Tickers batch run on {len(etfs)} items.\n")
         log.record_status(f"Processed {total_symbols} tickers.\n")
         return total_symbols
 

@@ -2,8 +2,8 @@ from datetime import date
 from typing import List
 from psycopg.errors import Error
 from psycopg.rows import class_row, dict_row
-
-from dataclasses import dataclass
+import pandas as pd
+from dataclasses import dataclass, asdict
 from modules.core.db import db_pool_instance
 
 @dataclass
@@ -12,6 +12,15 @@ class TickerValue:
     value_date: date | None
     stock_price: float | None
     market_cap: float | None
+
+def ticker_values_to_df(values: list[TickerValue]) -> pd.DataFrame:
+    df = pd.DataFrame(asdict(v) for v in values)
+
+    return (
+        df
+        .dropna(subset=["symbol", "stock_price", "market_cap"])
+        .query("stock_price > 0 and market_cap > 0")
+    )
 
 def upsert(item: TickerValue):
     try:
@@ -33,13 +42,22 @@ def upsert(item: TickerValue):
     except Error as e:
         raise Exception(f"Error inserting the Batch item into the DB: {e}")
 
-def fetch_tickers_by_symbols(symbols: List[str]) -> List[TickerValue]:
+def fetch_latest_tickers_by_symbols(symbols: List[str]) -> List[TickerValue]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(TickerValue)) as cur:
-                query = "SELECT * FROM ticker_value WHERE symbol = ANY(%s);"              
+                query = """
+                    SELECT DISTINCT ON (symbol)
+                        symbol,
+                        value_date,
+                        stock_price,
+                        market_cap
+                    FROM ticker_value
+                    WHERE symbol = ANY(%s)
+                    ORDER BY symbol, value_date DESC;
+                """
                 cur.execute(query, (symbols,))
                 return cur.fetchall()
     except Error as e:
-        raise Exception(f"Error retrieving TickerValue data: {e}")
+        raise Exception(f"Error retrieving latest TickerValue data: {e}")
     

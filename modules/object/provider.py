@@ -8,7 +8,7 @@ from modules.core.db import db_pool_instance
 
 @dataclass
 class Provider:
-    id: int | None
+    id: int
     created_at: datetime | None
     disabled: bool | None
     disabled_reason: str | None

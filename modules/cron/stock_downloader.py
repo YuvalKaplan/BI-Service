@@ -21,7 +21,7 @@ def run() -> tuple[int, int]:
         start = time.monotonic()
         num_groups = math.ceil(len(symbols) / group_size)
 
-        print(f"Starting stock info download in {num_groups} batches of {group_size} stocks each.")
+        print(f"Starting Stock Info Download in {num_groups} batches of {group_size} stocks each.")
 
         for i in range(0, len(symbols), group_size):
             batch = symbols[i : i + group_size]
@@ -41,7 +41,7 @@ def run() -> tuple[int, int]:
 
         log.record_status(f"Run time (seconds): {time.monotonic() - start}")
         log.record_status(f"Missing symbols ({len(missing_symbols)}): {', '.join(missing_symbols)}")
-        log.record_status(f"Finished stock downloader batch run on {len(symbols)} stocks.")
+        log.record_status(f"Finished Stock Info Download batch run on {len(symbols)} stocks.")
 
         batch_run.update_completed_at(batch_run_id)
         return len(symbols), len(missing_symbols)

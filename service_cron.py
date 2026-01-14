@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from modules.init.exit import cleanup
 from modules.core.db import db_pool_instance
 from modules.core import sender
-from modules.cron import etf_downloader, categorize_tickers, stock_downloader
+from modules.cron import etf_downloader, categorize_tickers, stock_downloader, best_ideas_generator
 
 atexit.register(cleanup)
 
@@ -28,7 +28,6 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
                 raise e
             
-            # Inform admin that batch has completed.
             message_actions += f"Holdings Download\n--------------------------------\n{stats_downloader}\n\n"
             message_actions += f"--------------------------------\n"
             message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
@@ -40,7 +39,6 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on categorize tickers with error:\n{e}\n")
                 raise e
             
-            # Inform admin that batch has completed.
             message_actions += f"Categorized tickers: {total_symbols}\n\n"
 
         if 0 <= start_time.weekday() <= 6: # Monday to Friday
@@ -50,9 +48,21 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on download stock data (price and market cap) with error:\n{e}\n")
                 raise e
             
-            # Inform admin that batch has completed.
             message_actions += f"Stocks updated: {total_updated}\n\n"
             message_actions += f"Stocks missing data: {missing_data}\n\n"
+
+        if 0 <= start_time.weekday() <= 6: # Monday to Friday
+            try:
+                etfs_processed, generated_etfs, problems = best_ideas_generator.run()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on best ideas processing with error:\n{e}\n")
+                raise e
+            
+            message_actions += f"Total ETFs available: {etfs_processed}"
+            message_actions += f"ETFS processed with best ideas: {generated_etfs}"
+            message_actions += f"ETFS with problems: {len(problems)}\n"
+            for p in problems:
+                message_actions += f"{p}\n"
 
         end = datetime.now(timezone.utc)
         message_full = f"Activated at {start_time.strftime("%H:%M:%S")}\nCompleted at {end.strftime("%H:%M:%S")}.\n\n"

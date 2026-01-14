@@ -13,4 +13,4 @@ if __name__ == '__main__':
         print(f"Stocks missing data: {missing_data}")
 
     except Exception as e:
-        print(f"Error in downloadinf stock price and market cap: {e}")
+        print(f"Error in downloading stock price and market cap: {e}")

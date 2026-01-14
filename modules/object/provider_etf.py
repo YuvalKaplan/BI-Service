@@ -8,7 +8,7 @@ from modules.object.provider import Provider
 
 @dataclass
 class ProviderEtf:
-    id: int | None
+    id: int
     created_at: datetime | None
     provider_id: int | None
     disabled: bool | None

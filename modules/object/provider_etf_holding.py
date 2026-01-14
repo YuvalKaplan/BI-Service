@@ -17,16 +17,22 @@ class ProviderEtfHolding:
     market_value: float
     weight: float
 
-def fetch_by_provider_etf_id(provider_etf_id: int):
+
+def fetch_latest_by_provider_etf_id(provider_etf_id: int):
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(ProviderEtfHolding)) as cur:
                 query_str = """
-                    SELECT * FROM provider_etf_holding
+                    SELECT *
+                    FROM provider_etf_holding
                     WHERE provider_etf_id = %s
-                    ;
+                      AND trade_date = (
+                          SELECT MAX(trade_date)
+                          FROM provider_etf_holding
+                          WHERE provider_etf_id = %s
+                      );
                 """
-                cur.execute(query_str, (provider_etf_id,))
+                cur.execute(query_str, (provider_etf_id, provider_etf_id))
                 items = cur.fetchall()
         return items
     except Error as e:
