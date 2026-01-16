@@ -25,10 +25,31 @@ class OpenBrowser:
 
 def get_date_on_page(page: Page, mapping: Mapping) -> date | None:
     try:
-        if mapping.date.location_on_page:
-            locator = page.locator(mapping.date.location_on_page).first
-            locator.wait_for(state="visible", timeout=15000)
-            return clean_date(locator.inner_text().strip(), mapping.date.format).date()
+        on_page = mapping.date.on_page
+        if not on_page or not on_page.location:
+            return None
+
+        locator = page.locator(on_page.location).first
+        locator.wait_for(state="visible", timeout=15000)
+
+        raw_text = locator.inner_text()
+       
+        # Normalize whitespace (handles line breaks between label and date)
+        normalized = " ".join(raw_text.split())
+        
+        if on_page.text_before:
+            # Case 1: anchor text provided
+            anchor = on_page.text_before.strip()
+            if anchor not in normalized:
+                return None
+            
+            candidate = normalized.split(anchor, 1)[1].strip()
+            return clean_date(candidate, mapping.date.format).date()
+            
+        else:
+            # Case 2: one date in section
+            return clean_date(normalized, mapping.date.format)
+            
         return None
 
     except Exception as e:
@@ -188,7 +209,7 @@ def scrape_provider(cp: Provider):
                         mapping  = etf.mapping or cp.mapping
                         if mapping:
                             map = getMappingFromJson(mapping)
-                            if mapping and map.date.location_on_page:
+                            if mapping and map.date.on_page:
                                 found_date_from_page = get_date_on_page(page=open_browser.page, mapping=map)
                                 if not found_date_from_page:
                                     raise Exception('ETF holdings date from page could not be confirmed - skipping this ETF.')

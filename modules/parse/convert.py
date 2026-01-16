@@ -181,7 +181,7 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
 
     good_date: date | None = None
     
-    if mapping.date.location_on_page and date_from_page:
+    if mapping.date.on_page and date_from_page:
         good_date = date_from_page
 
     if mapping.date.in_file_name:

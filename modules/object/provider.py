@@ -27,11 +27,15 @@ class DatePosition(BaseModel):
     col: int
     max_row_scan: Optional[int] = 0
 
+class DateOnPage(BaseModel):
+    location: str
+    text_before: Optional[str] = None
+
 class DateFormat(BaseModel):
     none: bool = False
-    location_on_page: Optional[str]
-    in_file_name: bool = False
     format: str
+    in_file_name: bool = False
+    on_page: Optional[DateOnPage] = None
     single: Optional[DatePosition] = None
     
 class Mapping(BaseModel):
