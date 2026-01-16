@@ -3,9 +3,7 @@ import os
 from urllib.request import urlopen
 import json
 
-API_KEY = os.getenv('SECRET_MARKET_DATE_API_KEY')
 API_URL = 'https://financialmodelingprep.com/stable/'
-
 
 def get_jsonparsed_data(url) -> dict:
     response = urlopen(url)
@@ -16,7 +14,7 @@ def get_jsonparsed_data(url) -> dict:
 
 def get_stock_profile(symbol: str) -> dict[str,str] | None:
     try:
-        url = (f"{API_URL}/profile?symbol={symbol}&apikey={API_KEY}")
+        url = (f"{API_URL}/profile?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATE_API_KEY')}")
         array = get_jsonparsed_data(url)
         return array[0]
     except Exception as e:

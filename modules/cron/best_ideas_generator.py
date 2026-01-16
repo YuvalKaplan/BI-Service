@@ -4,8 +4,8 @@ from datetime import date
 from modules.object import batch_run, batch_run_log
 from modules.object import provider, provider_etf
 from modules.calc.best_ideas import find_best_ideas
-from modules.object.provider_etf_holding import fetch_latest_by_provider_etf_id
-from modules.object.ticker_value import fetch_latest_tickers_by_symbols
+from modules.object.provider_etf_holding import fetch_holding_dates_available_past_week, fetch_holdings_by_provider_etf_id
+from modules.object.ticker_value import fetch_price_dates_available_past_week, fetch_tickers_by_symbols_on_date
 from modules.object import best_idea
 
 MIN_HOLDINGS = 10
@@ -21,7 +21,7 @@ def record_problem(batch_run_id: int, provider: provider.Provider, etf: provider
     problem_etfs.append(record)
 
 def run() -> tuple[int, int, list[str]]:
-    value_date = date.today()
+    today = date.today()
     try:
         batch_run_id = None
         if batch_run_id is None:
@@ -34,6 +34,7 @@ def run() -> tuple[int, int, list[str]]:
         total_etfs = 0
         generated_etfs = 0
         problem_etfs: list[str] = []
+        availabe_price_dates = fetch_price_dates_available_past_week()
         for p in providers:
             pe_list = provider_etf.fetch_by_provider_id(p.id)
             total_etfs += len(pe_list)
@@ -41,7 +42,14 @@ def run() -> tuple[int, int, list[str]]:
 
             for pe in pe_list:
                 try:
-                    holdings = fetch_latest_by_provider_etf_id(pe.id)
+                    available_holding_dates = fetch_holding_dates_available_past_week(pe.id)
+                    latest_common_date = max(set(availabe_price_dates) & set(available_holding_dates), default=None)
+                    if not latest_common_date:
+                        message = f"latest holdings date={max(available_holding_dates)}, latest price date={max(availabe_price_dates)}"
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Data sources out of sync", message=message, problem_etfs=problem_etfs)
+                        continue
+
+                    holdings = fetch_holdings_by_provider_etf_id(pe.id, latest_common_date)
                     if len(holdings) < MIN_HOLDINGS:
                         if len(holdings) == 0:
                             error = f"No holdings"
@@ -49,23 +57,15 @@ def run() -> tuple[int, int, list[str]]:
                             error = f"Less than {MIN_HOLDINGS} holdings"
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=error, message=None, problem_etfs=problem_etfs)
                         continue
-
-                    holdings_date = max(h.trade_date.date() for h in holdings)
+                    
                     tickers = [h.ticker for h in holdings]
-                    values = fetch_latest_tickers_by_symbols(tickers)
-                    stock_values_date = min(v.value_date for v in values if v.value_date is not None)
-
-                    diff_days = abs((holdings_date - stock_values_date).days)
-                    if diff_days > MAX_DATE_DIFF_DAYS:
-                        message = f"holdings_date={holdings_date}, stock_values_date={stock_values_date}, diff={diff_days} days"
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Data sources out of sync", message=message, problem_etfs=problem_etfs)
-                        continue
+                    values = fetch_tickers_by_symbols_on_date(tickers, latest_common_date)
 
                     best_ideas_df = find_best_ideas(holdings, values, MAX_BEST_IDEAS_PER_FUND)
                     rows = best_idea.df_to_rows(
                         best_ideas_df,
                         provider_etf_id=pe.id,
-                        value_date=min(holdings_date, stock_values_date)
+                        value_date=latest_common_date
                     )
                     best_idea.insert_bulk(rows)
                     generated_etfs += 1

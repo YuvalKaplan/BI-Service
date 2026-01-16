@@ -22,6 +22,44 @@ def ticker_values_to_df(values: list[TickerValue]) -> pd.DataFrame:
         .query("stock_price > 0 and market_cap > 0")
     )
 
+
+def fetch_price_dates_available_past_week() -> list[date]:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                query = """
+                    SELECT DISTINCT (value_date)
+                        value_date
+                    FROM ticker_value
+                    WHERE value_date > NOW() - INTERVAL '1 week'
+                    ORDER BY value_date;
+                """
+                cur.execute(query)
+                return [row["value_date"] for row in cur.fetchall()]
+    except Error as e:
+        raise Exception(f"Error retrieving the list of dates available in the past week: {e}")
+
+    
+def fetch_tickers_by_symbols_on_date(symbols: List[str], value_date: date) -> List[TickerValue]:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(TickerValue)) as cur:
+                query = """
+                    SELECT DISTINCT ON (symbol)
+                        symbol,
+                        value_date,
+                        stock_price,
+                        market_cap
+                    FROM ticker_value
+                    WHERE symbol = ANY(%s)
+                    AND value_date = %s
+                    ORDER BY symbol, value_date DESC;
+                """
+                cur.execute(query, (symbols, value_date))
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error retrieving latest TickerValue data: {e}")
+    
 def upsert(item: TickerValue):
     try:
         with db_pool_instance.get_connection() as conn:
@@ -42,22 +80,3 @@ def upsert(item: TickerValue):
     except Error as e:
         raise Exception(f"Error inserting the Batch item into the DB: {e}")
 
-def fetch_latest_tickers_by_symbols(symbols: List[str]) -> List[TickerValue]:
-    try:
-        with db_pool_instance.get_connection() as conn:
-            with conn.cursor(row_factory=class_row(TickerValue)) as cur:
-                query = """
-                    SELECT DISTINCT ON (symbol)
-                        symbol,
-                        value_date,
-                        stock_price,
-                        market_cap
-                    FROM ticker_value
-                    WHERE symbol = ANY(%s)
-                    ORDER BY symbol, value_date DESC;
-                """
-                cur.execute(query, (symbols,))
-                return cur.fetchall()
-    except Error as e:
-        raise Exception(f"Error retrieving latest TickerValue data: {e}")
-    
