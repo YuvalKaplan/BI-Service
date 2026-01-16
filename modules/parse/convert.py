@@ -2,12 +2,13 @@ import io
 import os
 import csv
 import warnings
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 import re
 from openpyxl import load_workbook
 import xlrd
 import pandas as pd
-from modules.object.provider import Mapping, getMappingFromJson
+from modules.core.util import clean_date
+from modules.object.provider import Mapping
 
 FILE_FOLDER = "./.downloads/"
 DECIMAL_PRECISION = 10
@@ -126,25 +127,6 @@ def clean_numeric_column(df: pd.DataFrame, column: str, as_type: str = "float") 
     
     return col_numeric
 
-def clean_date(dirty: str, format: str) -> datetime:
-    format_to_regex = {
-        "%Y": r"\d{4}",
-        "%y": r"\d{2}",
-        "%m": r"\d{1,2}",
-        "%d": r"\d{1,2}",
-        "%b": r"\w{3}",
-        "%B": r"\w+"
-    }
-    pattern = format
-    for k, v in format_to_regex.items():
-        pattern = pattern.replace(k, v)
-
-    match = re.search(pattern, dirty)
-    if match:
-        return datetime.strptime(match.group(), format)
-    
-    raise Exception("Date could not be parsed")
-
 def convert_to_data_frame(full_rows: list[list[str]], mapping: Mapping) -> pd.DataFrame:
     skip = mapping.skip_rows
     if mapping.multi_row_header == 2:
@@ -194,12 +176,13 @@ def convert_to_data_frame(full_rows: list[list[str]], mapping: Mapping) -> pd.Da
 
     return df
 
-def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.DataFrame:
+def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | None, mapping: Mapping) -> pd.DataFrame:
     df = convert_to_data_frame(full_rows=full_rows, mapping=mapping)
 
-    good_date: datetime | None = None
-    if mapping.date.none:
-        good_date = (datetime.now(timezone.utc) - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    good_date: date | None = None
+    
+    if mapping.date.location_on_page and date_from_page:
+        good_date = date_from_page
 
     if mapping.date.in_file_name:
         good_date = clean_date(file_name, format=mapping.date.format)
@@ -219,7 +202,7 @@ def map_data(full_rows: list[list[str]], file_name:str, mapping: Mapping) -> pd.
                 good_date = detected_date
         else:
             dirty = full_rows[mapping.date.single.row][mapping.date.single.col]
-            good_date = clean_date(dirty, format=mapping.date.format) 
+            good_date = clean_date(dirty, format=mapping.date.format)
 
     # select only the rows of the product (if this is a multi-product sheet)
     if mapping.product_column:

@@ -98,3 +98,21 @@ def get_domain_from_url(url: str) -> str:
     else:
         return top_level_domain
 
+def clean_date(dirty: str, format: str) -> datetime:
+    format_to_regex = {
+        "%Y": r"\d{4}",
+        "%y": r"\d{2}",
+        "%m": r"\d{1,2}",
+        "%d": r"\d{1,2}",
+        "%b": r"\w{3}",
+        "%B": r"\w+"
+    }
+    pattern = format
+    for k, v in format_to_regex.items():
+        pattern = pattern.replace(k, v)
+
+    match = re.search(pattern, dirty)
+    if match:
+        return datetime.strptime(match.group(), format)
+    
+    raise Exception("Date could not be parsed")

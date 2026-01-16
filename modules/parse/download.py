@@ -42,7 +42,7 @@ def process_provider(provider: Provider):
                     if mapping and d.file_name:
                         map = getMappingFromJson(mapping)
                         full_rows = load(etf_name=d.etf.name, file_format=file_format, mapping=map, file_name=d.file_name, raw_data=d.data)
-                        df = map_data(full_rows=full_rows, file_name=d.file_name, mapping=map)
+                        df = map_data(full_rows=full_rows, file_name=d.file_name, date_from_page=d.date_from_page, mapping=map)
                         insert_all_holdings(d.etf.id, df)
                         update_last_download(d.etf.id)
 

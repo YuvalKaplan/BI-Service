@@ -21,7 +21,7 @@ if __name__ == '__main__':
                     if d.etf.id and file_format and mapping and d.file_name:
                         map = provider.getMappingFromJson(mapping)
                         full_rows = load(etf_name=d.etf.name, file_format=file_format, mapping=map, file_name=d.file_name, raw_data=d.data)
-                        df = map_data(full_rows=full_rows, file_name=d.file_name, mapping=map)
+                        df = map_data(full_rows=full_rows, file_name=d.file_name, date_from_page=d.date_from_page, mapping=map)
                         print(f"{d.etf.name}\t{d.file_name}")
                         print(df.head())
                         print("... ------------ ...")

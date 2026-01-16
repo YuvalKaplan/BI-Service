@@ -48,7 +48,7 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on download stock data (price and market cap) with error:\n{e}\n\n")
                 raise e
             
-            message_actions += f"Stocks updated: {total_updated}\n\n"
+            message_actions += f"Stocks updated: {total_updated - missing_data} out of {total_updated}\n\n"
             message_actions += f"Stocks missing data: {missing_data}\n\n"
 
         if 0 <= start_time.weekday() <= 6: # Monday to Friday

@@ -29,6 +29,7 @@ class DatePosition(BaseModel):
 
 class DateFormat(BaseModel):
     none: bool = False
+    location_on_page: Optional[str]
     in_file_name: bool = False
     format: str
     single: Optional[DatePosition] = None
@@ -45,7 +46,6 @@ class Mapping(BaseModel):
     columns: Dict[str, Optional[str]]
     date: DateFormat
     remove_tickers: list[str] = []
-    
 
 def getMappingFromJson(data: dict) -> Mapping:
     return Mapping.model_validate(data)

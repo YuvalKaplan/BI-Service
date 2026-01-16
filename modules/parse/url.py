@@ -2,12 +2,13 @@ import os
 import log
 import re
 import tempfile
-from datetime import datetime
+from datetime import date
 from typing import List
 from dataclasses import dataclass
 from playwright.sync_api import sync_playwright, Download, Browser, BrowserContext, Page
 from playwright_stealth import Stealth
-from modules.object.provider import Provider 
+from modules.core.util import clean_date 
+from modules.object.provider import Provider, Mapping, getMappingFromJson 
 from modules.object.provider_etf import EtfDownload, fetch_by_provider_id
 from modules.object.categorize_etf import CategorizeEtf, CategorizeEtfDownload
 
@@ -21,6 +22,19 @@ class OpenBrowser:
     browser: Browser | None
     context: BrowserContext | None
     page: Page | None
+
+def get_date_on_page(page: Page, mapping: Mapping) -> date | None:
+    try:
+        if mapping.date.location_on_page:
+            locator = page.locator(mapping.date.location_on_page).first
+            locator.wait_for(state="visible", timeout=15000)
+            return clean_date(locator.inner_text().strip(), mapping.date.format).date()
+        return None
+
+    except Exception as e:
+        log.record_notice(f"An unexpected error occurred when trying to get the date on the page: {e}")
+        return None
+
 
 def dispatch(page: Page, event: dict):
         action_timout = 5000
@@ -166,14 +180,21 @@ def scrape_provider(cp: Provider):
                 log.record_status(f"Scraping {len(etf_list)} ETFs from provider '{cp.name}'")
                 for etf in etf_list:
                     trigger_download = etf.trigger_download or cp.trigger_download
-
                     if etf.id == None or etf.url == None or trigger_download == None:
                         raise Exception('Missing URL or Trigger Method for provider etf.')
                     
                     if open_page(page=open_browser.page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
+                        found_date_from_page = None
+                        mapping  = etf.mapping or cp.mapping
+                        if mapping:
+                            map = getMappingFromJson(mapping)
+                            if mapping and map.date.location_on_page:
+                                found_date_from_page = get_date_on_page(page=open_browser.page, mapping=map)
+                                if not found_date_from_page:
+                                    raise Exception('ETF holdings date from page could not be confirmed - skipping this ETF.')
                         file_name, data = get_holdings(page=open_browser.page, trigger_download=trigger_download)
                         if file_name and data:
-                            downloads.append(EtfDownload(provider=cp, etf=etf, file_name=file_name, data=data))
+                            downloads.append(EtfDownload(provider=cp, etf=etf, file_name=file_name, data=data, date_from_page=found_date_from_page))
 
             open_browser.context.close()
             open_browser.browser.close()

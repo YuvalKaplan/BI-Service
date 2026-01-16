@@ -24,7 +24,7 @@ if __name__ == '__main__':
 
                 mapping = provider.getMappingFromJson(use_mapping)
                 full_rows = read_file(file_name=filename, format=file_format, mapping=mapping)
-                df = map_data(full_rows=full_rows, file_name=filename, mapping=mapping)
+                df = map_data(full_rows=full_rows, file_name=filename, date_from_page=None, mapping=mapping)
             
                 print(df.head())
                 print("... ------------ ...")

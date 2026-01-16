@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
@@ -35,6 +35,7 @@ class EtfDownload:
     etf: ProviderEtf
     file_name: str | None
     data: bytes | None
+    date_from_page: date | None = None
 
 def fetch_by_id(id: int):
     with db_pool_instance.get_connection() as conn:
