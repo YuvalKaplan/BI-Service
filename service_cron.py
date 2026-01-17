@@ -21,54 +21,57 @@ if __name__ == '__main__':
         start_time = datetime.now(timezone.utc)
         message_actions = ""
 
-        if 0 <= start_time.weekday() <= 6: # Monday to Friday
-            try:
-                stats_downloader, total_downloaded, provider_ids, = etf_downloader.run(start_time)
-            except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
-                raise e
-            
-            message_actions += f"Holdings Download\n--------------------------------\n{stats_downloader}\n\n"
-            message_actions += f"--------------------------------\n"
-            message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
+        try:
+            stats_downloader, total_downloaded, provider_ids, = etf_downloader.run(start_time)
+        except Exception as e:
+            sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
+            raise e
+        
+        message_actions += f"Holdings Download\n"
+        message_actions += f"--------------------------------\n"
+        message_actions += f"{stats_downloader}\n\n"
+        message_actions += f"--------------------------------\n"
+        message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
+        message_actions += f"=========================================\n\n"
 
-        if start_time.day == 15: # middle of each month
+        if start_time.day == 15: # middle of each month - the ETF data is updated once a month on the website
             try:
                 total_symbols = categorize_tickers.run()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on categorize tickers with error:\n{e}\n\n")
                 raise e
             
-            message_actions += f"Categorized tickers: {total_symbols}\n\n"
+            message_actions += f"Categorized tickers: {total_symbols}\n"
+            message_actions += f"=========================================\n\n"
 
-        if 0 <= start_time.weekday() <= 6: # Monday to Friday
-            try:
-                total_updated, missing_data = stock_downloader.run()
-            except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on download stock data (price and market cap) with error:\n{e}\n\n")
-                raise e
-            
-            message_actions += f"Stocks updated: {total_updated - missing_data} out of {total_updated}\n\n"
-            message_actions += f"Stocks missing data: {missing_data}\n\n"
+        try:
+            total_updated, missing_data = stock_downloader.run()
+        except Exception as e:
+            sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on download stock data (price and market cap) with error:\n{e}\n\n")
+            raise e
+        
+        message_actions += f"Stocks updated: {total_updated - missing_data} out of {total_updated}\n"
+        message_actions += f"Stocks missing data: {missing_data}\n"
+        message_actions += f"=========================================\n\n"
 
-        if 0 <= start_time.weekday() <= 6: # Monday to Friday
-            try:
-                etfs_processed, generated_etfs, problems = best_ideas_generator.run()
-            except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on best ideas processing with error:\n{e}\n\n")
-                raise e
-            
-            message_actions += f"Total ETFs available: {etfs_processed}\n"
-            message_actions += f"ETFS processed with best ideas: {generated_etfs}\n"
-            message_actions += f"ETFS with problems: {len(problems)}\n"
-            for p in problems:
-                message_actions += f"{p}\n"
+        try:
+            etfs_processed, generated_etfs, problems = best_ideas_generator.run()
+        except Exception as e:
+            sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on best ideas processing with error:\n{e}\n\n")
+            raise e
+        
+        message_actions += f"Total ETFs available: {etfs_processed}\n"
+        message_actions += f"ETFS processed with best ideas: {generated_etfs}\n"
+        message_actions += f"ETFS with problems: {len(problems)}\n"
+        for p in problems:
+            message_actions += f"{p}\n"
+        message_actions += f"=========================================\n\n"
 
         end = datetime.now(timezone.utc)
         message_full = f"Activated at {start_time.strftime("%H:%M:%S")}\nCompleted at {end.strftime("%H:%M:%S")}.\n\n"
         sender.send_admin(subject="Best Ideas Cron Completed", message=message_full + message_actions)
 
     except Exception as e:
-        log.record_error(f"Error starting cron service: {e}")
-        raise Exception(f"Cron job failed - {e}")
+        log.record_error(f"Error in Best Ideas cron service: {e}")
+        raise Exception(f"Cron Job Best Ideas failed - {e}")
     

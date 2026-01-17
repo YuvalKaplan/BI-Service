@@ -2,7 +2,7 @@ import log
 import os
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, wait
-from modules.object import batch_run
+from modules.object import batch_run, ticker
 from modules.parse.download import process_provider
 from modules.object import provider
 
@@ -36,6 +36,9 @@ def run(start_time: datetime) -> tuple[str, int, list[int] | None]:
                 stats_downloader += "{:<8}{:<20}{}\n".format(line['id'], f"{line['downloaded']} out of {line['available']}", line['name'])
 
         log.record_status(f"Finished ETF Downloader batch run on {len(to_scrape)} items.\n{stats_downloader}")
+
+        ticker.sync_tickers_with_etf_holdings()
+
         return stats_downloader, total_downloaded, provider_ids
 
     except Exception as e:

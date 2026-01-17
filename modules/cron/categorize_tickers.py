@@ -10,8 +10,6 @@ def run() -> int:
         if batch_run_id is None:
             batch_run_id = batch_run.insert(batch_run.BatchRun('categorize_tickers', 'auto'))
 
-        ticker.sync_tickers_with_etf_holdings()
-
         etfs = categorize_etf.fetch_all()
         
         log.record_status(f"Running Categorize Tickers batch job ID {batch_run_id} - will proccess {len(etfs)} items.")
