@@ -36,9 +36,22 @@ To find out about dependencies use `pip show library-name`
 
 ## Database
 
+### Single Source of Truth
+
 As we use the DB as the Single Source of Truth, we simply use [psycopg](https://www.psycopg.org/) library for connection pool management and CRUD actions.
 We use the [psycopg.rows](https://www.psycopg.org/psycopg3/docs/advanced/rows.html) utility to generate the data as classes.
 Classes are created with the [dataclass](https://www.datacamp.com/tutorial/python-data-classes) wrapper.
+
+## Transfer Production database to Development
+All of the following should be done in pgAdmin:
+1. Create a data only backup of Production database in a CMD window:
+    > pg_dump  -h  dpg-d5do2kje5dus739gfud0-a.virginia-postgres.render.com -U admin -d best_ideas_eq6y --column-inserts --disable-triggers --data-only -f C:\Users\Yuval\Downloads\db_backup_data_only.sql
+    - You will need the admin password - get this from render.com
+2. Truncate all the tables in the development database in pgAdmin:
+    > call truncate_all_tables();
+3. Back in the CMD window, retore the database:
+    > psql -h localhost -p 5433 -U admin -d best_ideas -f C:\Users\Yuval\Downloads\db_backup_data_only.sql
+    - You will need the admin password
 
 ## Playwright
 We are using this library to simulate activity in a web browser. We are using the [headless version](https://playwright.dev/python/docs/browsers).

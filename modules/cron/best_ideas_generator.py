@@ -14,14 +14,13 @@ MAX_BEST_IDEAS_PER_FUND = 15
 
 def record_problem(batch_run_id: int, provider: provider.Provider, etf: provider_etf.ProviderEtf, error: str, message: str | None, problem_etfs: list[str]):
     item_info = f"[Provider: '{provider.name}' ({provider.id}), ETF: '{etf.name}' ({etf.id})]"
-    record = "{:<100}{}".format(item_info, f"{error} {message or ''}")
+    record = f"{item_info}\t{error}\t{message or ''}"
 
     log.record_status(record)
     batch_run_log.insert(batch_run_log.BatchRunLog(batch_run_id=batch_run_id, note=record))
     problem_etfs.append(record)
 
 def run() -> tuple[int, int, list[str]]:
-    today = date.today()
     try:
         batch_run_id = None
         if batch_run_id is None:
@@ -45,7 +44,7 @@ def run() -> tuple[int, int, list[str]]:
                     available_holding_dates = fetch_holding_dates_available_past_week(pe.id)
                     latest_common_date = max(set(availabe_price_dates) & set(available_holding_dates), default=None)
                     if not latest_common_date:
-                        message = f"latest holdings date={max(available_holding_dates)}, latest price date={max(availabe_price_dates)}"
+                        message = f"Latest holdings date: {max(available_holding_dates).strftime("%b %d, %Y")}, Latest price date: {max(availabe_price_dates).strftime("%b %d, %Y")}"
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Data sources out of sync", message=message, problem_etfs=problem_etfs)
                         continue
 
@@ -61,6 +60,10 @@ def run() -> tuple[int, int, list[str]]:
                     tickers = [h.ticker for h in holdings]
                     values = fetch_tickers_by_symbols_on_date(tickers, latest_common_date)
 
+                    if len(values) < int(0.9 * len(holdings)):
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Too many prices missing (less than 90 percent of holdngs)", message=None, problem_etfs=problem_etfs)
+                        continue
+
                     best_ideas_df = find_best_ideas(holdings, values, MAX_BEST_IDEAS_PER_FUND)
                     rows = best_idea.df_to_rows(
                         best_ideas_df,
@@ -70,7 +73,7 @@ def run() -> tuple[int, int, list[str]]:
                     best_idea.insert_bulk(rows)
                     generated_etfs += 1
                 except Exception as e:
-                    record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Error in generating best ideas", message=None, problem_etfs=problem_etfs)
+                    record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"{e}", message=None, problem_etfs=problem_etfs)
 
             log.record_status(f"Completed processing provider {p.name}")
 

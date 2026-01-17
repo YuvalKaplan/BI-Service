@@ -28,11 +28,11 @@ def fetch_price_dates_available_past_week() -> list[date]:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 query = """
-                    SELECT DISTINCT (value_date)
+                    SELECT DISTINCT (value_date::date)
                         value_date
                     FROM ticker_value
                     WHERE value_date > NOW() - INTERVAL '1 week'
-                    ORDER BY value_date;
+                    ORDER BY value_date::date;
                 """
                 cur.execute(query)
                 return [row[0] for row in cur.fetchall()]
