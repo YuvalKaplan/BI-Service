@@ -35,7 +35,7 @@ def fetch_price_dates_available_past_week() -> list[date]:
                     ORDER BY value_date;
                 """
                 cur.execute(query)
-                return [row["value_date"] for row in cur.fetchall()]
+                return [row[0] for row in cur.fetchall()]
     except Error as e:
         raise Exception(f"Error retrieving the list of dates available in the past week: {e}")
 
