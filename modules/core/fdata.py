@@ -8,7 +8,7 @@ import json
 
 API_URL = 'https://financialmodelingprep.com/stable/'
 
-CALLS_PER_MINUTE = 300
+CALLS_PER_MINUTE = 200
 WINDOW_SECONDS = 60.0
 
 _call_timestamps = deque()

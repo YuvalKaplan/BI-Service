@@ -42,7 +42,12 @@ def run() -> tuple[int, int, list[str]]:
             for pe in pe_list:
                 try:
                     available_holding_dates = fetch_holding_dates_available_past_week(pe.id)
+                    if len(available_holding_dates) == 0:
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="No holdings have been downloaded for the past week", message=None, problem_etfs=problem_etfs)
+                        continue
+
                     latest_common_date = max(set(availabe_price_dates) & set(available_holding_dates), default=None)
+
                     if not latest_common_date:
                         message = f"Latest holdings date: {max(available_holding_dates).strftime("%b %d, %Y")}, Latest price date: {max(availabe_price_dates).strftime("%b %d, %Y")}"
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Data sources out of sync", message=message, problem_etfs=problem_etfs)
@@ -61,7 +66,8 @@ def run() -> tuple[int, int, list[str]]:
                     values = fetch_tickers_by_symbols_on_date(tickers, latest_common_date)
 
                     if len(values) < int(0.9 * len(holdings)):
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Too many prices missing (less than 90 percent of holdngs)", message=None, problem_etfs=problem_etfs)
+                        message = f"Holdings: {len(holdings)}, Values: {len(values)}"
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Too many prices missing (less than 90 percent of holdngs)", message=message, problem_etfs=problem_etfs)
                         continue
 
                     best_ideas_df = find_best_ideas(holdings, values, MAX_BEST_IDEAS_PER_FUND)
