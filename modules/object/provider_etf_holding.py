@@ -23,7 +23,6 @@ def fetch_holding_dates_available_past_week(provider_etf_id: int) -> list[date]:
             with conn.cursor() as cur:
                 query = """
                     SELECT DISTINCT (peh.trade_date::date)
-                        peh.trade_date
                     FROM provider_etf_holding AS peh
                     INNER JOIN ticker AS t ON peh.ticker = t.symbol
                     WHERE t.invalid IS null
