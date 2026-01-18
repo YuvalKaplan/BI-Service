@@ -22,12 +22,14 @@ def fetch_holding_dates_available_past_week(provider_etf_id: int) -> list[date]:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 query = """
-                    SELECT DISTINCT (trade_date::date)
-                        trade_date
-                    FROM provider_etf_holding
-                    WHERE provider_etf_id = %s 
-                      AND trade_date > NOW() - INTERVAL '1 week'
-                    ORDER BY trade_date::date;
+                    SELECT DISTINCT (peh.trade_date::date)
+                        peh.trade_date
+                    FROM provider_etf_holding AS peh
+                    INNER JOIN ticker AS t ON peh.ticker = t.symbol
+                    WHERE t.invalid IS null
+                      AND peh.provider_etf_id = %s 
+                      AND peh.trade_date > NOW() - INTERVAL '1 week'
+                    ORDER BY peh.trade_date::date;
                 """
                 cur.execute(query, (provider_etf_id,))
                 return [row[0] for row in cur.fetchall()]

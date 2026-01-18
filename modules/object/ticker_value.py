@@ -45,15 +45,10 @@ def fetch_tickers_by_symbols_on_date(symbols: List[str], value_date: date) -> Li
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(TickerValue)) as cur:
                 query = """
-                    SELECT DISTINCT ON (symbol)
-                        symbol,
-                        value_date,
-                        stock_price,
-                        market_cap
+                    SELECT symbol, value_date, stock_price, market_cap
                     FROM ticker_value
                     WHERE symbol = ANY(%s)
-                    AND value_date = %s
-                    ORDER BY symbol, value_date DESC;
+                      AND value_date = %s;
                 """
                 cur.execute(query, (symbols, value_date))
                 return cur.fetchall()

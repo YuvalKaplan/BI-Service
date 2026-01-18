@@ -33,7 +33,7 @@ def run() -> tuple[int, int, list[str]]:
         total_etfs = 0
         generated_etfs = 0
         problem_etfs: list[str] = []
-        availabe_price_dates = fetch_price_dates_available_past_week()
+        available_price_dates = fetch_price_dates_available_past_week()
         for p in providers:
             pe_list = provider_etf.fetch_by_provider_id(p.id)
             total_etfs += len(pe_list)
@@ -46,10 +46,10 @@ def run() -> tuple[int, int, list[str]]:
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="No holdings have been downloaded for the past week", message=None, problem_etfs=problem_etfs)
                         continue
 
-                    latest_common_date = max(set(availabe_price_dates) & set(available_holding_dates), default=None)
+                    latest_common_date = max(set(available_price_dates) & set(available_holding_dates), default=None)
 
-                    if not latest_common_date:
-                        message = f"Latest holdings date: {max(available_holding_dates).strftime("%b %d, %Y")}, Latest price date: {max(availabe_price_dates).strftime("%b %d, %Y")}"
+                    if latest_common_date is None:
+                        message = f"Latest holdings date: {max(available_holding_dates).strftime("%b %d, %Y")}, Latest price date: {max(available_price_dates).strftime("%b %d, %Y")}"
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Data sources out of sync", message=message, problem_etfs=problem_etfs)
                         continue
 
@@ -66,7 +66,7 @@ def run() -> tuple[int, int, list[str]]:
                     values = fetch_tickers_by_symbols_on_date(tickers, latest_common_date)
 
                     if len(values) < int(0.9 * len(holdings)):
-                        message = f"Holdings: {len(holdings)}, Values: {len(values)}"
+                        message = f"Holdings: {len(holdings)}, Values: {len(values)} - on date {latest_common_date.strftime("%b %d, %Y")}"
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Too many prices missing (less than 90 percent of holdngs)", message=message, problem_etfs=problem_etfs)
                         continue
 
