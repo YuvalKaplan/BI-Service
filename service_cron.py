@@ -24,36 +24,36 @@ if __name__ == '__main__':
         start_time = datetime.now(timezone.utc)
         message_actions = ""
 
-        # try:
-        #     stats_downloader, total_downloaded, provider_ids, = etf_downloader.run(start_time)
-        # except Exception as e:
-        #     sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
-        #     raise e
+        try:
+            stats_downloader, total_downloaded, provider_ids, = etf_downloader.run(start_time)
+        except Exception as e:
+            sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
+            raise e
         
-        # message_actions += f"Holdings Download\n" + SEPERATOR_LINE
-        # message_actions += f"{stats_downloader}\n" + SEPERATOR_LINE
-        # message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
-        # message_actions += BREAKER_LINE
+        message_actions += f"Holdings Download\n" + SEPERATOR_LINE
+        message_actions += f"{stats_downloader}\n" + SEPERATOR_LINE
+        message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
+        message_actions += BREAKER_LINE
 
-        # if start_time.day == 15: # middle of each month - the ETF data is updated once a month on the website
-        #     try:
-        #         total_symbols = categorize_tickers.run()
-        #     except Exception as e:
-        #         sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on categorize tickers with error:\n{e}\n\n")
-        #         raise e
+        if start_time.day == 15: # middle of each month - the ETF data is updated once a month on the website
+            try:
+                total_symbols = categorize_tickers.run()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on categorize tickers with error:\n{e}\n\n")
+                raise e
             
-        #     message_actions += f"Categorized tickers: {total_symbols}\n"
-        #     message_actions += BREAKER_LINE
+            message_actions += f"Categorized tickers: {total_symbols}\n"
+            message_actions += BREAKER_LINE
 
-        # try:
-        #     total_updated, missing_data = stock_downloader.run()
-        # except Exception as e:
-        #     sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on download stock data (price and market cap) with error:\n{e}\n\n")
-        #     raise e
+        try:
+            total_updated, missing_data = stock_downloader.run()
+        except Exception as e:
+            sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on download stock data (price and market cap) with error:\n{e}\n\n")
+            raise e
         
-        # message_actions += f"Stocks updated: {total_updated - missing_data} out of {total_updated}\n"
-        # message_actions += f"Stocks missing data: {missing_data}\n"
-        # message_actions += BREAKER_LINE
+        message_actions += f"Stocks updated: {total_updated - missing_data} out of {total_updated}\n"
+        message_actions += f"Stocks missing data: {missing_data}\n"
+        message_actions += BREAKER_LINE
 
         try:
             etfs_processed, generated_etfs, problems = best_ideas_generator.run()
