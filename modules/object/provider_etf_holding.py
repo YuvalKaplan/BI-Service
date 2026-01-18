@@ -54,7 +54,7 @@ def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, trade_date: da
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(ProviderEtfHolding)) as cur:
                 query_str = """
-                    SELECT *
+                    SELECT peh.*
                     FROM provider_etf_holding AS peh
                     INNER JOIN ticker AS t ON peh.ticker = t.symbol
                     WHERE t.invalid IS null
