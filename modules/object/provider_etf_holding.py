@@ -33,16 +33,32 @@ def fetch_holding_dates_available_past_week(provider_etf_id: int) -> list[date]:
                 return [row[0] for row in cur.fetchall()]
     except Error as e:
         raise Exception(f"Error retrieving the list of holding dates available in the past week: {e}")
+    
+def fetch_valid_tickers_in_holdings() -> List[str]:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                query = """
+                    SELECT DISTINCT peh.ticker 
+                    FROM public.provider_etf_holding AS peh
+                    INNER JOIN ticker AS t ON peh.ticker = t.symbol
+                    WHERE t.invalid IS null;
+                """
+                cur.execute(query)
+                return [row[0] for row in cur.fetchall()]
+    except Error as e:
+        raise Exception(f"Error retrieving TickerMarketCap data: {e}")
 
-
-def fetch_holdings_by_provider_etf_id(provider_etf_id: int, trade_date: date):
+def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, trade_date: date):
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(ProviderEtfHolding)) as cur:
                 query_str = """
                     SELECT *
-                    FROM provider_etf_holding
-                    WHERE provider_etf_id = %s
+                    FROM provider_etf_holding AS peh
+                    INNER JOIN ticker AS t ON peh.ticker = t.symbol
+                    WHERE t.invalid IS null
+                      AND provider_etf_id = %s
                       AND trade_date = %s;
                 """
                 cur.execute(query_str, (provider_etf_id, trade_date))
@@ -51,16 +67,6 @@ def fetch_holdings_by_provider_etf_id(provider_etf_id: int, trade_date: date):
     except Error as e:
         raise Exception(f"Error fetching the Provider ETFs Holdings for provider ETF ID from the DB: {e}")
 
-def fetch_tickers_in_holdings() -> List[str]:
-    try:
-        with db_pool_instance.get_connection() as conn:
-            with conn.cursor() as cur:
-                query = "SELECT DISTINCT ticker FROM public.provider_etf_holding;"
-                cur.execute(query)
-                return [row[0] for row in cur.fetchall()]
-    except Error as e:
-        raise Exception(f"Error retrieving TickerMarketCap data: {e}")
-    
 
 def insert_all_holdings(etf_id: int, df: pd.DataFrame):
     try:

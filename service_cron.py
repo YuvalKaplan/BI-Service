@@ -7,6 +7,9 @@ from modules.core.db import db_pool_instance
 from modules.core import sender
 from modules.cron import etf_downloader, categorize_tickers, stock_downloader, best_ideas_generator
 
+SEPERATOR_LINE = "-" * 20 + "\n"
+BREAKER_LINE = "=" * 20 + "\n\n"
+
 atexit.register(cleanup)
 
 if __name__ == '__main__':
@@ -27,12 +30,10 @@ if __name__ == '__main__':
             sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
             raise e
         
-        message_actions += f"Holdings Download\n"
-        message_actions += f"--------------------------------\n"
-        message_actions += f"{stats_downloader}\n\n"
-        message_actions += f"--------------------------------\n"
+        message_actions += f"Holdings Download\n" + SEPERATOR_LINE
+        message_actions += f"{stats_downloader}\n" + SEPERATOR_LINE
         message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
-        message_actions += f"=========================================\n\n"
+        message_actions += BREAKER_LINE
 
         if start_time.day == 15: # middle of each month - the ETF data is updated once a month on the website
             try:
@@ -42,7 +43,7 @@ if __name__ == '__main__':
                 raise e
             
             message_actions += f"Categorized tickers: {total_symbols}\n"
-            message_actions += f"=========================================\n\n"
+            message_actions += BREAKER_LINE
 
         try:
             total_updated, missing_data = stock_downloader.run()
@@ -52,7 +53,7 @@ if __name__ == '__main__':
         
         message_actions += f"Stocks updated: {total_updated - missing_data} out of {total_updated}\n"
         message_actions += f"Stocks missing data: {missing_data}\n"
-        message_actions += f"=========================================\n\n"
+        message_actions += BREAKER_LINE
 
         try:
             etfs_processed, generated_etfs, problems = best_ideas_generator.run()
@@ -61,11 +62,11 @@ if __name__ == '__main__':
             raise e
         
         message_actions += f"Total ETFs available: {etfs_processed}\n"
-        message_actions += f"ETFS processed with best ideas: {generated_etfs}\n"
-        message_actions += f"ETFS with problems: {len(problems)}\n"
+        message_actions += f"ETFS with best ideas: {generated_etfs}\n"
+        message_actions += f"ETFS with problems: {len(problems)}\n" + SEPERATOR_LINE
         for p in problems:
             message_actions += f"{p}\n"
-        message_actions += f"=========================================\n\n"
+        message_actions += BREAKER_LINE
 
         end = datetime.now(timezone.utc)
         message_full = f"Activated at {start_time.strftime("%H:%M:%S")}\nCompleted at {end.strftime("%H:%M:%S")}.\n\n"

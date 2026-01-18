@@ -4,7 +4,7 @@ import math
 from datetime import datetime
 from modules.object import batch_run
 from modules.core.fdata import get_stock_profile
-from modules.object.provider_etf_holding import fetch_tickers_in_holdings
+from modules.object.provider_etf_holding import fetch_valid_tickers_in_holdings
 from modules.object import ticker, ticker_value
 
 def run() -> tuple[int, int]:
@@ -13,7 +13,7 @@ def run() -> tuple[int, int]:
         if batch_run_id is None:
             batch_run_id = batch_run.insert(batch_run.BatchRun('stock_downloader', 'auto'))
 
-        symbols = fetch_tickers_in_holdings()
+        symbols = fetch_valid_tickers_in_holdings()
         group_size = 100
         group_count = 1
         today = datetime.today()
@@ -26,15 +26,15 @@ def run() -> tuple[int, int]:
         for i in range(0, len(symbols), group_size):
             batch = symbols[i : i + group_size]
             for s in batch:
-                # No need for throtteling logic as the call response time is over 1 second and we are allowed 300 per minute.
                 sd = get_stock_profile(s)
-                if sd:
+                if isinstance(sd, str):
+                    ticker.update_invalid(s, sd)
+                    missing_symbols.append(s)
+                else:
                     t = ticker.Ticker(symbol=s, isin=sd['isin'], cik=sd['cik'], exchange=sd['exchange'], name=sd['companyName'], industry=sd['industry'], sector=sd['sector'])
                     ticker.update_info(t)
                     tv = ticker_value.TickerValue(symbol=s, value_date=today, stock_price=float(sd['price']), market_cap=float(sd['marketCap']))
                     ticker_value.upsert(tv)
-                else:
-                    missing_symbols.append(s)
 
             print(f"Batch {group_count} completed.")
             group_count += 1

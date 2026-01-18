@@ -4,7 +4,7 @@ from datetime import date
 from modules.object import batch_run, batch_run_log
 from modules.object import provider, provider_etf
 from modules.calc.best_ideas import find_best_ideas
-from modules.object.provider_etf_holding import fetch_holding_dates_available_past_week, fetch_holdings_by_provider_etf_id
+from modules.object.provider_etf_holding import fetch_holding_dates_available_past_week, fetch_valid_holdings_by_provider_etf_id
 from modules.object.ticker_value import fetch_price_dates_available_past_week, fetch_tickers_by_symbols_on_date
 from modules.object import best_idea
 
@@ -48,7 +48,7 @@ def run() -> tuple[int, int, list[str]]:
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Data sources out of sync", message=message, problem_etfs=problem_etfs)
                         continue
 
-                    holdings = fetch_holdings_by_provider_etf_id(pe.id, latest_common_date)
+                    holdings = fetch_valid_holdings_by_provider_etf_id(pe.id, latest_common_date)
                     if len(holdings) < MIN_HOLDINGS:
                         if len(holdings) == 0:
                             error = f"No holdings"
