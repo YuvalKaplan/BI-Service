@@ -42,7 +42,7 @@ def sync_tickers_with_etf_holdings():
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("CALL public.sync_tickers_symbols();")
+                cur.execute("SELECT public.sync_tickers_symbols();")
         
     except Error as e:
         raise Exception(f"Error executing stored procedure: {e}")

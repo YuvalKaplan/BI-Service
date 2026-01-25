@@ -11,8 +11,12 @@ class ProviderEtfHolding:
     created_at: datetime
     fund_id: int
     ticker: str
-    sources: dict | None
-    weight: float | None
+    entry_ranking: int 
+    appearances: int
+    max_delta: float
+    top_delta_provider_etf_id: int
+    all_provider_etf_ids: list[int]
+
 
 def insert_all_holdings(fund_id: int, df: pd.DataFrame):
     try:

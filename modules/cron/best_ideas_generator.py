@@ -1,6 +1,4 @@
 import log
-import os
-from datetime import date
 from modules.object import batch_run, batch_run_log
 from modules.object import provider, provider_etf
 from modules.calc.best_ideas import find_best_ideas
@@ -10,7 +8,7 @@ from modules.object import best_idea
 
 MIN_HOLDINGS = 10
 MAX_DATE_DIFF_DAYS = 5
-MAX_BEST_IDEAS_PER_FUND = 15
+MAX_BEST_IDEAS_PER_FUND = 10
 
 def record_problem(batch_run_id: int, provider: provider.Provider, etf: provider_etf.ProviderEtf, error: str, message: str | None, problem_etfs: list[str]):
     item_info = f"[Provider: '{provider.name}' ({provider.id}), ETF: '{etf.name}' ({etf.id})]"

@@ -54,3 +54,27 @@ def insert_bulk(rows: list[tuple]):
                 cur.executemany(query, rows)
     except Error as e:
         raise Exception(f"Error inserting Best Ideas in bulk: {e}")
+
+
+@dataclass
+class BestIdeaRanked:
+    symbol: str
+    name: str
+    style_type: str
+    cap_type: str
+    ranking: int
+    appearances: int
+    max_delta: float
+    source_etf_id: int          # The single ID associated with max delta
+    all_provider_ids: List[int] # The array of all provider IDs
+
+def fetch_best_ideas_by_ranking(ranking_level: int) -> List[BestIdeaRanked]:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(BestIdeaRanked)) as cur:
+                cur.execute('SELECT * FROM ticker WHERE symbol = %s;', (ranking_level,))
+                items = cur.fetchall()
+        return items
+    except Error as e:
+        raise Exception(f"Error fetching the BestIdeaResult from the DB: {e}")
+                
