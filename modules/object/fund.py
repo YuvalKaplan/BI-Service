@@ -5,18 +5,18 @@ from dataclasses import dataclass
 from modules.core.db import db_pool_instance
 
 @dataclass
-class Provider:
+class Fund:
     id: int
-    created_at: datetime | None
-    style_type: str | None
-    cap_type: str | None
-    name: str | None
+    created_at: datetime 
+    style_type: str 
+    cap_type: str
+    name: str
     last_updated: datetime | None
 
 def fetch_all():
     try:
         with db_pool_instance.get_connection() as conn:
-            with conn.cursor(row_factory=class_row(Provider)) as cur:
+            with conn.cursor(row_factory=class_row(Fund)) as cur:
                 query_str = "SELECT * FROM fund;"
                 cur.execute(query_str)
                 items = cur.fetchall()

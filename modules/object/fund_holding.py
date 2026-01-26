@@ -1,50 +1,80 @@
-from datetime import datetime
+from datetime import date
+from typing import List
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
 from modules.core.db import db_pool_instance
+from modules.object.fund import Fund
 import pandas as pd
 
 @dataclass
-class ProviderEtfHolding:
-    id: int
-    created_at: datetime
+class FundHolding:
     fund_id: int
-    ticker: str
-    entry_ranking: int 
-    appearances: int
-    max_delta: float
-    top_delta_provider_etf_id: int
-    all_provider_etf_ids: list[int]
+    symbol: str
+    holding_date: date
+    ranking: int 
 
-
-def insert_all_holdings(fund_id: int, df: pd.DataFrame):
+def fetch_funds_holdings(fund_id: int):
     try:
-        df = df.drop(columns=["id"], errors="ignore")
-        df["fund_id"] = fund_id
-        df = df[[
-            "fund_id",
-            "ticker",
-            "sources",
-            "weight"
-        ]]
-        rows = list(df.itertuples(index=False, name=None)).copy()
-
-        #  Delete the Holdings data for a ETF on a Trade Date to prevent duplicates
         with db_pool_instance.get_connection() as conn:
-            with conn.cursor() as cur:
-                delete_query = """
-                    DELETE FROM fund_holding peh
-                    WHERE peh.fund_id = %s 
-                    AND peh.created_at = %s;
+            with conn.cursor(row_factory=class_row(FundHolding)) as cur:
+                query_str = """
+                    SELECT * FROM fund_holding
+                    WHERE fund_id = %s
+                      AND holding_date = (
+                          SELECT MAX(holding_date)
+                          FROM fund_holding
+                          WHERE fund_id = %s 
+                            AND holding_date < CURRENT_DATE
+                      );
                 """
-                cur.execute(delete_query, (fund_id, df["trade_date"].iat[0]))    
+                cur.execute(query_str, (fund_id, fund_id,))
+                items = cur.fetchall()
+        return items
+    except Error as e:
+        raise Exception(f"Error fetching the Fund Holdings from the DB: {e}")
 
+
+def insert_fund_holding(items: List[FundHolding]):
+    if not items:
+        return
+
+    try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
-                insert_query = "INSERT INTO fund_holding (fund_id, trade_date, ticker, weight) VALUES (%s, %s, %s, %s, %s, %s);"
-                cur.executemany(insert_query, rows)
+
+                delete_sql = """
+                    DELETE FROM fund_holding
+                    WHERE fund_id = %s
+                      AND symbol = %s
+                      AND holding_date = %s;
+                """
+
+                delete_values = [
+                    (i.fund_id, i.symbol, i.holding_date)
+                    for i in items
+                ]
+
+                cur.executemany(delete_sql, delete_values)
+
+                insert_sql = """
+                    INSERT INTO fund_holding (
+                        fund_id,
+                        symbol,
+                        holding_date,
+                        ranking
+                    )
+                    VALUES (%s, %s, %s, %s);
+                """
+
+                insert_values = [
+                    (i.fund_id, i.symbol, i.holding_date, i.ranking)
+                    for i in items
+                ]
+
+                cur.executemany(insert_sql, insert_values)
+
+            conn.commit()
 
     except Error as e:
-        raise Exception(f"Error inserting the Provider ETF Holdings into the DB: {e}")
-    
+        raise Exception(f"Error replacing fund holdings in DB: {e}")

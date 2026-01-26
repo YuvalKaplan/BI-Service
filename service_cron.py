@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from modules.init.exit import cleanup
 from modules.core.db import db_pool_instance
 from modules.core import sender
-from modules.cron import etf_downloader, categorize_tickers, stock_downloader, best_ideas_generator
+from modules.cron import etf_downloader, categorize_tickers, stock_downloader, best_ideas_generator, funds_update
 
 SEPERATOR_LINE = "-" * 20 + "\n"
 BREAKER_LINE = "=" * 20 + "\n\n"
@@ -69,6 +69,18 @@ if __name__ == '__main__':
             message_actions += f"ETFS with problems: {len(problems)}\n" + SEPERATOR_LINE
             for p in problems:
                 message_actions += f"{p}\n"
+            message_actions += BREAKER_LINE
+
+
+        if 1 <= start_time.weekday() <= 5: # Tuesday through Saturday
+            try:
+                results = funds_update.run()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on fund update with error:\n{e}\n\n")
+                raise e
+
+            message_actions += f"Fund Updates\n" + SEPERATOR_LINE
+            message_actions += f"{funds_update.results_to_string(results)}\n"
             message_actions += BREAKER_LINE
 
         end = datetime.now(timezone.utc)

@@ -1,11 +1,14 @@
 import log
 import time
 import math
+import re
 from datetime import datetime
 from modules.object import batch_run
 from modules.core.fdata import get_stock_profile
 from modules.object.provider_etf_holding import fetch_valid_tickers_in_holdings
 from modules.object import ticker, ticker_value
+
+REMOVE_ETFS_AND_FUNDS = r'\b(ETF|fund)\b'
 
 def run() -> tuple[int, int]:
     try:
@@ -32,9 +35,13 @@ def run() -> tuple[int, int]:
                     missing_symbols.append(s)
                 else:
                     t = ticker.Ticker(symbol=s, isin=sd['isin'], cik=sd['cik'], exchange=sd['exchange'], name=sd['companyName'], industry=sd['industry'], sector=sd['sector'])
-                    ticker.update_info(t)
-                    tv = ticker_value.TickerValue(symbol=s, value_date=today, stock_price=float(sd['price']), market_cap=float(sd['marketCap']))
-                    ticker_value.upsert(tv)
+                    if t.name is None or re.search(REMOVE_ETFS_AND_FUNDS, t.name, flags=re.IGNORECASE):
+                        ticker.update_invalid(s, 'Fund or ETF')
+                        missing_symbols.append(s)
+                    else:    
+                        ticker.update_info(t)
+                        tv = ticker_value.TickerValue(symbol=s, value_date=today, stock_price=float(sd['price']), market_cap=float(sd['marketCap']))
+                        ticker_value.upsert(tv)
 
             print(f"Batch {group_count} completed.")
             group_count += 1

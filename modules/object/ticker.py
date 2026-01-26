@@ -63,7 +63,7 @@ def fetch_by_symbols(symbols: list[str]):
             with conn.cursor(row_factory=class_row(Ticker)) as cur:
                 query_str = """
                     SELECT * FROM ticker
-                    WHERE id = ANY(%s);
+                    WHERE symbol = ANY(%s);
                 """
                 cur.execute(query_str, (symbols,))
                 items = cur.fetchall()

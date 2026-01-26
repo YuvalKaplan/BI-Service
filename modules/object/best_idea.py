@@ -60,19 +60,17 @@ def insert_bulk(rows: list[tuple]):
 class BestIdeaRanked:
     symbol: str
     name: str
-    style_type: str
-    cap_type: str
     ranking: int
     appearances: int
     max_delta: float
-    source_etf_id: int          # The single ID associated with max delta
-    all_provider_ids: List[int] # The array of all provider IDs
+    source_etf_id: int
+    all_provider_ids: List[int]
 
-def fetch_best_ideas_by_ranking(ranking_level: int) -> List[BestIdeaRanked]:
+def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: str) -> List[BestIdeaRanked]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(BestIdeaRanked)) as cur:
-                cur.execute('SELECT * FROM ticker WHERE symbol = %s;', (ranking_level,))
+                cur.execute('SELECT * FROM get_best_ideas_by_ranking(%s, %s, %s);', (ranking_level, style_type, cap_type,))
                 items = cur.fetchall()
         return items
     except Error as e:
