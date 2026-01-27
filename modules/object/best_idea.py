@@ -59,7 +59,6 @@ def insert_bulk(rows: list[tuple]):
 @dataclass
 class BestIdeaRanked:
     symbol: str
-    name: str
     ranking: int
     appearances: int
     max_delta: float
@@ -76,3 +75,46 @@ def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: s
     except Error as e:
         raise Exception(f"Error fetching the BestIdeaResult from the DB: {e}")
                 
+"""
+The following is the SQL Function for get_best_ideas_by_ranking:
+SELECT
+	    be.symbol::TEXT,
+	    be.ranking,
+	    COUNT(be.symbol) AS appearances,
+	    MAX(be.delta) AS max_delta,
+	    (array_agg(be.provider_etf_id ORDER BY be.delta DESC))[1] AS source_etf_id,
+	    array_agg(DISTINCT be.provider_etf_id) AS all_provider_ids
+	
+	FROM public.best_idea be
+	JOIN public.ticker t ON be.symbol = t.symbol
+	JOIN public.ticker_value tv ON tv.symbol = be.symbol
+	JOIN (
+	    SELECT symbol, MAX(value_date) AS max_date
+	    FROM public.ticker_value
+	    WHERE value_date >= CURRENT_DATE - INTERVAL '7 days'
+	    GROUP BY symbol
+	) latest_tv
+	    ON tv.symbol = latest_tv.symbol
+	   AND tv.value_date = latest_tv.max_date
+	
+	-- keep only the best ranking per symbol
+	JOIN (
+	    SELECT symbol, MIN(ranking) AS best_ranking
+	    FROM public.best_idea
+	    WHERE ranking <= p_ranking_level
+	    GROUP BY symbol
+	) best
+	    ON be.symbol = best.symbol
+	   AND be.ranking = best.best_ranking
+	
+	WHERE t.style_type = p_style_type
+	  AND (
+	      CASE
+	          WHEN tv.market_cap >= 10000000000 THEN 'large'
+	          ELSE 'mid_small'
+	      END
+	  ) = p_cap_type
+	
+	GROUP BY be.symbol, be.ranking
+	ORDER BY be.ranking, appearances DESC, max_delta DESC;
+"""
