@@ -38,6 +38,9 @@ def fetch_funds_holdings(fund_id: int):
 def insert_fund_holding(items: List[FundHolding]):
     if not items:
         return
+    
+    fund_id = items[0].fund_id
+    holding_date = items[0].holding_date
 
     try:
         with db_pool_instance.get_connection() as conn:
@@ -46,16 +49,9 @@ def insert_fund_holding(items: List[FundHolding]):
                 delete_sql = """
                     DELETE FROM fund_holding
                     WHERE fund_id = %s
-                      AND symbol = %s
                       AND holding_date = %s;
                 """
-
-                delete_values = [
-                    (i.fund_id, i.symbol, i.holding_date)
-                    for i in items
-                ]
-
-                cur.executemany(delete_sql, delete_values)
+                cur.execute(delete_sql, (fund_id, holding_date))
 
                 insert_sql = """
                     INSERT INTO fund_holding (

@@ -25,24 +25,21 @@ def normalize_ids(ids: list[int] | None) -> list[int] | None:
 def insert_fund_changes(items: List[FundHoldingChange]):
     if not items:
         return
+    
+    fund_id = items[0].fund_id
+    change_date = items[0].change_date
 
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
 
+                # Delete once for this fund & date
                 delete_sql = """
                     DELETE FROM fund_holding_change
                     WHERE fund_id = %s
-                      AND symbol = %s
                       AND change_date = %s;
                 """
-
-                delete_values = [
-                    (i.fund_id, i.symbol, i.change_date)
-                    for i in items
-                ]
-
-                cur.executemany(delete_sql, delete_values)
+                cur.execute(delete_sql, (fund_id, change_date))
 
                 insert_sql = """
                     INSERT INTO fund_holding_change (
