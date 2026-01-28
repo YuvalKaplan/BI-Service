@@ -31,14 +31,19 @@ def results_to_string(results: List[FundChangesResult]):
 
     for r in results:
         aggregator += (f"{r.fund.name}\n" + "=" * 20 + "\n")
-        aggregator += "{:<12}{:<15}{:<}{:<15}{:<10}{}\n".format('Direction', 'Date', 'Ranking', 'Appearances', 'Symbol', 'Name')
-        for ch in r.changes:
-            ticker = ticker_by_symbol.get(ch.symbol)
-            date_str = ch.change_date.strftime("%Y-%m-%d") if ch.change_date else "---"
-            name_str = ticker.name if ticker else "---"
-            aggregator += "{:<12}{:<15}{:<15}{:<15}{:<10}{}\n".format(ch.direction, date_str, ch.ranking, ch.appearances, ch.symbol, name_str)
+        if len(r.changes) == 0:
+            aggregator += "No changes\n\n\n"
+        else:
+            aggregator += "{:<12}{:<15}{:<12}{:<15}{:<10}{}\n".format('Direction', 'Date', 'Ranking', 'Appearances', 'Symbol', 'Name')
+            for ch in r.changes:
+                ticker = ticker_by_symbol.get(ch.symbol)
+                date_str = ch.change_date.strftime("%Y-%m-%d") if ch.change_date else "---"
+                ranking = ch.ranking if ch.ranking else "---"
+                appearances = ch.appearances if ch.appearances else "---"
+                name_str = ticker.name if ticker else "---"
+                aggregator += "{:<12}{:<15}{:<12}{:<15}{:<10}{}\n".format(ch.direction, date_str, ranking, appearances, ch.symbol, name_str)
 
-        aggregator += ("-" * 30 + "\n\n")
+            aggregator += ("-" * 30 + "\n\n")
 
     return aggregator
 
@@ -62,20 +67,20 @@ def run() -> List[FundChangesResult]:
             yesterday_holdings = fetch_funds_holdings(f.id)
             
             # Find if we need to replace holdings - have droped 2 rankings
-            for h in yesterday_holdings:
-                latest_state = next((x for x in fresh_ideas if x.symbol == h.symbol), None)
-                if latest_state is None or latest_state.ranking <= h.ranking + GAP_TO_SELL:
+            for yh in yesterday_holdings:
+                latest_state = next((x for x in fresh_ideas if x.symbol == yh.symbol), None)
+                if latest_state is None or latest_state.ranking - yh.ranking >= GAP_TO_SELL:
                     # Should sell the holding
-                    holdings_changed.append(FundHoldingChange(fund_id=f.id, symbol=h.symbol, change_date=today, direction='sell'))
+                    holdings_changed.append(FundHoldingChange(fund_id=f.id, symbol=yh.symbol, change_date=today, direction='sell'))
                 else:
                     # Keep the holding
-                    h.holding_date = today
-                    todays_holdings.append(h)
+                    yh.holding_date = today
+                    todays_holdings.append(yh)
 
             # If new holdings are needed get then from the fresh - as long as they are not already in the fund.
             missing = HOLDINGS_IN_FUND - len(todays_holdings) 
             if missing != 0:
-                existing_symbols = {h.symbol for h in todays_holdings}
+                existing_symbols = {th.symbol for th in todays_holdings}
                 for fi in fresh_ideas:
                     if fi.symbol in existing_symbols:
                         continue

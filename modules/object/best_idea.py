@@ -80,7 +80,7 @@ The following is the SQL Function for get_best_ideas_by_ranking:
 SELECT
 	    be.symbol::TEXT,
 	    be.ranking,
-	    COUNT(be.symbol) AS appearances,
+	    COUNT(DISTINCT be.provider_etf_id) AS appearances,
 	    MAX(be.delta) AS max_delta,
 	    (array_agg(be.provider_etf_id ORDER BY be.delta DESC))[1] AS source_etf_id,
 	    array_agg(DISTINCT be.provider_etf_id) AS all_provider_ids
