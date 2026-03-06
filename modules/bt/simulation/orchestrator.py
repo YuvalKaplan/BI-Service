@@ -1,9 +1,12 @@
 from decimal import Decimal
 from typing import List, Tuple
+from decimal import Decimal
 from dataclasses import dataclass
 from datetime import date, timedelta
 import pandas as pd
-from bt.object import fund_holding, account_holding as ah, account_cash_ledger as acl, account_trade as at
+from bt.object import fund, fund_holding
+from bt.object import account_holding as ah, account_cash_ledger as acl, account_trade as at, account_performance as ap, account_benchmark_comparison as abc
+from bt.object import benchmark_value as bv
 from bt.object import interest_config, ticker_value, ticker_dividend_history
 
 def best_ideas_to_funds():
@@ -87,7 +90,7 @@ def identify_rebalance_needs(account_id: int, fund_id: int, eval_date: date) -> 
 
 def calculate_commission(quantity: Decimal) -> Decimal:
     FEE_PER_SHARE = Decimal('0.005') # e.g., half a cent per share
-    MIN_COMMISSION = Decimal('1.00')  # Minimum charge per order
+    MIN_COMMISSION = Decimal('0.00')  # Minimum charge per order
     
     fee = quantity * FEE_PER_SHARE
     return max(fee, MIN_COMMISSION).quantize(Decimal('0.01'))
@@ -205,7 +208,7 @@ def create_daily_snapshot(
     eval_date: date, 
     previous_holdings: List[ah.AccountHolding], # Already in memory
     today_trades: List[at.AccountTrade]         # Returned from rebalance
-):
+) -> tuple[Decimal, List[ah.AccountHolding]] :
     
     # 1. Load data into DataFrames
     df_prev = pd.DataFrame([vars(h) for h in previous_holdings])
@@ -214,7 +217,7 @@ def create_daily_snapshot(
     
     df_trades = pd.DataFrame([vars(t) for t in today_trades])
 
-# 2. Process Trades (Aggregate by Symbol)
+    # 2. Process Trades (Aggregate by Symbol)
     if not df_trades.empty:
         # Net Quantity: BUY is +, SELL is -
         df_trades['qty_delta'] = df_trades.apply(
@@ -279,8 +282,7 @@ def create_daily_snapshot(
     tpv = df['mkt_val'].sum() + eod_cash
     df['weight'] = df['mkt_val'] / tpv if tpv > 0 else 0.0
 
-    # 7. Map back to AccountHolding objects
-    ah.record_account_holdings([
+    snapshots = [
         ah.AccountHolding(
             account_id=account_id,
             holding_date=eval_date,
@@ -290,8 +292,48 @@ def create_daily_snapshot(
             market_value=Decimal(str(row['mkt_val'])),
             weight_percentage=Decimal(str(row['weight']))
         ) for _, row in df.iterrows()
-    ])
+    ]
 
+    # 7. Record into database
+    ah.record_account_holdings(snapshots)
+    daily_return = ap.record_daily_performance(account_id=account_id, eval_date=eval_date, cash_balance=Decimal(eod_cash), snapshots=snapshots)
+
+    return daily_return, snapshots
+
+
+def benchmark_comparison(account_id: int, fund_id: int, eval_date: date, daily_return: Decimal, snapshots: List[ah.AccountHolding]):
+    fund_data = fund.fetch_fund(fund_id) # Using your existing fetch_fund
+    
+    if not fund_data or not fund_data.benchmarks:
+        return
+
+    for symbol in fund_data.benchmarks:
+        # Get Benchmark Prices
+        today_bench = bv.fetch_benchmark_price(symbol, eval_date)
+        prev_bench = bv.fetch_latest_benchmark_price_before(symbol, eval_date)
+
+        if not today_bench or not prev_bench:
+            continue
+
+        # Calculate Benchmark Metrics
+        bench_return = (today_bench.price / prev_bench.price) - 1
+        alpha = daily_return - bench_return
+
+        # Calculate Indexed Growth ($1.00 starting value)
+        prev_strat_idx, prev_bench_idx = abc.fetch_previous_comparison_values(account_id, symbol, eval_date)
+        
+        new_strat_idx = (prev_strat_idx * (1 + daily_return)).quantize(Decimal('0.000001'))
+        new_bench_idx = (prev_bench_idx * (1 + bench_return)).quantize(Decimal('0.000001'))
+
+        # Save Comparison
+        abc.record_benchmark_comparison(abc.AccountBenchmarkComparison(
+            account_id=account_id,
+            benchmark_symbol=symbol,
+            performance_date=eval_date,
+            strategy_indexed_value=new_strat_idx,
+            benchmark_indexed_value=new_bench_idx,
+            daily_alpha=alpha.quantize(Decimal('0.000001'))
+        ))
 
 def run_backtest(account_id: int, fund_id: int, start_date: date, end_date: date):
     current_sim_date = start_date
@@ -312,6 +354,9 @@ def run_backtest(account_id: int, fund_id: int, start_date: date, end_date: date
         today_trades = execute_minimal_rebalance(account_id, len(fund_symbols), needs, current_sim_date)
 
         # 5. Create Today's Snapshot
-        create_daily_snapshot(account_id=account_id, eval_date=current_sim_date, previous_holdings=account_holdings, today_trades=today_trades)
+        daily_return, snapshots = create_daily_snapshot(account_id=account_id, eval_date=current_sim_date, previous_holdings=account_holdings, today_trades=today_trades)
         
+        # 6. Record Performance
+        benchmark_comparison(account_id, fund_id, current_sim_date, daily_return, snapshots)
+
         current_sim_date += timedelta(days=1)

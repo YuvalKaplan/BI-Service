@@ -77,7 +77,19 @@ def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: s
                 
 """
 The following is the SQL Function for get_best_ideas_by_ranking:
-SELECT
+CREATE OR REPLACE FUNCTION public.get_best_ideas_by_ranking(
+	p_ranking_level integer,
+	p_style_type text,
+	p_cap_type text)
+    RETURNS TABLE(symbol text, ranking integer, appearances bigint, max_delta double precision, source_etf_id integer, all_provider_ids integer[]) 
+    LANGUAGE 'sql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+
+	SELECT
 	    be.symbol::TEXT,
 	    be.ranking,
 	    COUNT(DISTINCT be.provider_etf_id) AS appearances,
@@ -107,14 +119,22 @@ SELECT
 	    ON be.symbol = best.symbol
 	   AND be.ranking = best.best_ranking
 	
-	WHERE t.style_type = p_style_type
-	  AND (
-	      CASE
-	          WHEN tv.market_cap >= 10000000000 THEN 'large'
-	          ELSE 'mid_small'
-	      END
-	  ) = p_cap_type
+	WHERE 
+      -- Style Filter: Match style OR ignore if 'blend'
+      (p_style_type = 'blend' OR t.style_type = p_style_type)
+      
+      AND 
+      
+      -- Cap Filter: Ignore if 'all_cap' OR match the market_cap logic
+      (p_cap_type = 'all_cap' OR (
+          CASE
+              WHEN tv.market_cap >= 10000000000 THEN 'large'
+              ELSE 'mid_small'
+          END
+      ) = p_cap_type)
 	
 	GROUP BY be.symbol, be.ranking
 	ORDER BY be.ranking, appearances DESC, max_delta DESC;
+
+$BODY$;
 """

@@ -4,7 +4,6 @@ from psycopg.rows import class_row
 from dataclasses import dataclass
 from modules.core.db import db_pool_instance_bt
 
-
 @dataclass
 class CategorizeEtf:
     id: int | None
