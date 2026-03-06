@@ -1,6 +1,6 @@
 import log
 from bt.object import provider, provider_etf
-from modules.calc.best_ideas import find_best_ideas
+from bt.calc.best_ideas import find_best_ideas
 from bt.object.provider_etf_holding import fetch_holding_dates_available_past_week, fetch_valid_holdings_by_provider_etf_id
 from bt.object.ticker_value import fetch_price_dates_available_past_week, fetch_tickers_by_symbols_on_date
 from bt.object import best_idea

@@ -5,13 +5,29 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 import pandas as pd
 from bt.object import fund, fund_holding
-from bt.object import account_holding as ah, account_cash_ledger as acl, account_trade as at, account_performance as ap, account_benchmark_comparison as abc
+from bt.object import account, account_holding as ah, account_cash_ledger as acl, account_trade as at, account_performance as ap, account_benchmark_comparison as abc
 from bt.object import benchmark_value as bv
 from bt.object import interest_config, ticker_value, ticker_dividend_history
+from bt.actions import stock_downloader, best_ideas_generator, funds_update
 
-def best_ideas_to_funds():
-    print("This will do what we already know how to do...")
-
+def best_ideas_to_fund_strategies(sim_date: date):
+    try:
+        total_updated, missing_data = stock_downloader.run()
+    except Exception as e:
+        print(f"Failed on download stock data (price and market cap) with error:\n{e}\n\n")
+        raise e
+    
+    try:
+        etfs_processed, generated_etfs, problems = best_ideas_generator.run()
+    except Exception as e:
+        print(f"Failed on best ideas processing with error:\n{e}\n\n")
+        raise e
+    
+    try:
+        results = funds_update.run()
+    except Exception as e:
+        print(f"Failed on fund update with error:\n{e}\n\n")
+        raise e
 
 def process_daily_cash_accruals(account_id: int, sim_date: date):
     # 1. Interest
@@ -335,28 +351,36 @@ def benchmark_comparison(account_id: int, fund_id: int, eval_date: date, daily_r
             daily_alpha=alpha.quantize(Decimal('0.000001'))
         ))
 
-def run_backtest(account_id: int, fund_id: int, start_date: date, end_date: date):
+def update_account(account: account.Account, current_sim_date: date):
+
+    # Update Cash: Apply interest and record dividends 
+    process_daily_cash_accruals(account.id, current_sim_date)
+    
+    # Check for changes in target fund_holdings
+    fund_symbols, account_holdings, needs = identify_rebalance_needs(account.id, account.strategy_fund_id, current_sim_date)
+    
+    # Execute the changes and rebalance
+    today_trades = execute_minimal_rebalance(account.id, len(fund_symbols), needs, current_sim_date)
+
+    # Create Today's Snapshot
+    daily_return, snapshots = create_daily_snapshot(account_id=account.id, eval_date=current_sim_date, previous_holdings=account_holdings, today_trades=today_trades)
+    
+    # Record Performance
+    benchmark_comparison(account.id, account.strategy_fund_id, current_sim_date, daily_return, snapshots)
+
+
+def run_for_all_accounts(start_date: date, end_date: date):
     current_sim_date = start_date
+    accounts = account.fetch_all()
 
     while current_sim_date <= end_date:
         print(f"Processing: {current_sim_date}")
 
-        # 1. Identify the lateset best ideas and construct todays target fund holdings.
-        best_ideas_to_funds()
-        
-        # 2. Update Cash: Apply interest and record dividends 
-        process_daily_cash_accruals(account_id, current_sim_date)
-        
-        # 3. Check for changes in target fund_holdings
-        fund_symbols, account_holdings, needs = identify_rebalance_needs(account_id, fund_id, current_sim_date)
-        
-        # 4. Execute the changes and rebalance
-        today_trades = execute_minimal_rebalance(account_id, len(fund_symbols), needs, current_sim_date)
+        if 1 <= current_sim_date.weekday() <= 5: # Tuesday through Saturday
+            # Identify the lateset best ideas and construct todays target fund holdings.
+            best_ideas_to_fund_strategies(current_sim_date)
 
-        # 5. Create Today's Snapshot
-        daily_return, snapshots = create_daily_snapshot(account_id=account_id, eval_date=current_sim_date, previous_holdings=account_holdings, today_trades=today_trades)
-        
-        # 6. Record Performance
-        benchmark_comparison(account_id, fund_id, current_sim_date, daily_return, snapshots)
+        for current_account in accounts:
+            update_account(current_account, current_sim_date)
 
         current_sim_date += timedelta(days=1)
