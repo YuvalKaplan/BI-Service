@@ -2,11 +2,11 @@ import log
 from datetime import date
 from typing import List
 from dataclasses import dataclass
-from bt.object.best_idea import fetch_best_ideas_by_ranking
-from bt.object.fund import Fund, fetch_all
-from bt.object.fund_holding import FundHolding, fetch_funds_holdings, insert_fund_holding
-from bt.object.fund_holding_change import FundHoldingChange, insert_fund_changes
-from bt.object.ticker import fetch_by_symbols
+from modules.bt.object.best_idea import fetch_best_ideas_by_ranking
+from modules.bt.object.fund import Fund, getStrategyFromJson, fetch_all
+from modules.bt.object.fund_holding import FundHolding, fetch_funds_holdings, insert_fund_holding
+from modules.bt.object.fund_holding_change import FundHoldingChange, insert_fund_changes
+from modules.bt.object.ticker import fetch_by_symbols
 
 
 HOLDINGS_IN_FUND = 40
@@ -46,20 +46,19 @@ def results_to_string(results: List[FundChangesResult]):
 
     return aggregator
 
-def run() -> List[FundChangesResult]:
+def run(today: date) -> List[FundChangesResult]:
     try:
         funds = fetch_all()
 
         log.record_status(f"Running Fund Update - will proccess {len(funds)} funds.")
-        
-        today = date.today()
-        
+               
         results: List[FundChangesResult] = []
         for f in funds:
+            strategy = getStrategyFromJson(f.strategy)
             holdings_changed: list[FundHoldingChange] = [] 
             todays_holdings: List[FundHolding] = []
-            fresh_ideas = fetch_best_ideas_by_ranking(ranking_level=5, style_type=f.style_type, cap_type=f.cap_type)
-            yesterday_holdings = fetch_funds_holdings(f.id)
+            fresh_ideas = fetch_best_ideas_by_ranking(ranking_level=5, style_type=strategy.style.name, cap_type=strategy.cap.name)
+            yesterday_holdings = fetch_funds_holdings(f.id, today)
             
             # Find if we need to replace holdings - have droped 2 rankings
             for yh in yesterday_holdings:

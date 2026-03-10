@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, List
 from psycopg.errors import Error
 from psycopg.rows import dict_row
 from modules.core.db import db_pool_instance_bt
@@ -34,3 +34,41 @@ def fetch_dividends_for_holdings(account_id: int, eval_date: date):
                 return cur.fetchall()
     except Error as e:
             raise Exception(f"Error getting dividends of holdings: {e}")
+    
+def insert_dividends_bulk(items: List[TickerDividendHistory]):
+    if not items:
+        return
+    
+    symbol = items[0].symbol
+
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+
+                delete_sql = """
+                    DELETE FROM ticker_dividend_history
+                    WHERE symbol = %s;
+                """
+                cur.execute(delete_sql, (symbol,))
+
+                insert_sql = """
+                    INSERT INTO ticker_dividend_history (
+                        symbol,
+                        ex_date,
+                        amount_per_share
+                    )
+                    VALUES (%s, %s, %s);
+                """
+
+                insert_values = [
+                    (i.symbol, i.ex_date, i.amount_per_share)
+                    for i in items
+                ]
+
+                cur.executemany(insert_sql, insert_values)
+
+            conn.commit()
+
+    except Error as e:
+        raise Exception(f"Error replacing dividend for ticker symbol: {e}")
+    

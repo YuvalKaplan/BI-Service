@@ -115,3 +115,19 @@ def update_invalid(symbol: str, reason: str):
 
     except Error as e:
         raise Exception(f"Error updating the Ticker invalid reason into the DB: {e}")
+
+def upsert(item: Ticker):
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                query = """
+                    INSERT INTO ticker (symbol, isin, cik, name, industry, sector)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (symbol)
+                    DO UPDATE
+                    SET isin = EXCLUDED.isin, cik = EXCLUDED.cik, name = EXCLUDED.name, industry = EXCLUDED.industry, sector = EXCLUDED.sector;
+                """
+                cur.execute(query, (item.symbol, item.isin, item.cik, item.name, item.industry, item.sector))
+    
+    except Error as e:
+        raise Exception(f"Error upserting ticker into the DB: {e}")

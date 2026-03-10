@@ -1,9 +1,10 @@
 import log
-from bt.object import provider, provider_etf
-from bt.calc.best_ideas import find_best_ideas
-from bt.object.provider_etf_holding import fetch_holding_dates_available_past_week, fetch_valid_holdings_by_provider_etf_id
-from bt.object.ticker_value import fetch_price_dates_available_past_week, fetch_tickers_by_symbols_on_date
-from bt.object import best_idea
+from datetime import date
+from modules.bt.object import provider, provider_etf
+from modules.bt.calc.best_ideas import find_best_ideas
+from modules.bt.object.provider_etf_holding import fetch_holding_dates_available_past_week, fetch_valid_holdings_by_provider_etf_id
+from modules.bt.object.ticker_value import fetch_price_dates_available_past_week, fetch_tickers_by_symbols_on_date
+from modules.bt.object import best_idea
 
 MIN_HOLDINGS = 10
 MAX_DATE_DIFF_DAYS = 5
@@ -16,7 +17,7 @@ def record_problem(provider: provider.Provider, etf: provider_etf.ProviderEtf, e
     log.record_status(record)
     problem_etfs.append(record)
 
-def run() -> tuple[int, int, list[str]]:
+def run(todey: date) -> tuple[int, int, list[str]]:
     try:
         providers = provider.fetch_active_providers()
 
@@ -25,7 +26,7 @@ def run() -> tuple[int, int, list[str]]:
         total_etfs = 0
         generated_etfs = 0
         problem_etfs: list[str] = []
-        available_price_dates = fetch_price_dates_available_past_week()
+        available_price_dates = fetch_price_dates_available_past_week(todey)
         for p in providers:
             pe_list = provider_etf.fetch_by_provider_id(p.id)
             total_etfs += len(pe_list)

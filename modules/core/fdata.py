@@ -1,12 +1,15 @@
 import log
 import os
 import time
+from datetime import date
 from collections import deque
 from threading import Lock
 from urllib.request import urlopen
 import json
 
-API_URL = 'https://financialmodelingprep.com/stable/'
+FMP_API_URL = 'https://financialmodelingprep.com/stable/'
+FINNHUB_API_URL = 'https://finnhub.io/api/v1/'
+
 
 CALLS_PER_MINUTE = 200
 WINDOW_SECONDS = 60.0
@@ -52,7 +55,7 @@ def get_jsonparsed_data(url) -> dict:
 def get_stock_profile(symbol: str) -> dict[str,str] | str:
     try:
         throttle_api_calls()
-        url = (f"{API_URL}/profile?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATE_API_KEY')}")
+        url = (f"{FMP_API_URL}/profile?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
         array = get_jsonparsed_data(url)
         
         if not isinstance(array, list) or len(array) == 0:
@@ -66,4 +69,75 @@ def get_stock_profile(symbol: str) -> dict[str,str] | str:
         message = f"Failed to get stock profile for {symbol}. Response from service provider: {e}"
         log.record_error(message)
         return message
+    
+def get_stock_historic_prices(symbol: str, start: date, end: date) -> list[dict[str,str]] | str:
+    try:
+        throttle_api_calls()
+        url = (f"{FMP_API_URL}/historical-price-eod/light?symbol={symbol}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        array = get_jsonparsed_data(url)
+        
+        if not isinstance(array, list) or len(array) == 0:
+            message = f"Invalid stock price on date response for symbol '{symbol}': empty result"
+            log.record_notice(message) 
+            return message
+        
+        return array
+    
+    except Exception as e:
+        message = f"Failed to get stock price on date for {symbol}. Response from service provider: {e}"
+        log.record_error(message)
+        return message
 
+def get_stock_historic_dividend(symbol: str) -> list[dict[str,str]] | str:
+    try:
+        throttle_api_calls()
+        url = (f"{FMP_API_URL}/dividends?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        array = get_jsonparsed_data(url)
+        
+        if not isinstance(array, list):
+            message = f"Invalid historic dividends response for symbol '{symbol}': empty result"
+            log.record_notice(message) 
+            return message
+        
+        return array
+    
+    except Exception as e:
+        message = f"Failed to get historic dividends for {symbol}. Response from service provider: {e}"
+        log.record_error(message)
+        return message
+    
+def get_stock_historic_market_cap(symbol: str, start: date, end: date) -> list[dict[str,str]] | str:
+    try:
+        throttle_api_calls()
+        url = (f"{FMP_API_URL}/historical-market-capitalization?symbol={symbol}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        array = get_jsonparsed_data(url)
+        
+        if not isinstance(array, list) or len(array) == 0:
+            message = f"Invalid historic market cap price response for symbol '{symbol}': empty result"
+            log.record_notice(message) 
+            return message
+        
+        return array
+    
+    except Exception as e:
+        message = f"Failed to get historic market cap price for {symbol}. Response from service provider: {e}"
+        log.record_error(message)
+        return message
+
+def get_etf_holdings(symbol: str, on_date: date) -> list[dict[str,str]] | str:
+    try:
+        throttle_api_calls()
+        url = (f"{FINNHUB_API_URL}/etf/holdings?symbol={symbol}&date={on_date.strftime("%Y-%m-%d")}&token={os.getenv('SECRET_HOLDINGS_DATA_API_KEY')}")
+        array = get_jsonparsed_data(url)
+        
+        if not isinstance(array, list) or len(array) == 0:
+            message = f"Invalid profile response for symbol '{symbol}': empty result"
+            log.record_notice(message) 
+            return message
+        
+        return array[0]['holdings']
+    
+    except Exception as e:
+        message = f"Failed to get ETF holdings for {symbol} on {on_date.strftime("%Y-%m-%d")}. Response from service provider: {e}"
+        log.record_error(message)
+        return message

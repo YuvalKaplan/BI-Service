@@ -4,8 +4,8 @@ from decimal import Decimal
 from typing import Optional, List
 from psycopg.errors import Error
 from modules.core.db import db_pool_instance_bt
-from account_holding import AccountHolding
-from bt.object import account_cash_ledger as acl
+from modules.bt.object import account_holding
+from modules.bt.object import account_cash_ledger as acl
 
 @dataclass
 class AccountPerformance:
@@ -29,7 +29,7 @@ def fetch_previous_tpv(account_id: int, prev_date: date) -> Decimal:
         raise Exception(f"Error fetching previous TPV: {e}")
 
 
-def record_daily_performance(account_id: int, eval_date: date, cash_balance: Decimal, snapshots: List[AccountHolding]) -> Decimal:
+def record_daily_performance(account_id: int, eval_date: date, cash_balance: Decimal, snapshots: List[account_holding.AccountHolding]) -> Decimal:
     try:
         # 1. Calculate Today's Totals
         stock_value = sum(s.market_value for s in snapshots)

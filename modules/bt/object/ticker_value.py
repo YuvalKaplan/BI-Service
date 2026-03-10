@@ -23,7 +23,7 @@ def ticker_values_to_df(values: list[TickerValue]) -> pd.DataFrame:
     )
 
 
-def fetch_price_dates_available_past_week() -> list[date]:
+def fetch_price_dates_available_past_week(end_date: date) -> list[date]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
@@ -31,14 +31,27 @@ def fetch_price_dates_available_past_week() -> list[date]:
                     SELECT DISTINCT (value_date::date)
                         value_date
                     FROM ticker_value
-                    WHERE value_date > NOW() - INTERVAL '1 week'
+                    WHERE (value_date > %s - INTERVAL '1 week') AND (value_date <= %s)
                     ORDER BY value_date::date;
                 """
-                cur.execute(query)
+                cur.execute(query, (end_date,))
                 return [row[0] for row in cur.fetchall()]
     except Error as e:
         raise Exception(f"Error retrieving the list of dates available in the past week: {e}")
 
+def fetch_tickers_availability_dates(symbol: str) -> List[dict]:
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                query = """
+                    SELECT value_date
+                    FROM ticker_value
+                    WHERE symbol = %s;
+                """
+                cur.execute(query, (symbol,))
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error retrieving dates availability for a ticker symbol TickerValue data: {e}")
     
 def fetch_tickers_by_symbols_on_date(symbols: List[str], value_date: date) -> List[TickerValue]:
     try:
@@ -75,3 +88,36 @@ def upsert(item: TickerValue):
     except Error as e:
         raise Exception(f"Error inserting the Batch item into the DB: {e}")
 
+def upsert_bulk(items: List[TickerValue]):
+    if not items:
+        return
+
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+
+                insert_sql = """
+                    INSERT INTO ticker_value (
+                        symbol,
+                        value_date,
+                        stock_price,
+                        market_cap
+                    )
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (symbol, value_date)
+                    DO UPDATE SET
+                        stock_price = EXCLUDED.stock_price,
+                        market_cap = EXCLUDED.market_cap;
+                """
+
+                insert_values = [
+                    (i.symbol, i.value_date, i.stock_price, i.market_cap)
+                    for i in items
+                ]
+
+                cur.executemany(insert_sql, insert_values)
+
+            conn.commit()
+
+    except Error as e:
+        raise Exception(f"Error inserting ticker values in DB: {e}")

@@ -1,6 +1,6 @@
 import pandas as pd
-from bt.object.provider_etf_holding import ProviderEtfHolding
-from bt.object.ticker_value import TickerValue
+from modules.bt.object.provider_etf_holding import ProviderEtfHolding
+from modules.bt.object.ticker_value import TickerValue
 
 BASE_INDEX_LEVEL = 100.0
 

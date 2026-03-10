@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass

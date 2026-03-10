@@ -24,3 +24,44 @@ def fetch_funds_holdings(fund_id: int, eval_date: date):
         return items
     except Error as e:
         raise Exception(f"Error fetching the Fund Holdings from the DB: {e}")
+
+
+def insert_fund_holding(items: List[FundHolding]):
+    if not items:
+        return
+    
+    fund_id = items[0].fund_id
+    holding_date = items[0].holding_date
+
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+
+                delete_sql = """
+                    DELETE FROM fund_holding
+                    WHERE fund_id = %s
+                      AND holding_date = %s;
+                """
+                cur.execute(delete_sql, (fund_id, holding_date))
+
+                insert_sql = """
+                    INSERT INTO fund_holding (
+                        fund_id,
+                        symbol,
+                        holding_date,
+                        ranking
+                    )
+                    VALUES (%s, %s, %s, %s);
+                """
+
+                insert_values = [
+                    (i.fund_id, i.symbol, i.holding_date, i.ranking)
+                    for i in items
+                ]
+
+                cur.executemany(insert_sql, insert_values)
+
+            conn.commit()
+
+    except Error as e:
+        raise Exception(f"Error replacing fund holdings in DB: {e}")
