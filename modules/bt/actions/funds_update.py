@@ -10,6 +10,7 @@ from modules.bt.object.ticker import fetch_by_symbols
 
 
 HOLDINGS_IN_FUND = 40
+RANKING_LEVEL = 3
 GAP_TO_SELL = 2
 
 @dataclass
@@ -55,12 +56,22 @@ def run(today: date) -> List[FundChangesResult]:
         results: List[FundChangesResult] = []
         for f in funds:
             strategy = getStrategyFromJson(f.strategy)
-            holdings_changed: list[FundHoldingChange] = [] 
-            todays_holdings: List[FundHolding] = []
-            fresh_ideas = fetch_best_ideas_by_ranking(ranking_level=5, style_type=strategy.style.name, cap_type=strategy.cap.name)
+        
+            if (strategy.style.name == "blend") and (strategy.style.value is not None) and (strategy.style.growth is not None):
+                fresh_ideas_value = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type="value", cap_type=strategy.cap.name)
+                fresh_ideas_growth = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type="growth", cap_type=strategy.cap.name)
+                growth_count = min(len(fresh_ideas_growth), round(strategy.holdings * strategy.style.growth))
+                value_count = min(len(fresh_ideas_value), strategy.holdings - growth_count)
+                fresh_ideas = (fresh_ideas_growth[:growth_count] + fresh_ideas_value[:value_count])
+            else:
+                fresh_ideas = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type=strategy.style.name, cap_type=strategy.cap.name)
+            
             yesterday_holdings = fetch_funds_holdings(f.id, today)
             
             # Find if we need to replace holdings - have droped 2 rankings
+            holdings_changed: list[FundHoldingChange] = [] 
+            todays_holdings: List[FundHolding] = []
+            
             for yh in yesterday_holdings:
                 latest_state = next((x for x in fresh_ideas if x.symbol == yh.symbol), None)
                 if latest_state is None or latest_state.ranking - yh.ranking >= GAP_TO_SELL:
@@ -96,6 +107,7 @@ def run(today: date) -> List[FundChangesResult]:
             results.append(FundChangesResult(fund=f, changes=holdings_changed))
             log.record_status(f"Completed processing fund {f.name}")
        
+        log.record_status(f"{results_to_string(results)}")
         log.record_status(f"Finished Fund Update run.\n")
 
         return results

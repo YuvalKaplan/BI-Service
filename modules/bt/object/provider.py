@@ -40,6 +40,24 @@ def fetch_by_ids(ids: list[int]):
         return items
     except Error as e:
         raise Exception(f"Error fetching the Provider list page from the DB: {e}")
+    
+def fetch_by_etf_id(etf_id: int) -> Provider:
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Provider)) as cur:
+                query_str = """
+                    SELECT DISTINCT p.* FROM provider AS p
+                    INNER JOIN provider_etf AS pe ON p.id = pe.provider_id 
+                    WHERE pe.id = %s
+                    ;
+                """
+                cur.execute(query_str, (etf_id,))
+                item = cur.fetchone()
+            if item is None:
+                raise Exception(f"Provider not associated to provider ETF ID {etf_id}")
+        return item
+    except Error as e:
+        raise Exception(f"Error fetching the Provider for associated provider ETF ID from the DB: {e}")
 
 def update_domain(item: Provider):
     try:

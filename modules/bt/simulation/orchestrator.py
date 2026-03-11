@@ -7,8 +7,8 @@ from datetime import date, timedelta
 from modules.bt.object import fund, fund_holding
 from modules.bt.object import account, account_holding as ah, account_cash_ledger as acl, account_trade as at, account_performance as ap, account_benchmark_comparison as abc
 from modules.bt.object import benchmark_value as bv
-from modules.bt.object import interest_config, ticker_value, ticker_dividend_history
-from modules.bt.actions import downloader, best_ideas_generator, funds_update
+from modules.bt.object import interest_config, ticker, ticker_value, ticker_dividend_history
+from modules.bt.actions import stocks_download, best_ideas_generator, funds_update
 
 # def process_daily_cash_accruals(account_id: int, sim_date: date):
 #     # 1. Interest
@@ -354,29 +354,40 @@ from modules.bt.actions import downloader, best_ideas_generator, funds_update
 #     # Record Performance
 #     benchmark_comparison(account.id, account.strategy_fund_id, current_sim_date, daily_return, snapshots)
 
-def generate_best_ideas_fund_strategies(sim_date: date):
-    try:
-        etfs_processed, generated_etfs, problems = best_ideas_generator.run(sim_date)
-        results = funds_update.run(sim_date)
-    except Exception as e:
-        print(f"Failed to complete building fund strategy:\n{e}\n\n")
-        raise e
-    
+
+def distinct_provider_etfs(accounts) -> list[int]:
+    distinct_etfs = set()
+    for current_account in accounts:
+        f = fund.fetch_fund(current_account.strategy_fund_id)
+        if f is None:
+            raise Exception("Missing strategy for fund")
+
+        strategy = fund.getStrategyFromJson(f.strategy)
+        strategy_etfs = strategy.provider_etfs
+        if strategy_etfs:
+            distinct_etfs.update(strategy_etfs)
+
+    return list(distinct_etfs)
+
 def run(start_date: date, end_date: date):
     current_sim_date = start_date
     accounts = account.fetch_all()
+    etf_ids = distinct_provider_etfs(accounts)
 
-    downloader.run(accounts, start_date, end_date)
+    # stocks_download.run(etf_ids, start_date - timedelta(days=15), end_date + timedelta(days=15))
+    ticker.mark_categories()
 
-    # while current_sim_date <= end_date:
-    #     print(f"Processing: {current_sim_date}")
+    while current_sim_date <= end_date:
+        
+        if 1 <= current_sim_date.weekday() <= 5: # Tuesday through Saturday
+            print(f"Processing: {current_sim_date.strftime("%A, %d-%m-%Y")}")
 
-    #     if 1 <= current_sim_date.weekday() <= 5: # Tuesday through Saturday
-    #         # Identify the lateset best ideas and construct todays target fund holdings.
-    #         generate_best_ideas_fund_strategies(current_sim_date)
+            # Identify the lateset best ideas and construct todays target fund holdings.
+            etfs_processed, generated_etfs, problems = best_ideas_generator.run(etf_ids, current_sim_date)
+            results = funds_update.run(current_sim_date)
 
     #     for current_account in accounts:
     #         update_account(current_account, current_sim_date)
 
-    #     current_sim_date += timedelta(days=1)
+        current_sim_date += timedelta(days=1)
 

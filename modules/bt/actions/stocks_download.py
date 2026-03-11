@@ -23,31 +23,25 @@ def weekday_count(start: date, end: date) -> int:
             count += 1
     return count
 
-def run(accounts: list[account.Account], start_date: date, end_date: date) -> tuple[int, int]:
+def run(etf_ids: list[int], start_date: date, end_date: date) -> tuple[int, int, int]:
     try:
-        distinct_etfs = set()
-        for current_account in accounts:
-            f = fund.fetch_fund(current_account.strategy_fund_id)
-            if f is None:
-                raise Exception("Missing strategy for fund")
-
-            strategy = fund.getStrategyFromJson(f.strategy)
-            strategy_etfs = strategy.provider_etfs
-            if strategy_etfs:
-                distinct_etfs.update(strategy_etfs)
-
-        distinct_etfs_list: list[int] = list(distinct_etfs)
-
-        symbols = fetch_tickers_for_etfs(distinct_etfs_list)
+        symbols = fetch_tickers_for_etfs(etf_ids)
         missing_symbols = []
+        existing = 0
         start = time.monotonic()
 
         print(f"Starting Stock Info Download for {len(symbols)} ticker symbols.")
         
         for s in symbols:
+            t = ticker.fetch_by_symbol(s)
+            if t is not None and t.invalid:
+                missing_symbols.append(s)
+                continue
+
             # See if already loaded
             avialable = ticker_value.fetch_tickers_availability_dates(s)
             if len(avialable) != 0:
+                existing += 1
                 continue
 
             sd = get_stock_profile(s)
@@ -130,10 +124,15 @@ def run(accounts: list[account.Account], start_date: date, end_date: date) -> tu
             print(f"Downloaded and saved {s}")
 
         log.record_status(f"Run time (seconds): {time.monotonic() - start}")
-        log.record_status(f"Missing symbols ({len(missing_symbols)}): {', '.join(missing_symbols)}")
+        if existing:
+            log.record_status(f"Existing from previous runs: {existing}")
+        
+        if missing_symbols:
+            log.record_status(f"Missing symbols ({len(missing_symbols)}): {', '.join(missing_symbols)}")
+
         log.record_status(f"Finished Stock Info Download on {len(symbols)} stocks.")
 
-        return len(symbols), len(missing_symbols)
+        return len(symbols), existing, len(missing_symbols)
 
     except Exception as e:
         log.record_error(f"Error in downloading stock info run: {e}")

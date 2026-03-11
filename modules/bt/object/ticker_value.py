@@ -34,7 +34,7 @@ def fetch_price_dates_available_past_week(end_date: date) -> list[date]:
                     WHERE (value_date > %s - INTERVAL '1 week') AND (value_date <= %s)
                     ORDER BY value_date::date;
                 """
-                cur.execute(query, (end_date,))
+                cur.execute(query, (end_date,end_date,))
                 return [row[0] for row in cur.fetchall()]
     except Error as e:
         raise Exception(f"Error retrieving the list of dates available in the past week: {e}")

@@ -24,11 +24,13 @@ class ProviderEtf:
     url: str | None
     file_format: str | None
 
-def fetch_by_id(id: int):
+def fetch_by_id(id: int) -> ProviderEtf:
     with db_pool_instance_bt.get_connection() as conn:
         with conn.cursor(row_factory=class_row(ProviderEtf)) as cur:
             cur.execute('SELECT * FROM provider_etf WHERE id = %s;', (id,))
             item = cur.fetchone()
+        if item is None:
+                raise Exception(f"Provider ETF not found for ID {id}")
     return item
 
 def fetch_by_provider_id(provider_id: int):

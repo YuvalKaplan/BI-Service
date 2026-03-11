@@ -110,11 +110,17 @@ def update_invalid(symbol: str, reason: str):
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
-                insert_query = "UPDATE ticker SET invalid =%s WHERE symbol = %s;"
-                cur.execute(insert_query, (reason, symbol))
-
+                query = """
+                    INSERT INTO ticker (symbol, invalid)
+                    VALUES (%s, %s)
+                    ON CONFLICT (symbol)
+                    DO UPDATE
+                    SET invalid = EXCLUDED.invalid;
+                """
+                cur.execute(query, (symbol, reason))
+    
     except Error as e:
-        raise Exception(f"Error updating the Ticker invalid reason into the DB: {e}")
+        raise Exception(f"Error updating ticker invalid reason into the DB: {e}")
 
 def upsert(item: Ticker):
     try:
@@ -131,3 +137,13 @@ def upsert(item: Ticker):
     
     except Error as e:
         raise Exception(f"Error upserting ticker into the DB: {e}")
+
+def mark_categories():
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT public.fill_ticker_style_and_cap()')
+        return
+    except Error as e:
+        raise Exception(f"Error marking the categories for the tickers in the DB: {e}")
+              
