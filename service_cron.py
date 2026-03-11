@@ -57,30 +57,30 @@ if __name__ == '__main__':
             message_actions += f"Stocks missing data: {missing_data}\n"
             message_actions += BREAKER_LINE
 
-        if 1 <= start_time.weekday() <= 5: # Tuesday through Saturday
-            try:
-                etfs_processed, generated_etfs, problems = best_ideas_generator.run()
-            except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on best ideas processing with error:\n{e}\n\n")
-                raise e
+        # if 1 <= start_time.weekday() <= 5: # Tuesday through Saturday
+        #     try:
+        #         etfs_processed, generated_etfs, problems = best_ideas_generator.run()
+        #     except Exception as e:
+        #         sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on best ideas processing with error:\n{e}\n\n")
+        #         raise e
             
-            message_actions += f"Total ETFs available: {etfs_processed}\n"
-            message_actions += f"ETFS with best ideas: {generated_etfs}\n"
-            message_actions += f"ETFS with problems: {len(problems)}\n" + SEPERATOR_LINE
-            for p in problems:
-                message_actions += f"{p}\n"
-            message_actions += BREAKER_LINE
+        #     message_actions += f"Total ETFs available: {etfs_processed}\n"
+        #     message_actions += f"ETFS with best ideas: {generated_etfs}\n"
+        #     message_actions += f"ETFS with problems: {len(problems)}\n" + SEPERATOR_LINE
+        #     for p in problems:
+        #         message_actions += f"{p}\n"
+        #     message_actions += BREAKER_LINE
 
-        if 1 <= start_time.weekday() <= 5: # Tuesday through Saturday
-            try:
-                results = funds_update.run()
-            except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on fund update with error:\n{e}\n\n")
-                raise e
+        # if 1 <= start_time.weekday() <= 5: # Tuesday through Saturday
+        #     try:
+        #         results = funds_update.run()
+        #     except Exception as e:
+        #         sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on fund update with error:\n{e}\n\n")
+        #         raise e
 
-            message_actions += f"Fund Updates\n" + SEPERATOR_LINE
-            message_actions += f"{funds_update.results_to_string(results)}\n"
-            message_actions += BREAKER_LINE
+        #     message_actions += f"Fund Updates\n" + SEPERATOR_LINE
+        #     message_actions += f"{funds_update.results_to_string(results)}\n"
+        #     message_actions += BREAKER_LINE
 
         end = datetime.now(timezone.utc)
         message_full = f"Activated at {start_time.strftime("%H:%M:%S")}\nCompleted at {end.strftime("%H:%M:%S")}.\n\n"
