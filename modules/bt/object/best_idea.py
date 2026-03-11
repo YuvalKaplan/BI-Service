@@ -65,11 +65,11 @@ class BestIdeaRanked:
     source_etf_id: int
     all_provider_ids: List[int]
 
-def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: str) -> List[BestIdeaRanked]:
+def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: str, as_of_date: date, provider_etf_ids: list[int]) -> List[BestIdeaRanked]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(BestIdeaRanked)) as cur:
-                cur.execute('SELECT * FROM get_best_ideas_by_ranking(%s, %s, %s);', (ranking_level, style_type, cap_type,))
+                cur.execute('SELECT * FROM get_best_ideas_by_ranking(%s, %s, %s, %s, %s);', (ranking_level, style_type, cap_type, as_of_date, provider_etf_ids))
                 items = cur.fetchall()
         return items
     except Error as e:
@@ -80,7 +80,9 @@ The following is the SQL Function for get_best_ideas_by_ranking:
 CREATE OR REPLACE FUNCTION public.get_best_ideas_by_ranking(
 	p_ranking_level integer,
 	p_style_type text,
-	p_cap_type text)
+	p_cap_type text,
+	p_as_of_date date,
+	p_provider_etf_ids integer[])
     RETURNS TABLE(symbol text, ranking integer, appearances bigint, max_delta double precision, source_etf_id integer, all_provider_ids integer[]) 
     LANGUAGE 'sql'
     COST 100
@@ -103,7 +105,8 @@ AS $BODY$
 	JOIN (
 	    SELECT symbol, MAX(value_date) AS max_date
 	    FROM public.ticker_value
-	    WHERE value_date >= CURRENT_DATE - INTERVAL '7 days'
+	    WHERE value_date <= p_as_of_date
+		  AND value_date >= p_as_of_date - INTERVAL '7 days'
 	    GROUP BY symbol
 	) latest_tv
 	    ON tv.symbol = latest_tv.symbol
@@ -120,11 +123,14 @@ AS $BODY$
 	   AND be.ranking = best.best_ranking
 	
 	WHERE 
+      -- restrict ETFs
+	  (cardinality(p_provider_etf_ids) = 0 OR be.provider_etf_id = ANY(p_provider_etf_ids))
+
+	  AND
       -- Style Filter: Match style OR ignore if 'blend'
       (p_style_type = 'blend' OR t.style_type = p_style_type)
       
       AND 
-      
       -- Cap Filter: Ignore if 'all_cap' OR match the market_cap logic
       (p_cap_type = 'all_cap' OR (
           CASE

@@ -56,15 +56,16 @@ def run(today: date) -> List[FundChangesResult]:
         results: List[FundChangesResult] = []
         for f in funds:
             strategy = getStrategyFromJson(f.strategy)
+            provider_etfs = strategy.provider_etfs or []
         
             if (strategy.style.name == "blend") and (strategy.style.value is not None) and (strategy.style.growth is not None):
-                fresh_ideas_value = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type="value", cap_type=strategy.cap.name)
-                fresh_ideas_growth = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type="growth", cap_type=strategy.cap.name)
-                growth_count = min(len(fresh_ideas_growth), round(strategy.holdings * strategy.style.growth))
+                fresh_ideas_value = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type="value", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
+                fresh_ideas_growth = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type="growth", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
+                growth_count = min(len(fresh_ideas_growth), round(strategy.holdings * strategy.style.growth/100))
                 value_count = min(len(fresh_ideas_value), strategy.holdings - growth_count)
                 fresh_ideas = (fresh_ideas_growth[:growth_count] + fresh_ideas_value[:value_count])
             else:
-                fresh_ideas = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type=strategy.style.name, cap_type=strategy.cap.name)
+                fresh_ideas = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type=strategy.style.name, cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
             
             yesterday_holdings = fetch_funds_holdings(f.id, today)
             

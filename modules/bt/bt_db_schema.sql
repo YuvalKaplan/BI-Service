@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict rYn1cr6QKQ8ARYsOCzLOPCYpBy7wZFlxP8OoAehofoEZJdT0nv5KRIH2eg7mqIt
+\restrict FILeny5wAYRvodA4oSlg1OWMXJvWSWGsK0UkUr5OcTWQrLlYDyc9NHqGF7DEfXl
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 18.0
 
--- Started on 2026-03-11 13:09:26
+-- Started on 2026-03-11 19:00:30
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -87,11 +87,11 @@ $$;
 ALTER FUNCTION public.fill_ticker_style_and_cap() OWNER TO admin;
 
 --
--- TOC entry 261 (class 1255 OID 249793)
--- Name: get_best_ideas_by_ranking(integer, text, text); Type: FUNCTION; Schema: public; Owner: admin
+-- TOC entry 250 (class 1255 OID 250218)
+-- Name: get_best_ideas_by_ranking(integer, text, text, date, integer[]); Type: FUNCTION; Schema: public; Owner: admin
 --
 
-CREATE FUNCTION public.get_best_ideas_by_ranking(p_ranking_level integer, p_style_type text, p_cap_type text) RETURNS TABLE(symbol text, ranking integer, appearances bigint, max_delta double precision, source_etf_id integer, all_provider_ids integer[])
+CREATE FUNCTION public.get_best_ideas_by_ranking(p_ranking_level integer, p_style_type text, p_cap_type text, p_as_of_date date, p_provider_etf_ids integer[]) RETURNS TABLE(symbol text, ranking integer, appearances bigint, max_delta double precision, source_etf_id integer, all_provider_ids integer[])
     LANGUAGE sql
     AS $$
 
@@ -109,7 +109,8 @@ CREATE FUNCTION public.get_best_ideas_by_ranking(p_ranking_level integer, p_styl
 	JOIN (
 	    SELECT symbol, MAX(value_date) AS max_date
 	    FROM public.ticker_value
-	    WHERE value_date >= CURRENT_DATE - INTERVAL '7 days'
+	    WHERE value_date <= p_as_of_date
+		  AND value_date >= p_as_of_date - INTERVAL '7 days'
 	    GROUP BY symbol
 	) latest_tv
 	    ON tv.symbol = latest_tv.symbol
@@ -126,11 +127,14 @@ CREATE FUNCTION public.get_best_ideas_by_ranking(p_ranking_level integer, p_styl
 	   AND be.ranking = best.best_ranking
 	
 	WHERE 
+      -- restrict ETFs
+	  (cardinality(p_provider_etf_ids) = 0 OR be.provider_etf_id = ANY(p_provider_etf_ids))
+
+	  AND
       -- Style Filter: Match style OR ignore if 'blend'
       (p_style_type = 'blend' OR t.style_type = p_style_type)
       
       AND 
-      
       -- Cap Filter: Ignore if 'all_cap' OR match the market_cap logic
       (p_cap_type = 'all_cap' OR (
           CASE
@@ -145,7 +149,7 @@ CREATE FUNCTION public.get_best_ideas_by_ranking(p_ranking_level integer, p_styl
 $$;
 
 
-ALTER FUNCTION public.get_best_ideas_by_ranking(p_ranking_level integer, p_style_type text, p_cap_type text) OWNER TO admin;
+ALTER FUNCTION public.get_best_ideas_by_ranking(p_ranking_level integer, p_style_type text, p_cap_type text, p_as_of_date date, p_provider_etf_ids integer[]) OWNER TO admin;
 
 SET default_tablespace = '';
 
@@ -1146,11 +1150,11 @@ ALTER TABLE ONLY public.ticker_dividend_history
     ADD CONSTRAINT ticker_dividend_history_symbol_fkey FOREIGN KEY (symbol) REFERENCES public.ticker(symbol);
 
 
--- Completed on 2026-03-11 13:09:26
+-- Completed on 2026-03-11 19:00:30
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict rYn1cr6QKQ8ARYsOCzLOPCYpBy7wZFlxP8OoAehofoEZJdT0nv5KRIH2eg7mqIt
+\unrestrict FILeny5wAYRvodA4oSlg1OWMXJvWSWGsK0UkUr5OcTWQrLlYDyc9NHqGF7DEfXl
 
