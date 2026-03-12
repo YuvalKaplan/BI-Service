@@ -8,7 +8,7 @@ from modules.bt.object import fund, fund_holding
 from modules.bt.object import account, account_holding as ah, account_cash_ledger as acl, account_trade as at, account_performance as ap, account_benchmark_comparison as abc
 from modules.bt.object import benchmark_value as bv
 from modules.bt.object import interest_config, ticker_value, ticker_dividend_history
-from modules.bt.actions import best_ideas_generator, funds_update, account_update
+
 
 def process_daily_cash_accruals(account_id: int, sim_date: date):
     # 1. Interest
@@ -92,7 +92,88 @@ def calculate_commission(quantity: Decimal) -> Decimal:
     fee = quantity * FEE_PER_SHARE
     return max(fee, MIN_COMMISSION).quantize(Decimal('0.01'))
 
-def execute_minimal_rebalance(account_id: int, num_fund_holdings: int, candidates: List[TradeCandidate], current_sim_date: date) -> List[at.AccountTrade]:
+def to_price(value) -> Decimal:
+    return Decimal(str(value)).quantize(Decimal('0.01'))
+
+def execute_trade(
+    account_id: int,
+    symbol: str,
+    side: str,
+    qty: Decimal,
+    price: Decimal,
+    trade_date: date,
+    local_cash: Decimal,
+    trades: List[at.AccountTrade],
+    cash_entries: List[acl.AccountCashLedger],
+    description: str
+) -> Decimal:
+
+    if qty <= 0:
+        return local_cash
+
+    gross = (qty * price).quantize(Decimal('0.01'))
+    commission = calculate_commission(qty)
+
+    if side == "BUY":
+
+        total_cost = (gross + commission).quantize(Decimal('0.01'))
+
+        if total_cost > local_cash:
+            return local_cash
+
+        trades.append(at.AccountTrade(
+            account_id=account_id,
+            symbol=symbol,
+            trade_date=trade_date,
+            side='BUY',
+            quantity=qty,
+            price=price,
+            commission=commission,
+            total_amount=gross
+        ))
+
+        cash_entries.append(acl.AccountCashLedger(
+            account_id=account_id,
+            transaction_date=trade_date,
+            amount=-total_cost,
+            entry_type='TRADE_BUY',
+            description=description
+        ))
+
+        return local_cash - total_cost
+
+    else:  # SELL
+
+        net = (gross - commission).quantize(Decimal('0.01'))
+
+        trades.append(at.AccountTrade(
+            account_id=account_id,
+            symbol=symbol,
+            trade_date=trade_date,
+            side='SELL',
+            quantity=qty,
+            price=price,
+            commission=commission,
+            total_amount=gross
+        ))
+
+        cash_entries.append(acl.AccountCashLedger(
+            account_id=account_id,
+            transaction_date=trade_date,
+            amount=net,
+            entry_type='TRADE_SELL',
+            description=description
+        ))
+
+        return local_cash + net
+    
+
+def execute_minimal_rebalance(
+    account_id: int,
+    num_fund_holdings: int,
+    candidates: List[TradeCandidate],
+    current_sim_date: date
+) -> List[at.AccountTrade]:
 
     if not candidates:
         return []
@@ -113,7 +194,6 @@ def execute_minimal_rebalance(account_id: int, num_fund_holdings: int, candidate
 
     df['qty_held'] = df['symbol'].map(holdings_map).fillna(0.0)
     df['price'] = df['symbol'].map(prices).fillna(0.0)
-
     df['current_val'] = df['qty_held'] * df['price']
 
     tpv = cash_val + df['current_val'].sum()
@@ -121,6 +201,9 @@ def execute_minimal_rebalance(account_id: int, num_fund_holdings: int, candidate
 
     # --- TARGET LOGIC ---
     candidate_map = {c.symbol: c.action for c in candidates}
+    sell_symbols = [c.symbol for c in candidates if c.action == "EXIT"]
+    buy_symbols = [c.symbol for c in candidates if c.action == "ENTER"]
+
     held_symbols = set(holdings_map)
 
     def get_target(sym):
@@ -134,165 +217,130 @@ def execute_minimal_rebalance(account_id: int, num_fund_holdings: int, candidate
         return 0.0
 
     df['target_val'] = df['symbol'].map(get_target)
-
     df['delta'] = df['current_val'] - df['target_val']
     df['abs_delta'] = df['delta'].abs()
-
     df = df.sort_values('abs_delta', ascending=False)
 
-    # --- CALCULATE ORDERS ---
     trades: List[at.AccountTrade] = []
     cash_ledger_entries: List[acl.AccountCashLedger] = []
 
     local_cash = Decimal(str(cash_val)).quantize(Decimal('0.01'))
 
     # --- SELLS FIRST ---
-    for _, row in df[df['delta'] > 1.0].iterrows():
+    for _, row in df[df['symbol'].isin(sell_symbols)].iterrows():
 
-        price = Decimal(str(row['price'])).quantize(Decimal('0.01'))
+        price = to_price(row['price'])
+
         delta_val = Decimal(str(row['delta']))
-        qty_est = (delta_val / price)
+        qty_est = delta_val / price
         qty = qty_est.quantize(Decimal('1'), rounding=ROUND_DOWN)
         held_qty = Decimal(str(row['qty_held'])).quantize(Decimal('1'), rounding=ROUND_DOWN)
         qty = min(qty, held_qty)
 
-        if qty <= 0:
-            continue
-
-        gross = (qty * price).quantize(Decimal('0.01'))
-        commission = calculate_commission(qty).quantize(Decimal('0.01'))
-        net = (gross - commission).quantize(Decimal('0.01'))
-
-        trades.append(at.AccountTrade(
-            account_id=account_id,
-            symbol=row['symbol'],
-            trade_date=current_sim_date,
-            side='SELL',
-            quantity=qty,
-            price=price,
-            commission=commission,
-            total_amount=gross
-        ))
-
-        cash_ledger_entries.append(acl.AccountCashLedger(
-            account_id=account_id,
-            transaction_date=current_sim_date,
-            amount=net,
-            entry_type='TRADE_SELL',
-            description=f"Sold {qty} units of {row['symbol']} (Fee: ${commission})"
-        ))
-
-        local_cash += net
+        local_cash = execute_trade(
+            account_id,
+            row['symbol'],
+            "SELL",
+            qty,
+            price,
+            current_sim_date,
+            local_cash,
+            trades,
+            cash_ledger_entries,
+            f"Sold {qty} units of {row['symbol']}"
+        )
 
     # --- BUYS SECOND ---
-    for _, row in df[df['delta'] < -1.0].iterrows():
+    for _, row in df[df['symbol'].isin(buy_symbols)].iterrows():
 
         if local_cash <= Decimal('2.00'):
             break
 
-        price = Decimal(str(row['price'])).quantize(Decimal('0.01'))
+        price = to_price(row['price'])
+
         target_gross = Decimal(str(abs(row['delta'])))
         max_gross = (local_cash - Decimal('1.00')) / Decimal('1.001')
         actual_gross = min(target_gross, max_gross)
-        qty_est = (actual_gross / price)
+        qty_est = actual_gross / price
         qty = qty_est.quantize(Decimal('1'), rounding=ROUND_DOWN)
 
-        if qty <= 0:
-            continue
+        local_cash = execute_trade(
+            account_id,
+            row['symbol'],
+            "BUY",
+            qty,
+            price,
+            current_sim_date,
+            local_cash,
+            trades,
+            cash_ledger_entries,
+            f"Bought {qty} units of {row['symbol']}"
+        )
 
-        gross = (qty * price).quantize(Decimal('0.01'))
-        commission = calculate_commission(qty).quantize(Decimal('0.01'))
-        total_cost = (gross + commission).quantize(Decimal('0.01'))
-
-        if total_cost > local_cash:
-            continue
-
-        trades.append(at.AccountTrade(
-            account_id=account_id,
-            symbol=row['symbol'],
-            trade_date=current_sim_date,
-            side='BUY',
-            quantity=qty,
-            price=price,
-            commission=commission,
-            total_amount=gross
-        ))
-
-        cash_ledger_entries.append(acl.AccountCashLedger(
-            account_id=account_id,
-            transaction_date=current_sim_date,
-            amount=-total_cost,
-            entry_type='TRADE_BUY',
-            description=f"Bought {qty} units of {row['symbol']} (Fee: ${commission})"
-        ))
-
-        local_cash -= total_cost
-
-    # --- MINIMAL DRIFT REBALANCE ---
-    # Only attempt drift adjustment if we executed ENTER or EXIT trades
+    # --- DRIFT REBALANCE ---
     if any(c.action in ('ENTER', 'EXIT') for c in candidates):
-        df_no_actions = df[~df['symbol'].isin(candidate_map.keys())]
 
-        if not df_no_actions.empty:
-            df_no_actions['abs_delta'] = df_no_actions['delta'].abs()
-            worst = df_no_actions.sort_values('abs_delta', ascending=False).iloc[0]
-            price = Decimal(str(worst['price'])).quantize(Decimal('0.01'))
+        df_drift = df[~df['symbol'].isin(candidate_map.keys())]
 
-            # Buy the most underweight holding if we have cash
-            if local_cash > Decimal('50') and worst['delta'] < 0:
-                qty = (local_cash / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
-                if qty > 0:
-                    gross = (qty * price).quantize(Decimal('0.01'))
-                    commission = calculate_commission(qty).quantize(Decimal('0.01'))
-                    total_cost = gross + commission
-                    if total_cost <= local_cash:
-                        trades.append(at.AccountTrade(
-                            account_id=account_id,
-                            symbol=worst['symbol'],
-                            trade_date=current_sim_date,
-                            side='BUY',
-                            quantity=qty,
-                            price=price,
-                            commission=commission,
-                            total_amount=gross
-                        ))
-                        cash_ledger_entries.append(acl.AccountCashLedger(
-                            account_id=account_id,
-                            transaction_date=current_sim_date,
-                            amount=-total_cost,
-                            entry_type='TRADE_BUY',
-                            description=f"Drift rebalance BUY {worst['symbol']}"
-                        ))
-                        local_cash -= total_cost
+        if not df_drift.empty:
 
-            # Sell the most overweight holding if cash is negative
-            elif local_cash < Decimal('0') and worst['delta'] > 0:
-                qty = (abs(local_cash) / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
-                if qty > 0:
-                    gross = (qty * price).quantize(Decimal('0.01'))
-                    commission = calculate_commission(qty).quantize(Decimal('0.01'))
-                    net = (gross - commission).quantize(Decimal('0.01'))
+            df_drift = df_drift.sort_values('abs_delta', ascending=False)
 
-                    trades.append(at.AccountTrade(
-                        account_id=account_id,
-                        symbol=worst['symbol'],
-                        trade_date=current_sim_date,
-                        side='SELL',
-                        quantity=qty,
-                        price=price,
-                        commission=commission,
-                        total_amount=gross
-                    ))
-                    cash_ledger_entries.append(acl.AccountCashLedger(
-                        account_id=account_id,
-                        transaction_date=current_sim_date,
-                        amount=net,
-                        entry_type='TRADE_SELL',
-                        description=f"Drift rebalance SELL {worst['symbol']}"
-                    ))
-                    local_cash += net
+            # SELL overweight if negative cash
+            if local_cash < Decimal('0'):
 
-    # --- PHASE 3: COMMIT ---
+                for _, row in df_drift[df_drift['delta'] > 0].iterrows():
+
+                    if local_cash >= Decimal('0'):
+                        break
+
+                    price = to_price(row['price'])
+                    deficit = abs(local_cash)
+                    qty = (deficit / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+                    held_qty = Decimal(str(row['qty_held'])).quantize(Decimal('1'), rounding=ROUND_DOWN)
+                    qty = min(qty, held_qty)
+
+                    local_cash = execute_trade(
+                        account_id,
+                        row['symbol'],
+                        "SELL",
+                        qty,
+                        price,
+                        current_sim_date,
+                        local_cash,
+                        trades,
+                        cash_ledger_entries,
+                        f"Drift rebalance SELL {qty} {row['symbol']}"
+                    )
+
+            # BUY underweight if excess cash
+            elif local_cash > Decimal('20'):
+
+                for _, row in df_drift[df_drift['delta'] < 0].iterrows():
+
+                    if local_cash <= Decimal('5'):
+                        break
+
+                    price = to_price(row['price'])
+                    target_gap = Decimal(str(abs(row['delta'])))
+                    max_affordable = (local_cash - Decimal('1.00')) / Decimal('1.001')
+                    buy_value = min(target_gap, max_affordable)
+                    qty = (buy_value / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+
+                    local_cash = execute_trade(
+                        account_id,
+                        row['symbol'],
+                        "BUY",
+                        qty,
+                        price,
+                        current_sim_date,
+                        local_cash,
+                        trades,
+                        cash_ledger_entries,
+                        f"Drift rebalance BUY {qty} {row['symbol']}"
+                    )
+
+    # --- COMMIT ---
     for trade in trades:
         at.record_trade(trade)
 
@@ -437,7 +485,7 @@ def benchmark_comparison(account_id: int, fund_id: int, eval_date: date, daily_r
             daily_alpha=alpha.quantize(Decimal('0.000001'))
         ))
 
-def update_account(account: account.Account, current_sim_date: date):
+def daily_actions(account: account.Account, current_sim_date: date):
     if account.id is None:
         raise Exception('Account ID not specified')
 
@@ -451,49 +499,11 @@ def update_account(account: account.Account, current_sim_date: date):
     today_trades = execute_minimal_rebalance(account.id, len(fund_symbols), needs, current_sim_date)
 
     # Create Today's Snapshot
-    daily_return, snapshots = create_daily_snapshot(account_id=account.id, eval_date=current_sim_date, previous_holdings=account_holdings, today_trades=today_trades)
+    # daily_return, snapshots = create_daily_snapshot(account_id=account.id, eval_date=current_sim_date, previous_holdings=account_holdings, today_trades=today_trades)
     
     # Record Performance
-    benchmark_comparison(account.id, account.strategy_fund_id, current_sim_date, daily_return, snapshots)
+    # benchmark_comparison(account.id, account.strategy_fund_id, current_sim_date, daily_return, snapshots)
 
 
-def distinct_provider_etfs(accounts) -> list[int]:
-    distinct_etfs = set()
-    for current_account in accounts:
-        f = fund.fetch_fund(current_account.strategy_fund_id)
-        if f is None:
-            raise Exception("Missing strategy for fund")
 
-        strategy = fund.getStrategyFromJson(f.strategy)
-        strategy_etfs = strategy.provider_etfs
-        if strategy_etfs:
-            distinct_etfs.update(strategy_etfs)
-
-    return list(distinct_etfs)
-
-def run(start_date: date, end_date: date):
-    account.reset_accounts()
-    accounts = account.fetch_all()
-    etf_ids = distinct_provider_etfs(accounts)
-
-    # Download all stock information (prices, market cap and dividends)
-    # stocks_download.run(etf_ids, start_date - timedelta(days=15), end_date + timedelta(days=15))
-
-    # Mark the stocks as value/growh, based on Value/Growth ETF sources
-    # ticker.mark_categories()
-
-    current_sim_date = start_date
-    while current_sim_date <= end_date:
-        print(f"Processing: {current_sim_date.strftime("%A, %d-%m-%Y")}")
-
-        if 1 <= current_sim_date.weekday() <= 5: # Tuesday through Saturday
-            # Identify the lateset best ideas and construct todays target fund holdings.
-            etfs_processed, generated_etfs, problems = best_ideas_generator.run(etf_ids, current_sim_date)
-            results = funds_update.run(current_sim_date)
-
-        # Update account based on daily activity (interest, dividends, transactions)
-        for current_account in accounts:
-            account_update.daily_actions(current_account, current_sim_date)
-
-        current_sim_date += timedelta(days=1)
 

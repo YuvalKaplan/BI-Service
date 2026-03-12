@@ -27,7 +27,7 @@ def fetch_dividends_for_holdings(account_id: int, eval_date: date):
                     WHERE h.account_id = %s 
                     AND h.holding_date = (
                         SELECT MAX(holding_date) FROM account_holding_daily 
-                        WHERE account_id = %s AND holding_date < %s
+                        WHERE account_id = %s AND holding_date <= %s
                     )
                     AND d.ex_date = %s
                 """, (account_id, account_id, eval_date, eval_date))

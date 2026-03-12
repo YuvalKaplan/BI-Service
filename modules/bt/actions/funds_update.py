@@ -1,5 +1,5 @@
 import log
-from datetime import date
+from datetime import date, timedelta
 from typing import List
 from dataclasses import dataclass
 from modules.bt.object.best_idea import fetch_best_ideas_by_ranking
@@ -67,7 +67,7 @@ def run(today: date) -> List[FundChangesResult]:
             else:
                 fresh_ideas = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type=strategy.style.name, cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
             
-            yesterday_holdings = fetch_funds_holdings(f.id, today)
+            yesterday_holdings = fetch_funds_holdings(f.id, today - timedelta(days=1))
             
             # Find if we need to replace holdings - have droped 2 rankings
             holdings_changed: list[FundHoldingChange] = [] 
