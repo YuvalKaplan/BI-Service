@@ -18,8 +18,11 @@ def fetch_funds_holdings(fund_id: int, eval_date: date):
             with conn.cursor(row_factory=class_row(FundHolding)) as cur:
                 cur.execute("""
                     SELECT * FROM fund_holding 
-                    WHERE fund_id = %s AND holding_date = %s
-                """, (fund_id, eval_date))
+                    WHERE fund_id = %s 
+                      AND holding_date = (
+                        SELECT MAX(holding_date) FROM fund_holding 
+                        WHERE fund_id = %s AND holding_date <= %s);
+                """, (fund_id, fund_id, eval_date))
                 items = cur.fetchall()
         return items
     except Error as e:

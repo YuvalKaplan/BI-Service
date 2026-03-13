@@ -40,11 +40,11 @@ def fetch_fund(account_id: int):
 def reset_accounts():
     try:
         with db_pool_instance_bt.get_connection() as conn:
-            with conn.cursor(row_factory=class_row(Account)) as cur:
+            with conn.cursor() as cur:
                 cur.execute("DELETE FROM account_cash_ledger WHERE entry_type != 'DEPOSIT'")
                 cur.execute("DELETE FROM account_trade")
                 cur.execute("DELETE FROM account_holding_daily")
                 cur.execute("DELETE FROM account_performance_daily")
                 cur.execute("DELETE FROM account_benchmark_comparison")
     except Error as e:
-        raise Exception(f"Error fetching the Account details from the DB: {e}")
+        raise Exception(f"Error reseting the Account data in the DB: {e}")

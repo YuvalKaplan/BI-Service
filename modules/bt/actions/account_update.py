@@ -9,10 +9,10 @@ from modules.bt.object import account, account_holding as ah, account_cash_ledge
 from modules.bt.object import benchmark_value as bv
 from modules.bt.object import interest_config, ticker_value, ticker_dividend_history
 
+DRIFT_THRESHOLD = 0.05   # 5%
 
-def process_daily_cash_accruals(account_id: int, sim_date: date):
-    # 1. Interest
-    balance = acl.get_cash_balance(account_id, sim_date)
+def process_daily_interest(account_id: int, sim_date: date):
+    balance = acl.get_cash_balance(account_id, sim_date + timedelta(days=1))
     if balance > 0:
         rate_cfg = interest_config.get_latest_interest_rate(sim_date)
         if rate_cfg:
@@ -25,7 +25,8 @@ def process_daily_cash_accruals(account_id: int, sim_date: date):
                 description=f"Interest on {balance:,.2f}"
             ))
 
-    # 2. Dividends
+
+def process_daily_dividends(account_id: int, sim_date: date):
     divs = ticker_dividend_history.fetch_dividends_for_holdings(account_id, sim_date)
     for d in divs:
         total = (d['quantity'] * d['amount_per_share']).quantize(Decimal('0.01'))
@@ -44,7 +45,12 @@ class TradeCandidate:
     priority: int
     current_qty: Decimal = Decimal('0')
 
-def identify_rebalance_needs(account_id: int, fund_id: int, eval_date: date) -> Tuple[List[str], List[ah.AccountHolding], List[TradeCandidate]]:
+def identify_rebalance_needs(
+    account_id: int, 
+    fund_id: int, 
+    eval_date: date,
+    account_holdings: List[ah.AccountHolding]
+) -> Tuple[List[str], List[TradeCandidate]]:
     """
     Compares current account holdings vs fund targets.
     Returns: (target_map, list_of_candidates)
@@ -56,7 +62,6 @@ def identify_rebalance_needs(account_id: int, fund_id: int, eval_date: date) -> 
         targets_holdings = {h.symbol: h for h in base_fund_holding}
 
         # Fetch current snapshot
-        account_holdings = ah.fetch_current_account_snapshot(account_id=account_id, eval_date=eval_date)
         current_holdings = {h.symbol: h for h in account_holdings}
 
         all_symbols = set(targets_holdings.keys()) | set(current_holdings.keys())
@@ -79,11 +84,11 @@ def identify_rebalance_needs(account_id: int, fund_id: int, eval_date: date) -> 
                 # Optional: Logic for drift rebalance can be added here
                 pass 
 
-        return target_symbols, account_holdings, trade_candidates
+        return target_symbols, trade_candidates
 
     except Exception as e:
         print(f"Error comparing holdings: {e}")
-        return [], [], []
+        return [], []
 
 def calculate_commission(quantity: Decimal) -> Decimal:
     FEE_PER_SHARE = Decimal('0.005') # e.g., half a cent per share
@@ -108,7 +113,7 @@ def execute_trade(
     description: str
 ) -> Decimal:
 
-    if qty <= 0:
+    if qty <= 0 or price <= 0:
         return local_cash
 
     gross = (qty * price).quantize(Decimal('0.01'))
@@ -172,7 +177,8 @@ def execute_minimal_rebalance(
     account_id: int,
     num_fund_holdings: int,
     candidates: List[TradeCandidate],
-    current_sim_date: date
+    current_sim_date: date,
+    account_holdings: List[ah.AccountHolding]
 ) -> List[at.AccountTrade]:
 
     if not candidates:
@@ -180,14 +186,12 @@ def execute_minimal_rebalance(
 
     # --- FETCH DATA ---
     cash_val = float(acl.get_cash_balance(account_id, current_sim_date))
-    current_holdings = ah.fetch_current_account_snapshot(account_id, current_sim_date)
-
-    all_syms = list(set([h.symbol for h in current_holdings] + [c.symbol for c in candidates]))
-
+    print(f"Pre Trading cash balance on {current_sim_date}: {cash_val}")
+    
+    all_syms = list(set([h.symbol for h in account_holdings] + [c.symbol for c in candidates]))
     ticker_data = ticker_value.fetch_tickers_by_symbols_on_date(all_syms, current_sim_date)
     prices = {t.symbol: float(t.stock_price) for t in ticker_data if t.stock_price}
-
-    holdings_map = {h.symbol: float(h.quantity) for h in current_holdings}
+    holdings_map = {h.symbol: float(h.quantity) for h in account_holdings}
 
     # --- BUILD DATAFRAME ---
     df = pd.DataFrame({'symbol': all_syms})
@@ -226,43 +230,36 @@ def execute_minimal_rebalance(
 
     local_cash = Decimal(str(cash_val)).quantize(Decimal('0.01'))
 
-    # --- SELLS FIRST ---
+    # --- SELLS FIRST (EXIT POSITIONS) ---
     for _, row in df[df['symbol'].isin(sell_symbols)].iterrows():
 
         price = to_price(row['price'])
-
-        delta_val = Decimal(str(row['delta']))
-        qty_est = delta_val / price
-        qty = qty_est.quantize(Decimal('1'), rounding=ROUND_DOWN)
         held_qty = Decimal(str(row['qty_held'])).quantize(Decimal('1'), rounding=ROUND_DOWN)
-        qty = min(qty, held_qty)
-
+        
         local_cash = execute_trade(
             account_id,
             row['symbol'],
             "SELL",
-            qty,
+            held_qty,
             price,
             current_sim_date,
             local_cash,
             trades,
             cash_ledger_entries,
-            f"Sold {qty} units of {row['symbol']}"
+            f"Sold {held_qty} units of {row['symbol']}"
         )
 
-    # --- BUYS SECOND ---
+    # --- BUYS SECOND (ENTER POSITIONS) ---
     for _, row in df[df['symbol'].isin(buy_symbols)].iterrows():
 
         if local_cash <= Decimal('2.00'):
             break
 
         price = to_price(row['price'])
-
-        target_gross = Decimal(str(abs(row['delta'])))
         max_gross = (local_cash - Decimal('1.00')) / Decimal('1.001')
-        actual_gross = min(target_gross, max_gross)
-        qty_est = actual_gross / price
-        qty = qty_est.quantize(Decimal('1'), rounding=ROUND_DOWN)
+        qty = (Decimal(str(row['target_val'])) / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+        max_qty = (max_gross / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+        qty = min(qty, max_qty)
 
         local_cash = execute_trade(
             account_id,
@@ -277,10 +274,32 @@ def execute_minimal_rebalance(
             f"Bought {qty} units of {row['symbol']}"
         )
 
+    # --- RECOMPUTE PORTFOLIO AFTER MANDATORY TRADES ---
+    df['current_val'] = df['qty_held'] * df['price']
+
+    tpv = float(local_cash) + df['current_val'].sum()
+
+    target_val_per_stock = tpv / num_fund_holdings if num_fund_holdings > 0 else 0.0
+
+    df['target_val'] = df['symbol'].map(get_target)
+
+    df['delta'] = df['current_val'] - df['target_val']
+    df['abs_delta'] = df['delta'].abs()
+
+    df['drift_pct'] = 0.0
+    mask = df['target_val'] > 0
+
+    df.loc[mask, 'drift_pct'] = df.loc[mask, 'abs_delta'] / df.loc[mask, 'target_val']
+
+    df = df.sort_values('abs_delta', ascending=False)
+
     # --- DRIFT REBALANCE ---
     if any(c.action in ('ENTER', 'EXIT') for c in candidates):
 
-        df_drift = df[~df['symbol'].isin(candidate_map.keys())]
+        df_drift = df[
+            (~df['symbol'].isin(candidate_map.keys())) &
+            (df['drift_pct'] > DRIFT_THRESHOLD)
+        ]
 
         if not df_drift.empty:
 
@@ -361,10 +380,19 @@ def create_daily_snapshot(
     if df_prev.empty:
         df_prev = pd.DataFrame(columns=['symbol', 'quantity', 'cost_basis'])
     
+    # Convert to float immediately
+    df_prev['quantity'] = df_prev['quantity'].astype(float)
+    df_prev['cost_basis'] = df_prev['cost_basis'].astype(float)
+
     df_trades = pd.DataFrame([vars(t) for t in today_trades])
 
     # 2. Process Trades (Aggregate by Symbol)
     if not df_trades.empty:
+
+        df_trades['quantity'] = df_trades['quantity'].astype(float)
+        df_trades['total_amount'] = df_trades['total_amount'].astype(float)
+        df_trades['commission'] = df_trades['commission'].astype(float)
+
         # Net Quantity: BUY is +, SELL is -
         df_trades['qty_delta'] = df_trades.apply(
             lambda x: float(x['quantity']) if x['side'] == 'BUY' else -float(x['quantity']), axis=1
@@ -392,8 +420,13 @@ def create_daily_snapshot(
         trade_summary, 
         on='symbol', 
         how='outer'
-    ).fillna(0.0)
-    
+    )
+    df = df.infer_objects(copy=False)
+    num_cols = ['quantity', 'cost_basis', 'qty_delta', 'cost_delta', 'qty_sold']
+    for col in num_cols:
+        if col in df.columns:
+            df[col] = df[col].fillna(0.0).astype(float)
+            
     # 4. Calculate New Quantity
     df['new_qty'] = df['quantity'] + df['qty_delta']
     
@@ -408,13 +441,14 @@ def create_daily_snapshot(
             sell_pct = min(1.0, qty_sold / old_qty)
             old_cost = old_cost * (1.0 - sell_pct)
             
-        return old_cost + float(row['cost_delta'])
+        return old_cost + row['cost_delta']
 
     df['new_cost'] = df.apply(calculate_new_cost, axis=1)
     
     # Filter for active holdings (remove positions closed today)
     df = df[df['new_qty'] > 1e-8].copy()
-    if df.empty: return Decimal(0.0), []
+    if df.empty: 
+        return Decimal(0.0), []
 
     # 6. Market Value & Weights
     prices_raw = ticker_value.fetch_tickers_by_symbols_on_date(df['symbol'].tolist(), eval_date)
@@ -433,16 +467,16 @@ def create_daily_snapshot(
             account_id=account_id,
             holding_date=eval_date,
             symbol=row['symbol'],
-            quantity=Decimal(str(row['new_qty'])),
-            cost_basis=Decimal(str(row['new_cost'])),
-            market_value=Decimal(str(row['mkt_val'])),
-            weight_percentage=Decimal(str(row['weight']))
+            quantity=Decimal(str(round(row['new_qty'], 0))),
+            cost_basis=Decimal(str(round(row['new_cost'], 2))),
+            market_value=Decimal(str(round(row['mkt_val'], 2))),
+            weight_percentage=Decimal(str(round(row['weight'], 6)))
         ) for _, row in df.iterrows()
     ]
 
     # 7. Record into database
     ah.record_account_holdings(snapshots)
-    daily_return = ap.record_daily_performance(account_id=account_id, eval_date=eval_date, cash_balance=Decimal(eod_cash), snapshots=snapshots)
+    daily_return = ap.record_daily_performance(account_id=account_id, eval_date=eval_date, cash_balance=Decimal(round(eod_cash,2)), snapshots=snapshots)
 
     return daily_return, snapshots
 
@@ -490,17 +524,29 @@ def daily_actions(account: account.Account, current_sim_date: date):
         raise Exception('Account ID not specified')
 
     # Update Cash: Apply interest and record dividends 
-    process_daily_cash_accruals(account.id, current_sim_date)
-    
-    # Check for changes in target fund_holdings
-    fund_symbols, account_holdings, needs = identify_rebalance_needs(account.id, account.strategy_fund_id, current_sim_date)
-    
-    # Execute the changes and rebalance
-    today_trades = execute_minimal_rebalance(account.id, len(fund_symbols), needs, current_sim_date)
+    process_daily_dividends(account.id, current_sim_date)   
 
-    # Create Today's Snapshot
-    # daily_return, snapshots = create_daily_snapshot(account_id=account.id, eval_date=current_sim_date, previous_holdings=account_holdings, today_trades=today_trades)
-    
+    # Fetch current holding data
+    account_holdings = ah.fetch_current_account_snapshot(account.id, current_sim_date)
+    held_symbols = list([h.symbol for h in account_holdings])
+    current_ticker_data = ticker_value.fetch_tickers_by_symbols_on_date(held_symbols, current_sim_date)
+    found_symbols = {t.symbol for t in current_ticker_data if t.stock_price}
+    missing_prices = [s for s in held_symbols if s not in found_symbols]
+
+    if len(missing_prices) == 0:    
+        # Check for changes in target fund_holdings
+        fund_symbols, needs = identify_rebalance_needs(account.id, account.strategy_fund_id, current_sim_date, account_holdings)
+        
+        # Execute the changes and rebalance
+        today_trades = execute_minimal_rebalance(account.id, len(fund_symbols), needs, current_sim_date, account_holdings)
+
+        # Create Today's Snapshot
+        daily_return, snapshots = create_daily_snapshot(account_id=account.id, eval_date=current_sim_date, previous_holdings=account_holdings, today_trades=today_trades)
+    else:
+        print(f"Skippig Trading - Missing pricing on {current_sim_date} for {len(missing_prices)} out of {len(found_symbols)}")
+        
+    # Update interest on end of day cash 
+    process_daily_interest(account.id, current_sim_date)    
     # Record Performance
     # benchmark_comparison(account.id, account.strategy_fund_id, current_sim_date, daily_return, snapshots)
 

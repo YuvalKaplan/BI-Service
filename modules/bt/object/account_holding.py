@@ -28,7 +28,7 @@ def fetch_current_account_snapshot(account_id: int, eval_date: date):
                     WHERE account_id = %s 
                     AND holding_date = (
                         SELECT MAX(holding_date) FROM account_holding_daily 
-                        WHERE account_id = %s AND holding_date < %s
+                        WHERE account_id = %s AND holding_date <= %s
                     )
                 """, (account_id, account_id, eval_date))
                 items = cur.fetchall()

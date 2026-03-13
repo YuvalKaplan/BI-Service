@@ -55,3 +55,12 @@ def fetch_fund(fund_id: int):
         return items
     except Error as e:
         raise Exception(f"Error fetching the Fund from the DB: {e}")
+
+def reset_funds():
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM fund_holding_change")
+                cur.execute("DELETE FROM fund_holding")
+    except Error as e:
+        raise Exception(f"Error reseting the Fund holdings in the DB: {e}")
