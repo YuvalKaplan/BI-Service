@@ -1,8 +1,7 @@
 from datetime import date, timedelta
-from modules.bt.object import fund
+from modules.bt.object import fund, ticker, provider_etf_holding
 from modules.bt.object import account
-from modules.bt.actions import best_ideas_generator, funds_update, account_update
-
+from modules.bt.actions import stocks_download, best_ideas_generator, funds_update, account_update
 
 def distinct_provider_etfs(accounts) -> list[int]:
     distinct_etfs = set()
@@ -24,12 +23,14 @@ def run(start_date: date, end_date: date):
 
     accounts = account.fetch_all()
     etf_ids = distinct_provider_etfs(accounts)
+    symbols = provider_etf_holding.fetch_tickers_for_etfs(etf_ids)
 
     # Download all stock information (prices, market cap and dividends)
-    # stocks_download.run(etf_ids, start_date - timedelta(days=15), end_date + timedelta(days=15))
+    # stocks_download.run(symbols, start_date - timedelta(days=15), end_date + timedelta(days=15))
 
     # Mark the stocks as value/growh, based on Value/Growth ETF sources
     # ticker.mark_categories()
+    # ticker.mark_split_invalid(symbols, start_date - timedelta(days=5), end_date + timedelta(days=5))
 
     current_sim_date = start_date
     while current_sim_date <= end_date:

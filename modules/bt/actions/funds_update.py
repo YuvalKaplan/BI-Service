@@ -8,8 +8,6 @@ from modules.bt.object.fund_holding import FundHolding, fetch_funds_holdings, in
 from modules.bt.object.fund_holding_change import FundHoldingChange, insert_fund_changes
 from modules.bt.object.ticker import fetch_by_symbols
 
-
-HOLDINGS_IN_FUND = 40
 RANKING_LEVEL = 3
 GAP_TO_SELL = 2
 
@@ -84,7 +82,7 @@ def run(today: date) -> List[FundChangesResult]:
                     todays_holdings.append(yh)
 
             # If new holdings are needed get then from the fresh - as long as they are not already in the fund.
-            missing = HOLDINGS_IN_FUND - len(todays_holdings) 
+            missing = strategy.holdings - len(todays_holdings) 
             if missing != 0:
                 existing_symbols = {th.symbol for th in todays_holdings}
                 for fi in fresh_ideas:

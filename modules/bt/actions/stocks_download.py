@@ -5,9 +5,9 @@ import re
 from decimal import Decimal
 from typing import List
 from datetime import date, timedelta
-from modules.core.fdata import get_stock_profile, get_stock_historic_prices, get_stock_historic_dividend, get_stock_historic_market_cap
+from modules.core.fdata import get_stock_profile, get_stock_historic_prices, get_stock_historic_dividend, get_stock_historic_splits, get_stock_historic_market_cap
 
-from modules.bt.object import account
+from modules.bt.object import account, ticker_split_history
 from modules.bt.object import fund
 from modules.bt.object.provider_etf_holding import fetch_tickers_for_etfs
 from modules.bt.object import ticker, ticker_value, ticker_dividend_history
@@ -23,9 +23,8 @@ def weekday_count(start: date, end: date) -> int:
             count += 1
     return count
 
-def run(etf_ids: list[int], start_date: date, end_date: date) -> tuple[int, int, int]:
+def run(symbols: list[str], start_date: date, end_date: date) -> tuple[int, int, int]:
     try:
-        symbols = fetch_tickers_for_etfs(etf_ids)
         missing_symbols = []
         existing = 0
         start = time.monotonic()
@@ -73,6 +72,23 @@ def run(etf_ids: list[int], start_date: date, end_date: date) -> tuple[int, int,
                 for line in shd
             ]
             ticker_dividend_history.insert_dividends_bulk(dividends)
+
+            shs: list[dict[str,str]] | str = get_stock_historic_splits(s)
+            if isinstance(shs, str):
+                ticker.update_invalid(s, shs)
+                missing_symbols.append(s)
+                continue
+
+            splits = [
+                ticker_split_history.TickerSplitHistory(
+                    symbol=s,
+                    date=date.fromisoformat(line['date']),
+                    numerator=Decimal(line['numerator']),
+                    denominator=Decimal(line['denominator'])
+                )
+                for line in shs
+            ]
+            ticker_split_history.insert_split_bulk(splits)
  
 
             shp = get_stock_historic_prices(s, start_date, end_date)

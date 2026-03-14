@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
@@ -143,6 +143,30 @@ def mark_categories():
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute('SELECT public.fill_ticker_style_and_cap()')
+        return
+    except Error as e:
+        raise Exception(f"Error marking the categories for the tickers in the DB: {e}")
+              
+def mark_split_invalid(symbols: list[str], start_date: date, end_date: date):
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            # First remove priod invalid over split (could have been different period)
+            with conn.cursor() as cur:
+                cur.execute("""UPDATE public.ticker SET invalid = NULL WHERE invalid = 'Split in test period'""")
+
+            with conn.cursor() as cur:
+                query = """
+                    UPDATE public.ticker 
+                    SET invalid = 'Split in test period'
+                    WHERE ticker.invalid IS NULL 
+                    AND ticker.symbol = ANY(%s)
+                    AND ticker.symbol IN (
+                        SELECT tsh.symbol 
+                        FROM public.ticker_split_history tsh
+                        WHERE tsh.date >= %s AND tsh.date <= %s
+                    );
+                """
+                cur.execute(query, (symbols, start_date, end_date,))
         return
     except Error as e:
         raise Exception(f"Error marking the categories for the tickers in the DB: {e}")

@@ -25,7 +25,6 @@ def process_daily_interest(account_id: int, sim_date: date):
                 description=f"Interest on {balance:,.2f}"
             ))
 
-
 def process_daily_dividends(account_id: int, sim_date: date):
     divs = ticker_dividend_history.fetch_dividends_for_holdings(account_id, sim_date)
     for d in divs:
@@ -172,7 +171,6 @@ def execute_trade(
 
         return local_cash + net
     
-
 def execute_minimal_rebalance(
     account_id: int,
     num_fund_holdings: int,
@@ -542,13 +540,15 @@ def daily_actions(account: account.Account, current_sim_date: date):
 
         # Create Today's Snapshot
         daily_return, snapshots = create_daily_snapshot(account_id=account.id, eval_date=current_sim_date, previous_holdings=account_holdings, today_trades=today_trades)
+
+        # Record Performance
+        benchmark_comparison(account.id, account.strategy_fund_id, current_sim_date, daily_return, snapshots)
     else:
         print(f"Skippig Trading - Missing pricing on {current_sim_date} for {len(missing_prices)} out of {len(found_symbols)}")
         
     # Update interest on end of day cash 
     process_daily_interest(account.id, current_sim_date)    
-    # Record Performance
-    # benchmark_comparison(account.id, account.strategy_fund_id, current_sim_date, daily_return, snapshots)
+   
 
 
 

@@ -105,6 +105,24 @@ def get_stock_historic_dividend(symbol: str) -> list[dict[str,str]] | str:
         message = f"Failed to get historic dividends for {symbol}. Response from service provider: {e}"
         log.record_error(message)
         return message
+
+def get_stock_historic_splits(symbol: str) -> list[dict[str,str]] | str:
+    try:
+        throttle_api_calls()
+        url = (f"{FMP_API_URL}/splits?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        array = get_jsonparsed_data(url)
+        
+        if not isinstance(array, list):
+            message = f"Invalid historic splits response for symbol '{symbol}': empty result"
+            log.record_notice(message) 
+            return message
+        
+        return array
+    
+    except Exception as e:
+        message = f"Failed to get historic splits for {symbol}. Response from service provider: {e}"
+        log.record_error(message)
+        return message
     
 def get_stock_historic_market_cap(symbol: str, start: date, end: date) -> list[dict[str,str]] | str:
     try:

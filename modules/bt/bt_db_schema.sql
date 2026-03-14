@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict FILeny5wAYRvodA4oSlg1OWMXJvWSWGsK0UkUr5OcTWQrLlYDyc9NHqGF7DEfXl
+\restrict tbiJV8UBmZ8lv67IoeM9U7lxkO0G4d8X8Cxb8Q4KTQFdb6tvxhzFQ37QUNxtEO0
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 18.0
 
--- Started on 2026-03-11 19:00:30
+-- Started on 2026-03-14 12:21:41
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -22,7 +22,7 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
--- TOC entry 262 (class 1255 OID 250216)
+-- TOC entry 263 (class 1255 OID 250216)
 -- Name: fill_ticker_style_and_cap(); Type: FUNCTION; Schema: public; Owner: admin
 --
 
@@ -87,7 +87,7 @@ $$;
 ALTER FUNCTION public.fill_ticker_style_and_cap() OWNER TO admin;
 
 --
--- TOC entry 250 (class 1255 OID 250218)
+-- TOC entry 251 (class 1255 OID 250218)
 -- Name: get_best_ideas_by_ranking(integer, text, text, date, integer[]); Type: FUNCTION; Schema: public; Owner: admin
 --
 
@@ -695,6 +695,21 @@ CREATE TABLE public.ticker_dividend_history (
 ALTER TABLE public.ticker_dividend_history OWNER TO admin;
 
 --
+-- TOC entry 250 (class 1259 OID 250232)
+-- Name: ticker_split_history; Type: TABLE; Schema: public; Owner: admin
+--
+
+CREATE TABLE public.ticker_split_history (
+    symbol text NOT NULL,
+    date date NOT NULL,
+    numerator numeric(18,4) NOT NULL,
+    denominator numeric(18,4) NOT NULL
+);
+
+
+ALTER TABLE public.ticker_split_history OWNER TO admin;
+
+--
 -- TOC entry 224 (class 1259 OID 249722)
 -- Name: ticker_value; Type: TABLE; Schema: public; Owner: admin
 --
@@ -710,7 +725,7 @@ CREATE TABLE public.ticker_value (
 ALTER TABLE public.ticker_value OWNER TO admin;
 
 --
--- TOC entry 4894 (class 2606 OID 250036)
+-- TOC entry 4898 (class 2606 OID 250036)
 -- Name: account_benchmark_comparison account_benchmark_comparison_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -719,7 +734,7 @@ ALTER TABLE ONLY public.account_benchmark_comparison
 
 
 --
--- TOC entry 4896 (class 2606 OID 250049)
+-- TOC entry 4900 (class 2606 OID 250049)
 -- Name: account_cash_ledger account_cash_ledger_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -728,7 +743,7 @@ ALTER TABLE ONLY public.account_cash_ledger
 
 
 --
--- TOC entry 4898 (class 2606 OID 250066)
+-- TOC entry 4902 (class 2606 OID 250066)
 -- Name: account_holding_daily account_holding_daily_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -737,7 +752,7 @@ ALTER TABLE ONLY public.account_holding_daily
 
 
 --
--- TOC entry 4900 (class 2606 OID 250084)
+-- TOC entry 4904 (class 2606 OID 250084)
 -- Name: account_performance_daily account_performance_daily_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -746,7 +761,7 @@ ALTER TABLE ONLY public.account_performance_daily
 
 
 --
--- TOC entry 4892 (class 2606 OID 250022)
+-- TOC entry 4896 (class 2606 OID 250022)
 -- Name: account account_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -755,7 +770,7 @@ ALTER TABLE ONLY public.account
 
 
 --
--- TOC entry 4902 (class 2606 OID 250098)
+-- TOC entry 4906 (class 2606 OID 250098)
 -- Name: account_trade account_trade_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -764,7 +779,7 @@ ALTER TABLE ONLY public.account_trade
 
 
 --
--- TOC entry 4889 (class 2606 OID 250011)
+-- TOC entry 4893 (class 2606 OID 250011)
 -- Name: benchmark_value benchmark_value_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -773,7 +788,7 @@ ALTER TABLE ONLY public.benchmark_value
 
 
 --
--- TOC entry 4876 (class 2606 OID 249779)
+-- TOC entry 4880 (class 2606 OID 249779)
 -- Name: best_idea best_idea_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -782,7 +797,7 @@ ALTER TABLE ONLY public.best_idea
 
 
 --
--- TOC entry 4904 (class 2606 OID 250192)
+-- TOC entry 4908 (class 2606 OID 250192)
 -- Name: categorize_etf_holding categorize_etf_holding_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -791,7 +806,7 @@ ALTER TABLE ONLY public.categorize_etf_holding
 
 
 --
--- TOC entry 4883 (class 2606 OID 249811)
+-- TOC entry 4887 (class 2606 OID 249811)
 -- Name: categorize_etf categorize_etf_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -800,7 +815,7 @@ ALTER TABLE ONLY public.categorize_etf
 
 
 --
--- TOC entry 4874 (class 2606 OID 249764)
+-- TOC entry 4878 (class 2606 OID 249764)
 -- Name: fund_holding_change fund_holding_change_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -809,7 +824,7 @@ ALTER TABLE ONLY public.fund_holding_change
 
 
 --
--- TOC entry 4872 (class 2606 OID 249747)
+-- TOC entry 4876 (class 2606 OID 249747)
 -- Name: fund_holding fund_holding_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -818,7 +833,7 @@ ALTER TABLE ONLY public.fund_holding
 
 
 --
--- TOC entry 4870 (class 2606 OID 249740)
+-- TOC entry 4874 (class 2606 OID 249740)
 -- Name: fund fund_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -827,7 +842,7 @@ ALTER TABLE ONLY public.fund
 
 
 --
--- TOC entry 4885 (class 2606 OID 249922)
+-- TOC entry 4889 (class 2606 OID 249922)
 -- Name: interest_rate_config interest_rate_config_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -836,7 +851,7 @@ ALTER TABLE ONLY public.interest_rate_config
 
 
 --
--- TOC entry 4881 (class 2606 OID 249802)
+-- TOC entry 4885 (class 2606 OID 249802)
 -- Name: log log_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -845,7 +860,7 @@ ALTER TABLE ONLY public.log
 
 
 --
--- TOC entry 4866 (class 2606 OID 249721)
+-- TOC entry 4870 (class 2606 OID 249721)
 -- Name: ticker pk_ticker; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -854,7 +869,7 @@ ALTER TABLE ONLY public.ticker
 
 
 --
--- TOC entry 4868 (class 2606 OID 249726)
+-- TOC entry 4872 (class 2606 OID 249726)
 -- Name: ticker_value pk_ticker_value; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -863,7 +878,7 @@ ALTER TABLE ONLY public.ticker_value
 
 
 --
--- TOC entry 4864 (class 2606 OID 249706)
+-- TOC entry 4868 (class 2606 OID 249706)
 -- Name: provider_etf_holding provider_etf_holding_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -872,7 +887,7 @@ ALTER TABLE ONLY public.provider_etf_holding
 
 
 --
--- TOC entry 4860 (class 2606 OID 249691)
+-- TOC entry 4864 (class 2606 OID 249691)
 -- Name: provider_etf provider_etf_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -881,7 +896,7 @@ ALTER TABLE ONLY public.provider_etf
 
 
 --
--- TOC entry 4857 (class 2606 OID 249681)
+-- TOC entry 4861 (class 2606 OID 249681)
 -- Name: provider provider_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -890,7 +905,7 @@ ALTER TABLE ONLY public.provider
 
 
 --
--- TOC entry 4887 (class 2606 OID 249953)
+-- TOC entry 4891 (class 2606 OID 249953)
 -- Name: ticker_dividend_history ticker_dividend_history_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -899,7 +914,16 @@ ALTER TABLE ONLY public.ticker_dividend_history
 
 
 --
--- TOC entry 4877 (class 1259 OID 249790)
+-- TOC entry 4912 (class 2606 OID 250238)
+-- Name: ticker_split_history ticker_split_history_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.ticker_split_history
+    ADD CONSTRAINT ticker_split_history_pkey PRIMARY KEY (symbol, date);
+
+
+--
+-- TOC entry 4881 (class 1259 OID 249790)
 -- Name: fki_fk_best_idea_provider_etf_id; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -907,7 +931,7 @@ CREATE INDEX fki_fk_best_idea_provider_etf_id ON public.best_idea USING btree (p
 
 
 --
--- TOC entry 4878 (class 1259 OID 249791)
+-- TOC entry 4882 (class 1259 OID 249791)
 -- Name: fki_fk_best_idea_symbol; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -915,7 +939,7 @@ CREATE INDEX fki_fk_best_idea_symbol ON public.best_idea USING btree (symbol) WI
 
 
 --
--- TOC entry 4879 (class 1259 OID 249792)
+-- TOC entry 4883 (class 1259 OID 249792)
 -- Name: fki_fk_best_idea_value_date; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -923,7 +947,7 @@ CREATE INDEX fki_fk_best_idea_value_date ON public.best_idea USING btree (value_
 
 
 --
--- TOC entry 4905 (class 1259 OID 250198)
+-- TOC entry 4909 (class 1259 OID 250198)
 -- Name: fki_fk_categorize_etf_holding_categorize_etf_id; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -931,7 +955,7 @@ CREATE INDEX fki_fk_categorize_etf_holding_categorize_etf_id ON public.categoriz
 
 
 --
--- TOC entry 4861 (class 1259 OID 249712)
+-- TOC entry 4865 (class 1259 OID 249712)
 -- Name: fki_fk_provider_etf_holding_provider_etf_id; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -939,7 +963,7 @@ CREATE INDEX fki_fk_provider_etf_holding_provider_etf_id ON public.provider_etf_
 
 
 --
--- TOC entry 4858 (class 1259 OID 249697)
+-- TOC entry 4862 (class 1259 OID 249697)
 -- Name: fki_fk_provider_etf_provider_id; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -947,7 +971,7 @@ CREATE INDEX fki_fk_provider_etf_provider_id ON public.provider_etf USING btree 
 
 
 --
--- TOC entry 4890 (class 1259 OID 250012)
+-- TOC entry 4894 (class 1259 OID 250012)
 -- Name: idx_benchmark_price_lookup; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -955,7 +979,7 @@ CREATE INDEX idx_benchmark_price_lookup ON public.benchmark_value USING btree (s
 
 
 --
--- TOC entry 4906 (class 1259 OID 250199)
+-- TOC entry 4910 (class 1259 OID 250199)
 -- Name: idx_categorize_etf_holding_trade_date; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -963,7 +987,7 @@ CREATE INDEX idx_categorize_etf_holding_trade_date ON public.categorize_etf_hold
 
 
 --
--- TOC entry 4862 (class 1259 OID 249713)
+-- TOC entry 4866 (class 1259 OID 249713)
 -- Name: idx_provider_etf_holding_trade_date; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -971,7 +995,7 @@ CREATE INDEX idx_provider_etf_holding_trade_date ON public.provider_etf_holding 
 
 
 --
--- TOC entry 4919 (class 2606 OID 250050)
+-- TOC entry 4925 (class 2606 OID 250050)
 -- Name: account_cash_ledger account_cash_ledger_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -980,7 +1004,7 @@ ALTER TABLE ONLY public.account_cash_ledger
 
 
 --
--- TOC entry 4924 (class 2606 OID 250099)
+-- TOC entry 4930 (class 2606 OID 250099)
 -- Name: account_trade account_trade_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -989,7 +1013,7 @@ ALTER TABLE ONLY public.account_trade
 
 
 --
--- TOC entry 4925 (class 2606 OID 250104)
+-- TOC entry 4931 (class 2606 OID 250104)
 -- Name: account_trade account_trade_symbol_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -998,7 +1022,7 @@ ALTER TABLE ONLY public.account_trade
 
 
 --
--- TOC entry 4920 (class 2606 OID 250055)
+-- TOC entry 4926 (class 2606 OID 250055)
 -- Name: account_cash_ledger fk_account_cash_ledger_account; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1007,7 +1031,7 @@ ALTER TABLE ONLY public.account_cash_ledger
 
 
 --
--- TOC entry 4917 (class 2606 OID 250023)
+-- TOC entry 4923 (class 2606 OID 250023)
 -- Name: account fk_account_fund; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1016,7 +1040,7 @@ ALTER TABLE ONLY public.account
 
 
 --
--- TOC entry 4914 (class 2606 OID 249780)
+-- TOC entry 4920 (class 2606 OID 249780)
 -- Name: best_idea fk_best_idea_provider_etf_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1025,7 +1049,7 @@ ALTER TABLE ONLY public.best_idea
 
 
 --
--- TOC entry 4915 (class 2606 OID 249785)
+-- TOC entry 4921 (class 2606 OID 249785)
 -- Name: best_idea fk_best_idea_symbol; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1034,7 +1058,7 @@ ALTER TABLE ONLY public.best_idea
 
 
 --
--- TOC entry 4926 (class 2606 OID 250193)
+-- TOC entry 4932 (class 2606 OID 250193)
 -- Name: categorize_etf_holding fk_categorize_etf_holding_categorize_etf_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1043,7 +1067,7 @@ ALTER TABLE ONLY public.categorize_etf_holding
 
 
 --
--- TOC entry 4918 (class 2606 OID 250037)
+-- TOC entry 4924 (class 2606 OID 250037)
 -- Name: account_benchmark_comparison fk_comparison_account; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1052,7 +1076,7 @@ ALTER TABLE ONLY public.account_benchmark_comparison
 
 
 --
--- TOC entry 4912 (class 2606 OID 249765)
+-- TOC entry 4918 (class 2606 OID 249765)
 -- Name: fund_holding_change fk_fund_holding_change_fund_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1061,7 +1085,7 @@ ALTER TABLE ONLY public.fund_holding_change
 
 
 --
--- TOC entry 4913 (class 2606 OID 249770)
+-- TOC entry 4919 (class 2606 OID 249770)
 -- Name: fund_holding_change fk_fund_holding_change_symbol; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1070,7 +1094,7 @@ ALTER TABLE ONLY public.fund_holding_change
 
 
 --
--- TOC entry 4910 (class 2606 OID 249748)
+-- TOC entry 4916 (class 2606 OID 249748)
 -- Name: fund_holding fk_fund_holding_fund_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1079,7 +1103,7 @@ ALTER TABLE ONLY public.fund_holding
 
 
 --
--- TOC entry 4911 (class 2606 OID 249753)
+-- TOC entry 4917 (class 2606 OID 249753)
 -- Name: fund_holding fk_fund_holding_symbol; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1088,7 +1112,7 @@ ALTER TABLE ONLY public.fund_holding
 
 
 --
--- TOC entry 4921 (class 2606 OID 250067)
+-- TOC entry 4927 (class 2606 OID 250067)
 -- Name: account_holding_daily fk_holding_account; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1097,7 +1121,7 @@ ALTER TABLE ONLY public.account_holding_daily
 
 
 --
--- TOC entry 4922 (class 2606 OID 250072)
+-- TOC entry 4928 (class 2606 OID 250072)
 -- Name: account_holding_daily fk_holding_symbol; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1106,7 +1130,7 @@ ALTER TABLE ONLY public.account_holding_daily
 
 
 --
--- TOC entry 4923 (class 2606 OID 250085)
+-- TOC entry 4929 (class 2606 OID 250085)
 -- Name: account_performance_daily fk_performance_account; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1115,7 +1139,7 @@ ALTER TABLE ONLY public.account_performance_daily
 
 
 --
--- TOC entry 4908 (class 2606 OID 249707)
+-- TOC entry 4914 (class 2606 OID 249707)
 -- Name: provider_etf_holding fk_provider_etf_holding_provider_etf_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1124,7 +1148,7 @@ ALTER TABLE ONLY public.provider_etf_holding
 
 
 --
--- TOC entry 4907 (class 2606 OID 249692)
+-- TOC entry 4913 (class 2606 OID 249692)
 -- Name: provider_etf fk_provider_etf_provider_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1133,7 +1157,7 @@ ALTER TABLE ONLY public.provider_etf
 
 
 --
--- TOC entry 4909 (class 2606 OID 249727)
+-- TOC entry 4915 (class 2606 OID 249727)
 -- Name: ticker_value fk_ticker_symbol; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1142,7 +1166,7 @@ ALTER TABLE ONLY public.ticker_value
 
 
 --
--- TOC entry 4916 (class 2606 OID 249954)
+-- TOC entry 4922 (class 2606 OID 249954)
 -- Name: ticker_dividend_history ticker_dividend_history_symbol_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1150,11 +1174,20 @@ ALTER TABLE ONLY public.ticker_dividend_history
     ADD CONSTRAINT ticker_dividend_history_symbol_fkey FOREIGN KEY (symbol) REFERENCES public.ticker(symbol);
 
 
--- Completed on 2026-03-11 19:00:30
+--
+-- TOC entry 4933 (class 2606 OID 250239)
+-- Name: ticker_split_history ticker_split_history_symbol_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.ticker_split_history
+    ADD CONSTRAINT ticker_split_history_symbol_fkey FOREIGN KEY (symbol) REFERENCES public.ticker(symbol);
+
+
+-- Completed on 2026-03-14 12:21:41
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict FILeny5wAYRvodA4oSlg1OWMXJvWSWGsK0UkUr5OcTWQrLlYDyc9NHqGF7DEfXl
+\unrestrict tbiJV8UBmZ8lv67IoeM9U7lxkO0G4d8X8Cxb8Q4KTQFdb6tvxhzFQ37QUNxtEO0
 
