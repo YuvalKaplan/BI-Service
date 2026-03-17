@@ -111,7 +111,7 @@ def insert_holding_bulk(items: List[ProviderEtfHolding]):
                         market_value,
                         weight
                     )
-                    VALUES (%s, %s, %s, %s);
+                    VALUES (%s, %s, %s, %s, %s, %s);
                 """
 
                 insert_values = [

@@ -3,6 +3,7 @@ from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
 from modules.core.db import db_pool_instance_bt
+from modules.bt.actions.classification import get_classifier
 
 @dataclass
 class Ticker:
@@ -138,14 +139,47 @@ def upsert(item: Ticker):
     except Error as e:
         raise Exception(f"Error upserting ticker into the DB: {e}")
 
-def mark_categories():
+def mark_style():
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute('SELECT public.fill_ticker_style_and_cap()')
+                cur.execute("""
+                    UPDATE public.ticker t
+                    SET
+                        style_type = c.style_type,
+                        type_from = 'ETF'
+                    FROM public.categorize_ticker c
+                    WHERE t.symbol = c.symbol
+                    AND c.style_type IS NOT NULL;
+                """)
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT symbol
+                    FROM public.ticker
+                    WHERE style_type IS NULL
+                """)
+            missing_symbols = [row[0] for row in cur.fetchall()]
+            print(f"Classification using model needed for {len(missing_symbols)} tickers")
+
+            classifier = get_classifier(update_training_set=False)
+            results = classifier.classify_symbols(missing_symbols)
+
+            updates = [(r["style"], "MODEL", r["symbol"]) for r in results]
+            with conn.cursor() as cur:
+                update_sql = """
+                    UPDATE public.ticker
+                    SET style_type = %s,
+                        type_from = %s
+                    WHERE symbol = %s
+                """
+                cur.executemany(update_sql, updates)
+                conn.commit()
+
         return
     except Error as e:
         raise Exception(f"Error marking the categories for the tickers in the DB: {e}")
+    
+
               
 def mark_split_invalid(symbols: list[str], start_date: date, end_date: date):
     try:
@@ -170,4 +204,5 @@ def mark_split_invalid(symbols: list[str], start_date: date, end_date: date):
         return
     except Error as e:
         raise Exception(f"Error marking the categories for the tickers in the DB: {e}")
-              
+
+

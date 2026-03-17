@@ -14,7 +14,17 @@ class CategorizeEtfHolding:
     id: Optional[int]
     created_at: Optional[datetime]
 
+def fetch_all():
 
+    with db_pool_instance.get_connection() as conn:
+        with conn.cursor(row_factory=class_row(CategorizeEtfHolding)) as cur:
+
+            cur.execute(
+                "SELECT * FROM categorize_etf_holding"
+            )
+
+            return cur.fetchall()
+        
 def insert_holding(categorize_etf_id, holding_date: date, tickers: List[str]):
     if not tickers:
         return

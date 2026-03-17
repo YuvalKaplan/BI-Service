@@ -1,6 +1,8 @@
 import log
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Dict
 from datetime import date
 from collections import deque
 from threading import Lock
@@ -43,7 +45,6 @@ def throttle_api_calls() -> None:
 
         # Consume a token
         _call_timestamps.append(time.monotonic())
-
 
 def get_jsonparsed_data(url) -> dict:
     response = urlopen(url)
@@ -123,7 +124,7 @@ def get_stock_historic_splits(symbol: str) -> list[dict[str,str]] | str:
         message = f"Failed to get historic splits for {symbol}. Response from service provider: {e}"
         log.record_error(message)
         return message
-    
+
 def get_stock_historic_market_cap(symbol: str, start: date, end: date) -> list[dict[str,str]] | str:
     try:
         throttle_api_calls()
@@ -141,6 +142,106 @@ def get_stock_historic_market_cap(symbol: str, start: date, end: date) -> list[d
         message = f"Failed to get historic market cap price for {symbol}. Response from service provider: {e}"
         log.record_error(message)
         return message
+
+# ------------------------------------------------------------------
+# Fetch company list and factors forr use in classification universe
+# ------------------------------------------------------------------
+def fetch_company_factors(symbol) -> tuple[Dict, Dict]:
+    apikey = os.getenv('SECRET_MARKET_DATA_API_KEY')
+
+    def _fetch(endpoint: str):
+        throttle_api_calls()
+        return get_jsonparsed_data(endpoint)
+
+    try:
+        endpoints = {
+            "profile": f"{FMP_API_URL}/profile?symbol={symbol}&apikey={apikey}",
+            "growth": f"{FMP_API_URL}/financial-growth?symbol={symbol}&apikey={apikey}",
+            "ratios": f"{FMP_API_URL}/ratios-ttm?symbol={symbol}&apikey={apikey}",
+            "metrics": f"{FMP_API_URL}/key-metrics-ttm?symbol={symbol}&apikey={apikey}",
+            "income": f"{FMP_API_URL}/income-statement?symbol={symbol}&limit=1&apikey={apikey}",
+            "cashflow": f"{FMP_API_URL}/cash-flow-statement?symbol={symbol}&limit=1&apikey={apikey}",
+        }
+
+        results = {}
+
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = {name: executor.submit(_fetch, url) for name, url in endpoints.items()}
+
+            for name, future in futures.items():
+                results[name] = future.result()
+
+        profile = results["profile"]
+        growth = results["growth"]
+        ratios = results["ratios"]
+        metrics = results["metrics"]
+        income = results["income"]
+        cashflow = results["cashflow"]
+
+        if not all([growth, ratios, metrics, income, cashflow]):
+            return {}, {}
+        
+        p = profile[0]
+        g = growth[0]
+        r = ratios[0]
+        m = metrics[0]
+        i = income[0]
+        c = cashflow[0]
+
+        revenue = i.get("revenue", 1)
+
+        profile = {
+            "sector": p.get("sector"),
+            "isin": p.get("isin"),
+            "cik": p.get("cik"),
+            "exchange": p.get("exchange"),
+            "company_name": p.get("companyName"),
+            "industry": p.get("industry"),
+            "market_cap": p.get("marketCap", 0),
+        }
+
+        factors = {
+            "sector": p.get("sector"),
+            "industry": p.get("industry"),
+            "market_cap": p.get("marketCap", 0),
+
+            # Growth factors
+            "revenue_growth": g.get("revenueGrowth"),
+            "gross_profit_growth": g.get("grossProfitGrowth"),
+            "eps_growth": g.get("epsgrowth"),
+            "ebitda_growth": g.get("ebitgrowth"),
+            "operating_income_growth": g.get("operatingIncomeGrowth"),
+            "net_income_growth": g.get("netIncomeGrowth"),
+            "asset_growth": g.get("assetGrowth"),
+            "fcf_growth": g.get("freeCashFlowGrowth"),
+            "gross_margin": r.get("grossProfitMarginTTM"),
+            "operating_margin": r.get("operatingProfitMarginTTM"),
+            "rd_ratio": i.get("researchAndDevelopmentExpenses", 0) / max(revenue,1),
+            "capex_ratio": abs(c.get("capitalExpenditure",0)) / max(revenue,1),
+
+            # Value factors
+            "pe": r.get("priceToEarningsRatioTTM"),
+            "pb": r.get("priceToBookRatioTTM"),
+            "ps": r.get("priceToSalesRatioTTM"),
+            "ev_ebitda": m.get("enterpriseValueMultipleTTM"),
+            "price_to_fcf": m.get("priceToFreeCashFlowRatioTTM"),
+            "price_to_sales": m.get("priceToSalesRatioTTM"),
+            "price_to_operating_cf": m.get("priceToOperatingCashFlowRatioTTM"),
+
+            # Yield/other value
+            "earnings_yield": m.get("earningsYieldTTM"),
+            "fcf_yield": m.get("freeCashFlowYieldTTM"),
+            "dividend_yield": r.get("dividendYieldTTM"),
+            "book_to_price": 1 / (r.get("priceToBookRatioTTM",1) or 1),
+            "sales_to_price": 1 / (r.get("priceToSalesRatioTTM",1) or 1),
+            "cashflow_to_price": 1 / (m.get("priceToOperatingCashFlowsRatioTTM",1) or 1)
+        }
+        return profile, factors
+    
+    except Exception as e:
+        message = f"Failed to get factors for classificationfor symbol {symbol}. Response from service provider: {e}"
+        log.record_error(message)
+        raise e
 
 def get_etf_holdings(symbol: str, on_date: date) -> list[dict[str,str]] | str:
     try:
