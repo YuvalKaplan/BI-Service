@@ -41,6 +41,15 @@ def insert_dividends_bulk(items: List[TickerDividendHistory]):
     
     symbol = items[0].symbol
 
+    # Use a dictionary to keep only the first occurrence of each date
+    seen_dates = {}
+    unique_items: List[TickerDividendHistory] = []
+    
+    for item in items:
+        if item.ex_date not in seen_dates:
+            seen_dates[item.ex_date] = True
+            unique_items.append(item)
+
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
@@ -62,7 +71,7 @@ def insert_dividends_bulk(items: List[TickerDividendHistory]):
 
                 insert_values = [
                     (i.symbol, i.ex_date, i.amount_per_share)
-                    for i in items
+                    for i in unique_items
                 ]
 
                 cur.executemany(insert_sql, insert_values)

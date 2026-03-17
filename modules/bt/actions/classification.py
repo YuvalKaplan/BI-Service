@@ -100,8 +100,6 @@ def train_model():
 
     df = pd.DataFrame(rows)
 
-    print(df)
-
     # --- Define categorical features ---
     categorical_features = ["sector", "industry"]
 
@@ -153,8 +151,10 @@ class StyleClassifier:
     def classify_symbols(self, symbols: list[str]):
 
         rows = []
-
+        count = 0
         for symbol in symbols:
+            count += 1
+            print(f"Classifying {symbol} with model ({count} out of {len(symbols)})")
 
             profile, factors = fetch_company_factors(symbol)
 

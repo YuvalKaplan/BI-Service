@@ -28,10 +28,12 @@ def run(symbols: list[str], start_date: date, end_date: date) -> tuple[int, int,
         missing_symbols = []
         existing = 0
         start = time.monotonic()
+        count = 0
 
         print(f"Starting Stock Info Download for {len(symbols)} ticker symbols.")
         
         for s in symbols:
+            count += 1
             t = ticker.fetch_by_symbol(s)
             if t is not None and t.invalid:
                 missing_symbols.append(s)
@@ -137,7 +139,7 @@ def run(symbols: list[str], start_date: date, end_date: date) -> tuple[int, int,
             # BULK insert instead of row-by-row
             ticker_value.upsert_bulk(ticker_values)
 
-            print(f"Downloaded and saved {s}")
+            print(f"Downloaded and saved {s} ({count} out of {len(symbols)})")
 
         log.record_status(f"Run time (seconds): {time.monotonic() - start}")
         if existing:

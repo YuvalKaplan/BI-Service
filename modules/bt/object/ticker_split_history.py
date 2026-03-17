@@ -20,6 +20,15 @@ def insert_split_bulk(items: List[TickerSplitHistory]):
     
     symbol = items[0].symbol
 
+    # Use a dictionary to keep only the first occurrence of each date
+    seen_dates = {}
+    unique_items: List[TickerSplitHistory] = []
+    
+    for item in items:
+        if item.date not in seen_dates:
+            seen_dates[item.date] = True
+            unique_items.append(item)
+
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
@@ -42,7 +51,7 @@ def insert_split_bulk(items: List[TickerSplitHistory]):
 
                 insert_values = [
                     (i.symbol, i.date, i.numerator, i.denominator)
-                    for i in items
+                    for i in unique_items
                 ]
 
                 cur.executemany(insert_sql, insert_values)

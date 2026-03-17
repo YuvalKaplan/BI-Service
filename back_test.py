@@ -19,7 +19,7 @@ if __name__ == '__main__':
         start_time = datetime.now(timezone.utc)
         
         try:
-            results = orchestrator.run(date(2026,1,22), date(2026,2,1))
+            results = orchestrator.run(date(2025,1,1), date(2025,12,31))
         except Exception as e:
             print(f"Best Ideas Cron Failed with error:\n{e}\n\n")
             raise e

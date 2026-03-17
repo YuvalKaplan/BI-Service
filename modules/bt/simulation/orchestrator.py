@@ -26,7 +26,7 @@ def run(start_date: date, end_date: date):
     symbols = provider_etf_holding.fetch_tickers_for_etfs(etf_ids)
 
     # Download all stock information (prices, market cap and dividends)
-    stocks_download.run(symbols, start_date - timedelta(days=15), end_date + timedelta(days=15))
+    # stocks_download.run(symbols, start_date - timedelta(days=15), end_date + timedelta(days=15))
 
     # Mark the stocks as value/growh, based on Value/Growth ETF sources and for not found in ETFs, use the classification model
     ticker.mark_style()

@@ -142,6 +142,7 @@ def upsert(item: Ticker):
 def mark_style():
     try:
         with db_pool_instance_bt.get_connection() as conn:
+            # 1. Update from ETF categorization
             with conn.cursor() as cur:
                 cur.execute("""
                     UPDATE public.ticker t
@@ -152,15 +153,23 @@ def mark_style():
                     WHERE t.symbol = c.symbol
                     AND c.style_type IS NOT NULL;
                 """)
+            conn.commit()
+
+            # 2. Get symbols missing classification
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT symbol
                     FROM public.ticker
                     WHERE style_type IS NULL
+                      AND invalid IS NULL
                 """)
-            missing_symbols = [row[0] for row in cur.fetchall()]
+                missing_symbols = [row[0] for row in cur.fetchall()]
+            
+            conn.commit()
+
             print(f"Classification using model needed for {len(missing_symbols)} tickers")
 
+            # 3. Classify missing symbols
             classifier = get_classifier(update_training_set=False)
             results = classifier.classify_symbols(missing_symbols)
 
@@ -173,7 +182,8 @@ def mark_style():
                     WHERE symbol = %s
                 """
                 cur.executemany(update_sql, updates)
-                conn.commit()
+
+            conn.commit()
 
         return
     except Error as e:
