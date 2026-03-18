@@ -24,6 +24,7 @@ This can then be activated with:
 ### Modules
 #### Currently using modules:
 dotenv psycopg psycopg-pool psycopg_binary tld bcrypt playwright playwright-stealth mailgun pydantic pandas scikit-learn openpyxl xlrd
+fds.sdk.utils fds.sdk.FactSetOwnership
 
 #### Package manager
 The packages are installed using the `pip` command, for example:
