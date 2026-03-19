@@ -23,18 +23,18 @@ def ticker_values_to_df(values: list[TickerValue]) -> pd.DataFrame:
     )
 
 
-def fetch_price_dates_available_past_week(end_date: date) -> list[date]:
+def fetch_price_dates_available_past_period(end_date: date, look_back_days: int) -> list[date]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
                 query = """
                     SELECT DISTINCT (value_date::date)
-                        value_date
-                    FROM ticker_value
-                    WHERE (value_date > %s - INTERVAL '1 week') AND (value_date <= %s)
-                    ORDER BY value_date::date;
+                        FROM ticker_value
+                        WHERE value_date > %s - (%s * INTERVAL '1 day') 
+                        AND value_date <= %s
+                        ORDER BY 1;
                 """
-                cur.execute(query, (end_date,end_date,))
+                cur.execute(query, (end_date, look_back_days, end_date,))
                 return [row[0] for row in cur.fetchall()]
     except Error as e:
         raise Exception(f"Error retrieving the list of dates available in the past week: {e}")

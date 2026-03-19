@@ -55,7 +55,7 @@ def run(today: date) -> List[FundChangesResult]:
         for f in funds:
             strategy = getStrategyFromJson(f.strategy)
             provider_etfs = strategy.provider_etfs or []
-        
+            
             if (strategy.style.name == "blend") and (strategy.style.value is not None) and (strategy.style.growth is not None):
                 fresh_ideas_value = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type="value", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
                 fresh_ideas_growth = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type="growth", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)

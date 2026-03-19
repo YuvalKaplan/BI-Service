@@ -17,7 +17,7 @@ class ProviderEtfHolding:
     market_value: float
     weight: float
 
-def fetch_holding_dates_available_past_week(provider_etf_id: int) -> list[date]:
+def fetch_holding_dates_available_past_period(provider_etf_id: int, look_back_days: int) -> list[date]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
@@ -27,10 +27,10 @@ def fetch_holding_dates_available_past_week(provider_etf_id: int) -> list[date]:
                     INNER JOIN ticker AS t ON peh.ticker = t.symbol
                     WHERE t.invalid IS null
                       AND peh.provider_etf_id = %s 
-                      AND peh.trade_date > NOW() - INTERVAL '1 week'
+                      AND peh.trade_date > NOW() - (%s * INTERVAL '1 days')
                     ORDER BY peh.trade_date::date;
                 """
-                cur.execute(query, (provider_etf_id,))
+                cur.execute(query, (provider_etf_id, look_back_days))
                 return [row[0] for row in cur.fetchall()]
     except Error as e:
         raise Exception(f"Error retrieving the list of holding dates available in the past week: {e}")

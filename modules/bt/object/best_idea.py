@@ -74,7 +74,16 @@ def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: s
         return items
     except Error as e:
         raise Exception(f"Error fetching the BestIdeaResult from the DB: {e}")
-                
+
+
+def reset():
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM best_idea")          
+    except Error as e:
+        raise Exception(f"Error reseting the Account data in the DB: {e}")
+    
 """
 The following is the SQL Function for get_best_ideas_by_ranking:
 CREATE OR REPLACE FUNCTION public.get_best_ideas_by_ranking(

@@ -2,14 +2,15 @@ import log
 import pandas as pd
 from datetime import date
 from modules.bt.object import provider, provider_etf
-from modules.bt.object.provider_etf_holding import ProviderEtfHolding, fetch_holding_dates_available_past_week, fetch_valid_holdings_by_provider_etf_id
-from modules.bt.object.ticker_value import TickerValue, fetch_price_dates_available_past_week, fetch_tickers_by_symbols_on_date
+from modules.bt.object.provider_etf_holding import ProviderEtfHolding, fetch_holding_dates_available_past_period, fetch_valid_holdings_by_provider_etf_id
+from modules.bt.object.ticker_value import TickerValue, fetch_price_dates_available_past_period, fetch_tickers_by_symbols_on_date
 from modules.bt.object import best_idea
 from modules.bt.object.ticker_value import TickerValue
 
+LOOK_BACK_FOR_COMMON_DATE=14
 MIN_HOLDINGS = 10
 MAX_DATE_DIFF_DAYS = 5
-MAX_BEST_IDEAS_PER_FUND = 3
+MAX_BEST_IDEAS_PER_FUND = 2
 BASE_INDEX_LEVEL = 100.0
 
 def find_best_ideas(
@@ -95,15 +96,15 @@ def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
         log.record_status(f"Running Best Ideas Generator - will proccess {len(etf_ids)} ETFs.")
 
         total_etfs = len(etf_ids)
-        generated_etfs = 0
+        processed_etfs = 0
         problem_etfs: list[str] = []
-        available_price_dates = fetch_price_dates_available_past_week(today)
+        available_price_dates = fetch_price_dates_available_past_period(today, LOOK_BACK_FOR_COMMON_DATE)
         
         for etf_id in etf_ids:
             try:
-                available_holding_dates = fetch_holding_dates_available_past_week(etf_id, today)
+                available_holding_dates = fetch_holding_dates_available_past_period(etf_id, today, LOOK_BACK_FOR_COMMON_DATE)
                 if len(available_holding_dates) == 0:
-                    record_problem(etf_id=etf_id, error="No holdings have been downloaded for the past week", message=None, problem_etfs=problem_etfs)
+                    record_problem(etf_id=etf_id, error=f"No holdings have been downloaded for the past {LOOK_BACK_FOR_COMMON_DATE} days", message=None, problem_etfs=problem_etfs)
                     continue
 
                 latest_common_date = max(set(available_price_dates) & set(available_holding_dates), default=None)
@@ -137,12 +138,12 @@ def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
                     value_date=latest_common_date
                 )
                 best_idea.insert_bulk(rows)
-                generated_etfs += 1
+                processed_etfs += 1
             except Exception as e:
                 record_problem(etf_id=etf_id, error=f"{e}", message=None, problem_etfs=problem_etfs)
 
         log.record_status(f"Finished Best Ideas Generator batch run on {total_etfs} etfs.\n")
-        return total_etfs, generated_etfs, problem_etfs
+        return total_etfs, processed_etfs, problem_etfs
     
     except Exception as e:
         log.record_error(f"Error in best ideas generator batch run: {e}")

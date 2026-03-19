@@ -4,7 +4,7 @@ import os
 from datetime import date, datetime, timezone
 from modules.bt.object.exit import cleanup
 from modules.bt.simulation import orchestrator
-from modules.core.hdata import get_etf_holdings
+
 
 atexit.register(cleanup)
 

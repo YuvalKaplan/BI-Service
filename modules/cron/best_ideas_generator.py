@@ -2,10 +2,11 @@ import log
 from modules.object import batch_run, batch_run_log
 from modules.object import provider, provider_etf
 from modules.calc.best_ideas import find_best_ideas
-from modules.object.provider_etf_holding import fetch_holding_dates_available_past_week, fetch_valid_holdings_by_provider_etf_id
-from modules.object.ticker_value import fetch_price_dates_available_past_week, fetch_tickers_by_symbols_on_date
+from modules.object.provider_etf_holding import fetch_holding_dates_available_past_period, fetch_valid_holdings_by_provider_etf_id
+from modules.object.ticker_value import fetch_price_dates_available_past_period, fetch_tickers_by_symbols_on_date
 from modules.object import best_idea
 
+LOOK_BACK_FOR_COMMON_DATE=7
 MIN_HOLDINGS = 10
 MAX_DATE_DIFF_DAYS = 5
 MAX_BEST_IDEAS_PER_FUND = 10
@@ -31,7 +32,7 @@ def run() -> tuple[int, int, list[str]]:
         total_etfs = 0
         generated_etfs = 0
         problem_etfs: list[str] = []
-        available_price_dates = fetch_price_dates_available_past_week()
+        available_price_dates = fetch_price_dates_available_past_period(LOOK_BACK_FOR_COMMON_DATE)
         for p in providers:
             pe_list = provider_etf.fetch_by_provider_id(p.id)
             total_etfs += len(pe_list)
@@ -39,7 +40,7 @@ def run() -> tuple[int, int, list[str]]:
 
             for pe in pe_list:
                 try:
-                    available_holding_dates = fetch_holding_dates_available_past_week(pe.id)
+                    available_holding_dates = fetch_holding_dates_available_past_period(pe.id, LOOK_BACK_FOR_COMMON_DATE)
                     if len(available_holding_dates) == 0:
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="No holdings have been downloaded for the past week", message=None, problem_etfs=problem_etfs)
                         continue

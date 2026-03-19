@@ -39,11 +39,11 @@ def run(symbols: list[str], start_date: date, end_date: date) -> tuple[int, int,
                 missing_symbols.append(s)
                 continue
 
-            # See if already loaded
-            avialable = ticker_value.fetch_tickers_availability_dates(s)
-            if len(avialable) != 0:
-                existing += 1
-                continue
+            # # See if already loaded
+            # avialable = ticker_value.fetch_tickers_availability_dates(s)
+            # if len(avialable) != 0:
+            #     existing += 1
+            #     continue
 
             sd = get_stock_profile(s)
             if isinstance(sd, str):
@@ -115,7 +115,7 @@ def run(symbols: list[str], start_date: date, end_date: date) -> tuple[int, int,
             # Keep only weekdays
             common_weekdays = [d for d in common_dates if d.weekday() < 5]
 
-            expected_days = weekday_count(start_date, end_date)
+            expected_days = weekday_count(min(common_dates), max(common_dates))
 
             valid_days = len(common_weekdays)
             coverage = valid_days / expected_days if expected_days else 0
@@ -123,7 +123,6 @@ def run(symbols: list[str], start_date: date, end_date: date) -> tuple[int, int,
             if coverage < 0.85:
                 ticker.update_invalid(s, f"Insufficient data coverage ({coverage:.1%})")
                 missing_symbols.append(s)
-                continue
 
             # Build dataclass list (vectorized style)
             ticker_values = [
