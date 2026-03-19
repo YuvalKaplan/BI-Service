@@ -18,7 +18,7 @@ class AccountPerformance:
     id: Optional[int] = None
 
 
-def fetch_previous_tpv(account_id: int, prev_date: date) -> Decimal:
+def fetch_total_value(account_id: int, prev_date: date) -> Decimal:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
@@ -37,8 +37,8 @@ def record_daily_performance(account_id: int, eval_date: date, cash_balance: Dec
 
         # 2. Fetch Yesterday's TPV to calculate return
         yesterday = eval_date - timedelta(days=1)
-        tpv_yesterday = fetch_previous_tpv(account_id, yesterday)
-        
+        tpv_yesterday = fetch_total_value(account_id, yesterday)
+
         # Daily Return = (Today / Yesterday) - 1
         # Handle the first day of backtest where yesterday is 0
         daily_ret = (tpv_today / tpv_yesterday) - 1 if tpv_yesterday > 0 else Decimal('0')

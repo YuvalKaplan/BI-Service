@@ -18,8 +18,8 @@ def distinct_provider_etfs(accounts) -> list[int]:
     return list(distinct_etfs)
 
 def run(start_date: date, end_date: date):
-    fund.reset_funds()
-    best_idea.reset()
+    # best_idea.reset()
+    # fund.reset_funds()
     account.reset_accounts()
 
     accounts = account.fetch_all()
@@ -40,11 +40,10 @@ def run(start_date: date, end_date: date):
     while current_sim_date <= end_date:
         print(f"Processing: {current_sim_date.strftime("%A, %d-%m-%Y")}")
 
-        if 1 <= current_sim_date.weekday() <= 5: # Tuesday through Saturday
-            x = 1
-            # Identify the lateset best ideas and construct todays target fund holdings.
-            # total_etfs, processed_etfs, problems = best_ideas_generator.run(etf_ids, current_sim_date)
-            # results = funds_update.run(current_sim_date)
+        # if current_sim_date.weekday() < 5: # Monday through Friday
+        #     # Identify the lateset best ideas and construct todays target fund holdings.
+        #     total_etfs, processed_etfs, problems = best_ideas_generator.run(etf_ids, current_sim_date)
+        #     results = funds_update.run(current_sim_date)
 
         # Update account based on daily activity (interest, dividends, transactions)
         for current_account in accounts:

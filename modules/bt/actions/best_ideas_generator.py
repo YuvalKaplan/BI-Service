@@ -3,10 +3,13 @@ import pandas as pd
 from datetime import date
 from modules.bt.object import provider, provider_etf
 from modules.bt.object.provider_etf_holding import ProviderEtfHolding, fetch_holding_dates_available_past_period, fetch_valid_holdings_by_provider_etf_id
-from modules.bt.object.ticker_value import TickerValue, fetch_price_dates_available_past_period, fetch_tickers_by_symbols_on_date
+from modules.bt.object.ticker_value import TickerValue, fetch_latest_price_date_for_ticker, fetch_tickers_by_symbols_on_date
 from modules.bt.object import best_idea
 from modules.bt.object.ticker_value import TickerValue
 
+# Configuration constants
+DAYS_NO_PRICING = 7 # Threshold for stale holdings
+MIN_HOLDINGS_WITH_PRICES_PCT=0.9
 LOOK_BACK_FOR_COMMON_DATE=14
 MIN_HOLDINGS = 10
 MAX_DATE_DIFF_DAYS = 5
@@ -86,65 +89,95 @@ def record_problem(etf_id: int, error: str, message: str | None, problem_etfs: l
     p = provider.fetch_by_etf_id(etf_id)
     etf = provider_etf.fetch_by_id(etf_id)
     item_info = f"[Provider: '{p.name}' ({p.id}), ETF: '{etf.name}' ({etf_id})]"
-    record = f"{item_info}\t{error}\t{message or ''}"
+    record = f"{item_info} - {error}. {message or ''}"
 
     log.record_status(record)
     problem_etfs.append(record)
 
-def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
-    try:
-        log.record_status(f"Running Best Ideas Generator - will proccess {len(etf_ids)} ETFs.")
 
-        total_etfs = len(etf_ids)
-        processed_etfs = 0
-        problem_etfs: list[str] = []
-        available_price_dates = fetch_price_dates_available_past_period(today, LOOK_BACK_FOR_COMMON_DATE)
-        
+def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
+    successes :list[str] = []
+    try:
+        log.record_status(f"Running Best Ideas Generator - processing {len(etf_ids)} ETFs.")
+        total_etfs, processed_etfs, problem_etfs = len(etf_ids), 0, []
+
         for etf_id in etf_ids:
             try:
-                available_holding_dates = fetch_holding_dates_available_past_period(etf_id, today, LOOK_BACK_FOR_COMMON_DATE)
-                if len(available_holding_dates) == 0:
+                # 1. Get the most recent holding date on or prior to 'today'
+                available_holding_dates = fetch_holding_dates_available_past_period(
+                    etf_id, today, LOOK_BACK_FOR_COMMON_DATE
+                )
+                if not available_holding_dates:
                     record_problem(etf_id=etf_id, error=f"No holdings have been downloaded for the past {LOOK_BACK_FOR_COMMON_DATE} days", message=None, problem_etfs=problem_etfs)
                     continue
-
-                latest_common_date = max(set(available_price_dates) & set(available_holding_dates), default=None)
-
-                if latest_common_date is None:
-                    message = f"Latest holdings date: {max(available_holding_dates).strftime("%b %d, %Y")}, Latest price date: {max(available_price_dates).strftime("%b %d, %Y")}"
-                    record_problem(etf_id=etf_id, error="Data sources out of sync", message=message, problem_etfs=problem_etfs)
-                    continue
-
-                holdings = fetch_valid_holdings_by_provider_etf_id(etf_id, latest_common_date)
-                if len(holdings) < MIN_HOLDINGS:
-                    if len(holdings) == 0:
-                        error = f"No holdings"
-                    else:
-                        error = f"Less than {MIN_HOLDINGS} holdings"
-                    record_problem(etf_id=etf_id, error=error, message=None, problem_etfs=problem_etfs)
-                    continue
                 
-                tickers = [h.ticker for h in holdings]
-                values = fetch_tickers_by_symbols_on_date(tickers, latest_common_date)
-
-                if len(values) < int(0.9 * len(holdings)):
-                    message = f"Holdings: {len(holdings)}, Values: {len(values)} - on date {latest_common_date.strftime("%b %d, %Y")}"
-                    record_problem(etf_id=etf_id, error="Too many prices missing (less than 90 percent of holdngs)", message=message, problem_etfs=problem_etfs)
+                target_date = max(available_holding_dates)
+                if target_date.weekday() >= 5:
+                    record_problem(etf_id=etf_id, error=f"No prices on weekends", message=None, problem_etfs=problem_etfs)
                     continue
 
-                best_ideas_df = find_best_ideas(holdings, values, MAX_BEST_IDEAS_PER_FUND)
+                holdings = fetch_valid_holdings_by_provider_etf_id(etf_id, target_date)
+                
+                # 2. Preemptively remove holdings with no pricing in the last DAYS_NO_PRICING
+                # This check ensures we don't fail an ETF just because of "dead" tickers
+                valid_tickers_for_etf = []
+                for h in holdings:
+                    # Logic assumes fetch_latest_price_date_for_ticker(h.ticker) exists or similar
+                    last_price_date = fetch_latest_price_date_for_ticker(h.ticker, target_date)
+                    if last_price_date and (target_date - last_price_date).days <= DAYS_NO_PRICING:
+                        valid_tickers_for_etf.append(h)
+                    else:
+                        record_problem(etf_id=etf_id, error=f"STALE HOLDING", message=f"The holding {h.ticker} has no prices for over {DAYS_NO_PRICING} days", problem_etfs=problem_etfs)
+                
+                # Update current holdings to only include non-stale tickers
+                current_holdings = valid_tickers_for_etf
+                ticker_symbols = [h.ticker for h in current_holdings]
+
+                if len(ticker_symbols) == 0:
+                    record_problem(etf_id=etf_id, error=f"No holdings with matching prices", message=None, problem_etfs=problem_etfs)
+                    continue
+
+                # 3. Fetch prices for EXACT target_date
+                values = fetch_tickers_by_symbols_on_date(ticker_symbols, target_date)
+                
+                # 4. Percentage Threshold Case
+                # We filter current_holdings down to only those that actually returned a value for the target_date
+                priced_symbols = {v.symbol for v in values}
+                final_holdings_to_process = [h for h in current_holdings if h.ticker in priced_symbols]
+                
+                coverage_ratio = len(final_holdings_to_process) / len(current_holdings)
+
+                if coverage_ratio < MIN_HOLDINGS_WITH_PRICES_PCT:
+                    missing_count = len(current_holdings) - len(final_holdings_to_process)
+                    msg = f"Coverage {coverage_ratio:.1%}. Missing {missing_count} prices for date {target_date.strftime('%Y-%m-%d')}"
+                    record_problem(etf_id=etf_id, error="Insufficient pricing coverage", message=msg, problem_etfs=problem_etfs)
+                    continue
+
+                # 5. Generate and batch insert
+                best_ideas_df = find_best_ideas(current_holdings, values, MAX_BEST_IDEAS_PER_FUND)
                 rows = best_idea.df_to_rows(
                     best_ideas_df,
                     provider_etf_id=etf_id,
-                    value_date=latest_common_date
+                    value_date=target_date
                 )
                 best_idea.insert_bulk(rows)
                 processed_etfs += 1
-            except Exception as e:
-                record_problem(etf_id=etf_id, error=f"{e}", message=None, problem_etfs=problem_etfs)
 
-        log.record_status(f"Finished Best Ideas Generator batch run on {total_etfs} etfs.\n")
+                successes.append((f"Generated {len(rows)} best ideas for ETF {etf_id} using holdings from {target_date.strftime('%Y-%m-%d')}."))
+
+            except Exception as e:
+                record_problem(etf_id=etf_id, error=str(e), message="Failed running best ideas for etfs", problem_etfs=problem_etfs)
+
+        log.record_status(f"Finished batch run. Successful: {processed_etfs}/{total_etfs}")
+        if successes:
+            print("\n--- Summary of Successful Runs ---")
+            print("\n".join(successes))
+        else:
+            print("\n--- No ETFs were successfully processed ---")
+
+        print("\n")
         return total_etfs, processed_etfs, problem_etfs
     
     except Exception as e:
-        log.record_error(f"Error in best ideas generator batch run: {e}")
+        log.record_error(f"Critical batch error: {e}")
         raise e

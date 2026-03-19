@@ -1,5 +1,5 @@
 from datetime import date
-from typing import List
+from typing import Optional, List
 from psycopg.errors import Error
 from psycopg.rows import class_row, dict_row
 import pandas as pd
@@ -22,23 +22,6 @@ def ticker_values_to_df(values: list[TickerValue]) -> pd.DataFrame:
         .query("stock_price > 0 and market_cap > 0")
     )
 
-
-def fetch_price_dates_available_past_period(end_date: date, look_back_days: int) -> list[date]:
-    try:
-        with db_pool_instance_bt.get_connection() as conn:
-            with conn.cursor() as cur:
-                query = """
-                    SELECT DISTINCT (value_date::date)
-                        FROM ticker_value
-                        WHERE value_date > %s - (%s * INTERVAL '1 day') 
-                        AND value_date <= %s
-                        ORDER BY 1;
-                """
-                cur.execute(query, (end_date, look_back_days, end_date,))
-                return [row[0] for row in cur.fetchall()]
-    except Error as e:
-        raise Exception(f"Error retrieving the list of dates available in the past week: {e}")
-
 def fetch_tickers_availability_dates(symbol: str) -> List[dict]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
@@ -52,7 +35,49 @@ def fetch_tickers_availability_dates(symbol: str) -> List[dict]:
                 return cur.fetchall()
     except Error as e:
         raise Exception(f"Error retrieving dates availability for a ticker symbol TickerValue data: {e}")
+
+def fetch_latest_price_date_for_ticker(symbol: str, as_of_date: date) -> Optional[date]:
+    """
+    Retrieves the absolute latest date for which a price exists for a given ticker.
+    Used to determine if a ticker is 'dead' or missing recent data.
+    """
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                query = """
+                    SELECT MAX(value_date)::date
+                    FROM public.ticker_value
+                    WHERE symbol = %s
+                      AND value_date <= %s
+                """
+                cur.execute(query, (symbol, as_of_date,))
+                result = cur.fetchone()
+                
+                # fetchone() returns a tuple; the date is the first element
+                return result[0] if result and result[0] is not None else None
+                
+    except Error as e:
+        return None
     
+def fetch_ticker_on_date(symbol: str, for_date: date) -> Optional[TickerValue]:
+    """
+    Retrieves the absolute latest date for which a price exists for a given ticker.
+    Used to determine if a ticker is 'dead' or missing recent data.
+    """
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(TickerValue)) as cur:
+                query = """
+                    SELECT *
+                    FROM public.ticker_value
+                    WHERE symbol = %s
+                      AND value_date = %s
+                """
+                cur.execute(query, (symbol, for_date,))
+                return cur.fetchone()
+    except Error as e:
+        raise Exception(f"Error retrieving TickerValue for specific date: {e}")
+
 def fetch_tickers_by_symbols_on_date(symbols: List[str], value_date: date) -> List[TickerValue]:
     try:
         with db_pool_instance_bt.get_connection() as conn:

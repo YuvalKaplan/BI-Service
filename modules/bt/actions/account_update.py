@@ -64,26 +64,28 @@ def identify_rebalance_needs(
         current_holdings = {h.symbol: h for h in account_holdings}
 
         all_symbols = set(targets_holdings.keys()) | set(current_holdings.keys())
-        trade_candidates = []
+        candidates = []
 
-        for sym in all_symbols:
-            target = targets_holdings.get(sym)
-            actual = current_holdings.get(sym)
+        for symbol in all_symbols:
+            if symbol == 'AAWW':
+                print('Stop here!!!!')
+            target = targets_holdings.get(symbol)
+            actual = current_holdings.get(symbol)
 
             if target and not actual:
-                trade_candidates.append(TradeCandidate(
-                    symbol=sym, action="ENTER", priority=target.ranking
+                candidates.append(TradeCandidate(
+                    symbol=symbol, action="ENTER", priority=target.ranking
                 ))
             elif actual and not target:
-                trade_candidates.append(TradeCandidate(
-                    symbol=sym, action="EXIT", priority=0, 
+                candidates.append(TradeCandidate(
+                    symbol=symbol, action="EXIT", priority=0, 
                     current_qty=Decimal(str(actual.quantity))
                 ))
             elif actual and target:
                 # Optional: Logic for drift rebalance can be added here
                 pass 
 
-        return target_symbols, trade_candidates
+        return target_symbols, candidates
 
     except Exception as e:
         print(f"Error comparing holdings: {e}")
@@ -170,7 +172,10 @@ def execute_trade(
         ))
 
         return local_cash + net
-    
+
+from modules.bt.object.ticker_value import fetch_ticker_on_date, fetch_latest_price_date_for_ticker
+from modules.bt.object.account_holding import fetch_latest_common_date_for_ticker
+
 def execute_minimal_rebalance(
     account_id: int,
     num_fund_holdings: int,
@@ -181,23 +186,51 @@ def execute_minimal_rebalance(
 
     if not candidates:
         return []
-
-    # --- FETCH DATA ---
-    cash_val = float(acl.get_cash_balance(account_id, current_sim_date))
-    print(f"Pre Trading cash balance on {current_sim_date}: {cash_val}")
-    
+   
+    # --- FETCH LATEST INDIVIDUAL PRICE DATA ---
     all_syms = list(set([h.symbol for h in account_holdings] + [c.symbol for c in candidates]))
-    ticker_data = ticker_value.fetch_tickers_by_symbols_on_date(all_syms, current_sim_date)
-    prices = {t.symbol: float(t.stock_price) for t in ticker_data if t.stock_price}
-    holdings_map = {h.symbol: float(h.quantity) for h in account_holdings}
+    prices = {}
+    quantities = {}
+    sync_dates = {}
+
+    for symbol in all_syms:
+        if symbol == 'AAWW':
+            print('Stop here!!!!')
+
+        # Determine if we already hold this (to decide which date logic to use)
+        is_held = any(h.symbol == symbol and h.quantity > 0 for h in account_holdings)
+
+        if is_held:
+            # 1. EXISTING: Must have a common date to safely Sell/Rebalance
+            sync_date = fetch_latest_common_date_for_ticker(account_id, symbol, current_sim_date)
+        else:
+            # 2. NEW BUY: Only needs the latest available price date
+            sync_date = fetch_latest_price_date_for_ticker(symbol, current_sim_date)
+        
+        if sync_date:
+            tv = fetch_ticker_on_date(symbol, sync_date)
+            # Only fetch holding if it's an existing position
+            holding_at_date = ah.fetch_account_holding_on_date(account_id, symbol, sync_date) if is_held else None
+            
+            if tv and tv.stock_price:
+                prices[symbol] = float(tv.stock_price)
+                quantities[symbol] = float(holding_at_date.quantity) if holding_at_date else 0.0
+                sync_dates[symbol] = sync_date
+                continue
+
+        # Fallback if no date or price found
+        prices[symbol] = 0.0
+        quantities[symbol] = 0.0
+        sync_dates[symbol] = None
 
     # --- BUILD DATAFRAME ---
     df = pd.DataFrame({'symbol': all_syms})
-
-    df['qty_held'] = df['symbol'].map(holdings_map).fillna(0.0)
+    df['qty_held'] = df['symbol'].map(quantities).fillna(0.0)
     df['price'] = df['symbol'].map(prices).fillna(0.0)
+    df['sync_date'] = df['symbol'].map(sync_dates)
     df['current_val'] = df['qty_held'] * df['price']
 
+    cash_val = float(acl.get_cash_balance(account_id, current_sim_date))
     tpv = cash_val + df['current_val'].sum()
     target_val_per_stock = tpv / num_fund_holdings if num_fund_holdings > 0 else 0.0
 
@@ -206,7 +239,8 @@ def execute_minimal_rebalance(
     sell_symbols = [c.symbol for c in candidates if c.action == "EXIT"]
     buy_symbols = [c.symbol for c in candidates if c.action == "ENTER"]
 
-    held_symbols = set(holdings_map)
+    # Use the keys from your synced quantities dictionary where qty > 0
+    held_symbols = {sym for sym, qty in quantities.items() if qty > 0}
 
     def get_target(sym):
         action = candidate_map.get(sym)
@@ -230,7 +264,7 @@ def execute_minimal_rebalance(
 
     # --- SELLS FIRST (EXIT POSITIONS) ---
     for _, row in df[df['symbol'].isin(sell_symbols)].iterrows():
-
+        
         price = to_price(row['price'])
         held_qty = Decimal(str(row['qty_held'])).quantize(Decimal('1'), rounding=ROUND_DOWN)
         
@@ -448,12 +482,34 @@ def create_daily_snapshot(
     if df.empty: 
         return Decimal(0.0), []
 
-    # 6. Market Value & Weights
+        # 6. Market Value & Weights
     prices_raw = ticker_value.fetch_tickers_by_symbols_on_date(df['symbol'].tolist(), eval_date)
-    price_map = {p.symbol: float(p.stock_price) for p in prices_raw if p.stock_price}
+    price_map = {p.symbol: float(p.stock_price) for p in prices_raw if p.stock_price and p.stock_price > 0}
     
-    df['price'] = df['symbol'].map(price_map).fillna(0.0)
+    # Map today's prices
+    df['price'] = df['symbol'].map(price_map)
+
+    # Fallback logic: If today's price is missing/zero, use previous day's implied price
+    # We calculate implied_prev_price from the previous holdings we already have in df_prev
+    if not df_prev.empty:
+        # Avoid division by zero for symbols that had 0 qty yesterday
+        df_prev['prev_price'] = df_prev.apply(
+            lambda x: float(x['market_value']) / float(x['quantity']) if float(x['quantity']) > 0 else 0.0, axis=1
+        )
+        prev_price_map = dict(zip(df_prev['symbol'], df_prev['prev_price']))
+        # Fill only the NaNs (where today's price was 0 or missing)
+        df['price'] = df['price'].fillna(df['symbol'].map(prev_price_map))
+
+    # Final fallback to 0.0 for entirely new symbols with no history and no current price
+    df['price'] = df['price'].fillna(0.0)
     df['mkt_val'] = df['new_qty'] * df['price']
+
+    # # We can now safely remove the hard ValueError or change it to a warning 
+    # # since we have a fallback mechanism.
+    # if (df['mkt_val'] == 0).any():
+    #     zero_symbols = df.loc[df['mkt_val'] == 0, 'symbol'].tolist()
+    #     log.record_warning(f"Market value is 0 for {zero_symbols} even after fallback.")
+
     
     # Cash at End of Day
     eod_cash = float(acl.get_cash_balance(account_id, eval_date + timedelta(days=1)))
@@ -524,27 +580,29 @@ def daily_actions(account: account.Account, current_sim_date: date):
     # Update Cash: Apply interest and record dividends 
     process_daily_dividends(account.id, current_sim_date)   
 
-    # Fetch current holding data
-    account_holdings = ah.fetch_current_account_snapshot(account.id, current_sim_date)
-    held_symbols = list([h.symbol for h in account_holdings])
-    current_ticker_data = ticker_value.fetch_tickers_by_symbols_on_date(held_symbols, current_sim_date)
-    found_symbols = {t.symbol for t in current_ticker_data if t.stock_price}
-    missing_prices = [s for s in held_symbols if s not in found_symbols]
+    if current_sim_date.weekday() < 5: # Monday -> Friday
+        # Fetch current holding data
+        account_holdings = ah.fetch_current_account_snapshot(account.id, current_sim_date)
+        held_symbols = list([h.symbol for h in account_holdings])
+        current_ticker_data = ticker_value.fetch_tickers_by_symbols_on_date(held_symbols, current_sim_date)
+        symbols_with_prices = {t.symbol for t in current_ticker_data if t.stock_price}
+        missing_prices = [s for s in held_symbols if s not in symbols_with_prices]
+        if len(missing_prices) != 0 and len(missing_prices) != len(held_symbols):
+            print(f"** Missing pricing on {current_sim_date} for {len(missing_prices)} out of {len(held_symbols)} - {', '.join(missing_prices)} - will use most recently available")
 
-    if len(missing_prices) == 0:    
         # Check for changes in target fund_holdings
-        fund_symbols, needs = identify_rebalance_needs(account.id, account.strategy_fund_id, current_sim_date, account_holdings)
+        fund_symbols, candidates = identify_rebalance_needs(account.id, account.strategy_fund_id, current_sim_date, account_holdings)
         
         # Execute the changes and rebalance
-        today_trades = execute_minimal_rebalance(account.id, len(fund_symbols), needs, current_sim_date, account_holdings)
+        today_trades = execute_minimal_rebalance(account.id, len(fund_symbols), candidates, current_sim_date, account_holdings)
 
         # Create Today's Snapshot
         daily_return, snapshots = create_daily_snapshot(account_id=account.id, eval_date=current_sim_date, previous_holdings=account_holdings, today_trades=today_trades)
 
         # Record Performance
         benchmark_comparison(account.id, account.strategy_fund_id, current_sim_date, daily_return, snapshots)
-    else:
-        print(f"Skippig Trading - Missing pricing on {current_sim_date} for {len(missing_prices)} out of {len(found_symbols)}")
+ 
+            
         
     # Update interest on end of day cash 
     process_daily_interest(account.id, current_sim_date)    
