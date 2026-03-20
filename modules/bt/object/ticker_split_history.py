@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional, List
 from psycopg.errors import Error
-from psycopg.rows import dict_row
+from psycopg.rows import class_row
 from modules.core.db import db_pool_instance_bt
 
 @dataclass
@@ -13,6 +13,38 @@ class TickerSplitHistory:
     numerator: Decimal
     denominator: Decimal
     id: Optional[int] = None
+
+def fetch_split_factors_on_date(symbols: list[str], event_date: date) -> dict[str, float]:
+    """
+    Retrieves split records for the given symbols on a specific date 
+    and returns a dictionary of {symbol: ratio}.
+    """
+    if not symbols:
+        return {}
+
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            # Using class_row to map to your TickerSplitHistory dataclass
+            with conn.cursor(row_factory=class_row(TickerSplitHistory)) as cur:
+                query = """
+                    SELECT *
+                    FROM public.ticker_split_history
+                    WHERE symbol = ANY(%s)
+                      AND date = %s
+                """
+                cur.execute(query, (symbols, event_date))
+                splits = cur.fetchall()
+                
+                # Calculate the multiplier: (Numerator / Denominator)
+                # Example: 2 / 1 = 2.0 (Double shares)
+                # Example: 1 / 10 = 0.1 (Reverse split)
+                return {
+                    s.symbol: float(s.numerator / s.denominator) 
+                    for s in splits
+                }
+    except Exception as e:
+        print(f"Error fetching split factors on {event_date}: {e}")
+        return {}
     
 def insert_split_bulk(items: List[TickerSplitHistory]):
     if not items:

@@ -127,7 +127,7 @@ def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
                     if last_price_date and (target_date - last_price_date).days <= DAYS_NO_PRICING:
                         valid_tickers_for_etf.append(h)
                     else:
-                        record_problem(etf_id=etf_id, error=f"STALE HOLDING", message=f"The holding {h.ticker} has no prices for over {DAYS_NO_PRICING} days", problem_etfs=problem_etfs)
+                        record_problem(etf_id=etf_id, error=f"STALE HOLDING", message=f"The ETF holding {h.ticker} has no prices for over {DAYS_NO_PRICING} days - will not be included in best ideas", problem_etfs=problem_etfs)
                 
                 # Update current holdings to only include non-stale tickers
                 current_holdings = valid_tickers_for_etf

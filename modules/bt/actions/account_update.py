@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from modules.bt.object import fund, fund_holding
 from modules.bt.object import account, account_holding as ah, account_cash_ledger as acl, account_trade as at, account_performance as ap, account_benchmark_comparison as abc
 from modules.bt.object import benchmark_value as bv
-from modules.bt.object import interest_config, ticker_value, ticker_dividend_history
+from modules.bt.object import interest_config, ticker_value, ticker_dividend_history, ticker_split_history
 
 DRIFT_THRESHOLD = 0.05   # 5%
 
@@ -67,8 +67,7 @@ def identify_rebalance_needs(
         candidates = []
 
         for symbol in all_symbols:
-            if symbol == 'AAWW':
-                print('Stop here!!!!')
+
             target = targets_holdings.get(symbol)
             actual = current_holdings.get(symbol)
 
@@ -173,9 +172,6 @@ def execute_trade(
 
         return local_cash + net
 
-from modules.bt.object.ticker_value import fetch_ticker_on_date, fetch_latest_price_date_for_ticker
-from modules.bt.object.account_holding import fetch_latest_common_date_for_ticker
-
 def execute_minimal_rebalance(
     account_id: int,
     num_fund_holdings: int,
@@ -194,21 +190,19 @@ def execute_minimal_rebalance(
     sync_dates = {}
 
     for symbol in all_syms:
-        if symbol == 'AAWW':
-            print('Stop here!!!!')
 
         # Determine if we already hold this (to decide which date logic to use)
         is_held = any(h.symbol == symbol and h.quantity > 0 for h in account_holdings)
 
         if is_held:
             # 1. EXISTING: Must have a common date to safely Sell/Rebalance
-            sync_date = fetch_latest_common_date_for_ticker(account_id, symbol, current_sim_date)
+            sync_date = ah.fetch_latest_common_date_for_ticker(account_id, symbol, current_sim_date)
         else:
             # 2. NEW BUY: Only needs the latest available price date
-            sync_date = fetch_latest_price_date_for_ticker(symbol, current_sim_date)
+            sync_date = ticker_value.fetch_latest_price_date_for_ticker(symbol, current_sim_date)
         
         if sync_date:
-            tv = fetch_ticker_on_date(symbol, sync_date)
+            tv = ticker_value.fetch_ticker_on_date(symbol, sync_date)
             # Only fetch holding if it's an existing position
             holding_at_date = ah.fetch_account_holding_on_date(account_id, symbol, sync_date) if is_held else None
             
@@ -416,6 +410,33 @@ def create_daily_snapshot(
     df_prev['quantity'] = df_prev['quantity'].astype(float)
     df_prev['cost_basis'] = df_prev['cost_basis'].astype(float)
 
+
+    # --- NEW STEP 1.5: APPLY SPLITS TO PREVIOUS HOLDINGS ---
+    # We must adjust the "carried over" shares to match today's post-split reality
+    # BEFORE we merge with today's trades.
+    
+    # Fetch split factors for all currently held symbols on this specific date
+    # Returns a dict: {'AAPL': 4.0, 'TSLA': 3.0} for a 4:1 and 3:1 split
+    split_map = ticker_split_history.fetch_split_factors_on_date(df_prev['symbol'].tolist(), eval_date)
+    
+    if split_map:
+        def apply_split(row):
+            symbol = row['symbol']
+            factor = split_map.get(symbol, 1.0)
+            
+            if factor != 1.0:
+                # Quantity increases (or decreases) by the factor
+                # Total Cost Basis remains UNCHANGED (your investment value didn't change)
+                return row['quantity'] * factor
+            return row['quantity']
+
+        df_prev['quantity'] = df_prev.apply(apply_split, axis=1)
+        
+        # Optional: Log the adjustment for debugging
+        for sym, factor in split_map.items():
+            print(f"Applied {factor}:1 split adjustment to {sym} holdings on {eval_date}")
+
+
     df_trades = pd.DataFrame([vars(t) for t in today_trades])
 
     # 2. Process Trades (Aggregate by Symbol)
@@ -482,7 +503,7 @@ def create_daily_snapshot(
     if df.empty: 
         return Decimal(0.0), []
 
-        # 6. Market Value & Weights
+    # 6. Market Value & Weights
     prices_raw = ticker_value.fetch_tickers_by_symbols_on_date(df['symbol'].tolist(), eval_date)
     price_map = {p.symbol: float(p.stock_price) for p in prices_raw if p.stock_price and p.stock_price > 0}
     
@@ -504,13 +525,6 @@ def create_daily_snapshot(
     df['price'] = df['price'].fillna(0.0)
     df['mkt_val'] = df['new_qty'] * df['price']
 
-    # # We can now safely remove the hard ValueError or change it to a warning 
-    # # since we have a fallback mechanism.
-    # if (df['mkt_val'] == 0).any():
-    #     zero_symbols = df.loc[df['mkt_val'] == 0, 'symbol'].tolist()
-    #     log.record_warning(f"Market value is 0 for {zero_symbols} even after fallback.")
-
-    
     # Cash at End of Day
     eod_cash = float(acl.get_cash_balance(account_id, eval_date + timedelta(days=1)))
     tpv = df['mkt_val'].sum() + eod_cash

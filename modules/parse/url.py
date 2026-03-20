@@ -177,14 +177,20 @@ def scrape_provider(cp: Provider):
         with Stealth().use_sync(sync_playwright()) as p:
             open_browser.browser = p.chromium.launch(headless=True,
             # Add extra launch arguments to mimic real Chrome
+            # args=[
+            #     "--disable-blink-features=AutomationControlled",
+            #     "--disable-infobars",
+            #     "--disable-web-security",
+            #     "--disable-site-isolation-trials",
+            #     "--disable-dev-shm-usage",
+            #     "--no-sandbox",
+            #     "--ignore-certificate-errors"
+            # ])
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--disable-infobars",
-                "--disable-web-security",
-                "--disable-site-isolation-trials",
                 "--disable-dev-shm-usage",
-                "--no-sandbox",
-                "--ignore-certificate-errors"
+                "--no-sandbox"
             ])
             open_browser.context = open_browser.browser.new_context(
                 user_agent=REAL_USER_AGENT,
