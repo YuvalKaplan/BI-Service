@@ -126,7 +126,7 @@ CREATE OR REPLACE FUNCTION public.get_best_ideas_by_ranking(
 AS $BODY$
 
 	WITH constants AS (
-	    SELECT INTERVAL '14 days' AS lookback
+	    SELECT INTERVAL '7 days' AS lookback
 	),
 	
 	-- 1. Pre-filter the "Universe" of allowed symbols based on Style (and calculate cap level)
@@ -151,23 +151,35 @@ AS $BODY$
 	    WHERE (p_cap_type = 'all_cap' OR calc_cap = p_cap_type)
 	),
 	
-	-- 3. Get the latest date and best rank for only the filtered symbols limited to ETF set
-	symbol_targets AS (
+	-- 3. Get the latest date
+	symbol_latest_date AS (
 	    SELECT 
 	        be.symbol, 
-	        MAX(be.value_date) as max_date,
-	        MIN(be.ranking) as best_ranking
+	        MAX(be.value_date) as max_date
 	    FROM public.best_idea be
 	    JOIN filtered_universe fu ON be.symbol = fu.symbol,
 	    constants
 	    WHERE be.value_date <= p_as_of_date
 	      AND be.value_date >= p_as_of_date - lookback
 	      AND (cardinality(p_provider_etf_ids) = 0 OR be.provider_etf_id = ANY(p_provider_etf_ids))
-	      AND be.ranking <= p_ranking_level
 	    GROUP BY be.symbol
+	),
+
+	-- 4. Get the best rank the max date
+	symbol_targets AS (
+	    SELECT DISTINCT ON (be.symbol)
+	        be.symbol,
+	        be.value_date AS max_date,
+	        be.ranking AS best_ranking
+	    FROM public.best_idea be
+	    JOIN symbol_latest_date sld ON be.symbol = sld.symbol 
+	                               AND be.value_date = sld.max_date
+	    WHERE be.ranking <= p_ranking_level
+	      AND (cardinality(p_provider_etf_ids) = 0 OR be.provider_etf_id = ANY(p_provider_etf_ids))
+	    ORDER BY be.symbol, be.ranking ASC -- Takes the best rank available on the latest date
 	)
 	
-	-- 4. Final aggregation using the pre-filtered targets
+	-- 5. Final aggregation using the pre-filtered targets
 	SELECT
 	    be.symbol::TEXT,
 	    st.best_ranking AS ranking,
@@ -181,7 +193,8 @@ AS $BODY$
 	                       AND be.value_date = st.max_date 
 	                       AND be.ranking = st.best_ranking
 	GROUP BY be.symbol, st.best_ranking
-	ORDER BY st.best_ranking, appearances DESC, max_delta DESC;
+	ORDER BY st.best_ranking, appearances DESC, max_delta DESC
+	;
 
 $BODY$;
 

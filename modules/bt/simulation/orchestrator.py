@@ -49,7 +49,7 @@ def run(start_date: date, end_date: date):
             current_sim_date += timedelta(days=1)
 
     # Update account based on daily activity (interest, dividends, transactions)
-    do_accounts = False
+    do_accounts = True
     if do_accounts:
         account.reset_accounts()
         current_sim_date = start_date
