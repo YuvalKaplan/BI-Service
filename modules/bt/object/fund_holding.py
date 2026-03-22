@@ -10,7 +10,9 @@ class FundHolding:
     fund_id: int
     symbol: str
     holding_date: date
-    ranking: int 
+    ranking: int
+    source_etf_id: int 
+    max_delta: float | None
 
 def fetch_funds_holdings(fund_id: int, eval_date: date):
     try:
@@ -52,13 +54,15 @@ def insert_fund_holding(items: List[FundHolding]):
                         fund_id,
                         symbol,
                         holding_date,
-                        ranking
+                        ranking,
+                        source_etf_id,
+                        max_delta
                     )
-                    VALUES (%s, %s, %s, %s);
+                    VALUES (%s, %s, %s, %s, %s, %s);
                 """
 
                 insert_values = [
-                    (i.fund_id, i.symbol, i.holding_date, i.ranking)
+                    (i.fund_id, i.symbol, i.holding_date, i.ranking, i.source_etf_id, i.max_delta)
                     for i in items
                 ]
 

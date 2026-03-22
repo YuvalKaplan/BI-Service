@@ -5,6 +5,7 @@ import re
 from decimal import Decimal
 from typing import List
 from datetime import date, timedelta
+from concurrent.futures import ThreadPoolExecutor
 from modules.core.fdata import get_stock_profile, get_stock_historic_prices, get_stock_historic_dividend, get_stock_historic_splits, get_stock_historic_market_cap
 
 from modules.bt.object import account, ticker_split_history
@@ -13,6 +14,160 @@ from modules.bt.object.provider_etf_holding import fetch_tickers_for_etfs
 from modules.bt.object import ticker, ticker_value, ticker_dividend_history
 
 REMOVE_ETFS_AND_FUNDS = r'\b(ETF|fund)\b'
+
+def parse_date(d):
+    if isinstance(d, str):
+        return date.fromisoformat(d)
+    elif isinstance(d, date):
+        return d
+    else:
+        raise ValueError(f"Cannot parse date: {d} of type {type(d)}")
+
+def process_symbol(s: str, start_date: date, end_date: date) -> tuple[bool, str, str | None]:
+    try:
+        t = ticker.fetch_by_symbol(s)
+        if t is not None and t.invalid:
+            return False, s, "Invalid ticker"
+
+        # Check if sufficient data already exists
+        available_dates = ticker_value.fetch_tickers_availability_dates(s)
+        if available_dates:
+            available_set = set()
+            for row in available_dates:
+                try:
+                    d = parse_date(row['value_date'])
+                    available_set.add(d)
+                except ValueError as e:
+                    log.record_error(f"Skipping invalid date for {s}: {e}")
+                    continue
+            # Filter to date range and weekdays
+            range_dates = [d for d in available_set if start_date <= d <= end_date and d.weekday() < 5]
+            expected_days = weekday_count(start_date, end_date)
+            coverage = len(range_dates) / expected_days if expected_days else 0
+            if coverage >= 0.85:
+                return True, s, None  # Sufficient data already exists
+
+        # Parallel fetch for profile, dividends, splits, prices, and market cap
+        def fetch_profile():
+            return get_stock_profile(s)
+
+        def fetch_dividends():
+            return get_stock_historic_dividend(s)
+
+        def fetch_splits():
+            return get_stock_historic_splits(s)
+
+        def fetch_prices():
+            return get_stock_historic_prices(s, start_date, end_date)
+
+        def fetch_market_cap():
+            return get_stock_historic_market_cap(s, start_date, end_date)
+
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {
+                'profile': executor.submit(fetch_profile),
+                'dividends': executor.submit(fetch_dividends),
+                'splits': executor.submit(fetch_splits),
+                'prices': executor.submit(fetch_prices),
+                'market_cap': executor.submit(fetch_market_cap)
+            }
+
+            results = {name: future.result() for name, future in futures.items()}
+
+        sd = results['profile']
+        if isinstance(sd, str):
+            ticker.update_invalid(s, sd)
+            return False, s, sd
+
+        t = ticker.Ticker(symbol=s, isin=sd['isin'], cik=sd['cik'], exchange=sd['exchange'], name=sd['companyName'], industry=sd['industry'], sector=sd['sector'])
+        if t.name is None or re.search(REMOVE_ETFS_AND_FUNDS, t.name, flags=re.IGNORECASE):
+            ticker.update_invalid(s, 'Fund or ETF')
+            return False, s, 'Fund or ETF'
+
+        ticker.upsert(t)
+
+        shd = results['dividends']
+        if isinstance(shd, str):
+            ticker.update_invalid(s, shd)
+            return False, s, shd
+
+        shs = results['splits']
+        if isinstance(shs, str):
+            ticker.update_invalid(s, shs)
+            return False, s, shs
+
+        shp = results['prices']
+        if isinstance(shp, str):
+            ticker.update_invalid(s, shp)
+            return False, s, shp
+
+        shmc = results['market_cap']
+        if isinstance(shmc, str):
+            ticker.update_invalid(s, shmc)
+            return False, s, shmc
+
+        # Process dividends
+        dividends = [
+            ticker_dividend_history.TickerDividendHistory(
+                symbol=s,
+                ex_date=parse_date(line['date']),
+                amount_per_share=Decimal(line['dividend'])
+            )
+            for line in shd
+        ]
+        ticker_dividend_history.insert_dividends_bulk(dividends)
+
+        # Process splits
+        splits = [
+            ticker_split_history.TickerSplitHistory(
+                symbol=s,
+                date=parse_date(line['date']),
+                numerator=Decimal(line['numerator']),
+                denominator=Decimal(line['denominator'])
+            )
+            for line in shs
+        ]
+        ticker_split_history.insert_split_bulk(splits)
+
+        # combine all days data and save
+        price_by_date = {parse_date(row["date"]): float(row["price"]) for row in shp}
+        mc_by_date = {parse_date(row["date"]): float(row["marketCap"]) for row in shmc}
+
+        # Intersection of dates that have both values
+        common_dates = price_by_date.keys() & mc_by_date.keys()
+
+        # Keep only weekdays
+        common_weekdays = [d for d in common_dates if d.weekday() < 5]
+
+        expected_days = weekday_count(min(common_dates), max(common_dates))
+
+        valid_days = len(common_weekdays)
+        coverage = valid_days / expected_days if expected_days else 0
+
+        if coverage < 0.85:
+            reason = f"Insufficient data coverage ({coverage:.1%})"
+            ticker.update_invalid(s, reason)
+            return False, s, reason
+
+        # Build dataclass list (vectorized style)
+        ticker_values = [
+            ticker_value.TickerValue(
+                symbol=s,
+                value_date=d,
+                stock_price=price_by_date[d],
+                market_cap=mc_by_date[d],
+            )
+            for d in common_weekdays
+        ]
+
+        # BULK insert instead of row-by-row
+        ticker_value.upsert_bulk(ticker_values)
+
+        return True, s, None
+
+    except Exception as e:
+        log.record_error(f"Error processing symbol {s}: {e}")
+        return False, s, str(e)
 
 def weekday_count(start: date, end: date) -> int:
     days = (end - start).days + 1
@@ -32,113 +187,17 @@ def run(symbols: list[str], start_date: date, end_date: date) -> tuple[int, int,
 
         print(f"Starting Stock Info Download for {len(symbols)} ticker symbols.")
         
-        for s in symbols:
-            count += 1
-            t = ticker.fetch_by_symbol(s)
-            if t is not None and t.invalid:
-                missing_symbols.append(s)
-                continue
-
-            # # See if already loaded
-            # avialable = ticker_value.fetch_tickers_availability_dates(s)
-            # if len(avialable) != 0:
-            #     existing += 1
-            #     continue
-
-            sd = get_stock_profile(s)
-            if isinstance(sd, str):
-                ticker.update_invalid(s, sd)
-                missing_symbols.append(s)
-                continue
-
-            t = ticker.Ticker(symbol=s, isin=sd['isin'], cik=sd['cik'], exchange=sd['exchange'], name=sd['companyName'], industry=sd['industry'], sector=sd['sector'])
-            if t.name is None or re.search(REMOVE_ETFS_AND_FUNDS, t.name, flags=re.IGNORECASE):
-                ticker.update_invalid(s, 'Fund or ETF')
-                missing_symbols.append(s)
-                continue
-
-            ticker.upsert(t) 
-
-            shd: list[dict[str,str]] | str = get_stock_historic_dividend(s)
-            if isinstance(shd, str):
-                ticker.update_invalid(s, shd)
-                missing_symbols.append(s)
-                continue
-
-            dividends = [
-                ticker_dividend_history.TickerDividendHistory(
-                    symbol=s,
-                    ex_date=date.fromisoformat(line['date']),
-                    amount_per_share=Decimal(line['dividend'])
-                )
-                for line in shd
-            ]
-            ticker_dividend_history.insert_dividends_bulk(dividends)
-
-            shs: list[dict[str,str]] | str = get_stock_historic_splits(s)
-            if isinstance(shs, str):
-                ticker.update_invalid(s, shs)
-                missing_symbols.append(s)
-                continue
-
-            splits = [
-                ticker_split_history.TickerSplitHistory(
-                    symbol=s,
-                    date=date.fromisoformat(line['date']),
-                    numerator=Decimal(line['numerator']),
-                    denominator=Decimal(line['denominator'])
-                )
-                for line in shs
-            ]
-            ticker_split_history.insert_split_bulk(splits)
- 
-
-            shp = get_stock_historic_prices(s, start_date, end_date)
-            if isinstance(shp, str):
-                ticker.update_invalid(s, shp)
-                missing_symbols.append(s)
-                continue
-
-            shmc = get_stock_historic_market_cap(s, start_date, end_date)
-            if isinstance(shmc, str):
-                ticker.update_invalid(s, shmc)
-                missing_symbols.append(s)
-                continue
-
-            # combile all days data and save
-            price_by_date = {date.fromisoformat(row["date"]): float(row["price"]) for row in shp}
-            mc_by_date = {date.fromisoformat(row["date"]): float(row["marketCap"]) for row in shmc}
-
-            # Intersection of dates that have both values
-            common_dates = price_by_date.keys() & mc_by_date.keys()
-
-            # Keep only weekdays
-            common_weekdays = [d for d in common_dates if d.weekday() < 5]
-
-            expected_days = weekday_count(min(common_dates), max(common_dates))
-
-            valid_days = len(common_weekdays)
-            coverage = valid_days / expected_days if expected_days else 0
-
-            if coverage < 0.85:
-                ticker.update_invalid(s, f"Insufficient data coverage ({coverage:.1%})")
-                missing_symbols.append(s)
-
-            # Build dataclass list (vectorized style)
-            ticker_values = [
-                ticker_value.TickerValue(
-                    symbol=s,
-                    value_date=d,
-                    stock_price=price_by_date[d],
-                    market_cap=mc_by_date[d],
-                )
-                for d in common_weekdays
-            ]
-
-            # BULK insert instead of row-by-row
-            ticker_value.upsert_bulk(ticker_values)
-
-            print(f"Downloaded and saved {s} ({count} out of {len(symbols)})")
+        # Use ThreadPoolExecutor for parallel processing
+        with ThreadPoolExecutor(max_workers=5) as executor:  # Reduced to 5 to ease API rate limiting
+            futures = [executor.submit(process_symbol, s, start_date, end_date) for s in symbols]
+            
+            for future in futures:
+                success, symbol, reason = future.result()
+                if success:
+                    count += 1
+                    print(f"Downloaded and saved {symbol} ({count} out of {len(symbols)})")
+                else:
+                    missing_symbols.append(symbol)
 
         log.record_status(f"Run time (seconds): {time.monotonic() - start}")
         if existing:

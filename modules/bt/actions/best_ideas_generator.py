@@ -13,7 +13,7 @@ MIN_HOLDINGS_WITH_PRICES_PCT=0.9
 LOOK_BACK_FOR_COMMON_DATE=14
 MIN_HOLDINGS = 10
 MAX_DATE_DIFF_DAYS = 5
-MAX_BEST_IDEAS_PER_FUND = 2
+MAX_BEST_IDEAS_PER_FUND = 5
 BASE_INDEX_LEVEL = 100.0
 
 def find_best_ideas(
@@ -96,6 +96,7 @@ def record_problem(etf_id: int, error: str, message: str | None, problem_etfs: l
 
 
 def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
+
     successes :list[str] = []
     try:
         log.record_status(f"Running Best Ideas Generator - processing {len(etf_ids)} ETFs.")
@@ -113,7 +114,7 @@ def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
                 
                 target_date = max(available_holding_dates)
                 if target_date.weekday() >= 5:
-                    record_problem(etf_id=etf_id, error=f"No prices on weekends", message=None, problem_etfs=problem_etfs)
+                    record_problem(etf_id=etf_id, error=f"No prices on weekends", message=f"Last available price date {target_date}", problem_etfs=problem_etfs)
                     continue
 
                 holdings = fetch_valid_holdings_by_provider_etf_id(etf_id, target_date)
@@ -122,6 +123,7 @@ def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
                 # This check ensures we don't fail an ETF just because of "dead" tickers
                 valid_tickers_for_etf = []
                 for h in holdings:
+                    
                     # Logic assumes fetch_latest_price_date_for_ticker(h.ticker) exists or similar
                     last_price_date = fetch_latest_price_date_for_ticker(h.ticker, target_date)
                     if last_price_date and (target_date - last_price_date).days <= DAYS_NO_PRICING:

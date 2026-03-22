@@ -75,6 +75,31 @@ def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: s
     except Error as e:
         raise Exception(f"Error fetching the BestIdeaResult from the DB: {e}")
 
+def average_best_ideas_delta_for_etf(provider_etf_id: int, as_of_date: date, use_rankings: int) -> float:
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT AVG(delta)
+                    FROM (
+                        SELECT delta
+                        FROM best_idea
+                        WHERE provider_etf_id = %s
+                          AND value_date = (
+                                SELECT MAX(value_date) FROM best_idea 
+                                WHERE provider_etf_id = %s AND value_date <= %s)
+                        ORDER BY ranking
+                        LIMIT %s
+                    ) sub;
+                """, (provider_etf_id, provider_etf_id, as_of_date, use_rankings))
+                item = cur.fetchone()
+                
+                if not item or item[0] is None:
+                    return 0.0
+
+                return float(item[0])
+    except Error as e:
+        raise Exception(f"Error fetching the BestIdeaResult from the DB: {e}")
 
 def reset():
     try:
@@ -100,56 +125,66 @@ CREATE OR REPLACE FUNCTION public.get_best_ideas_by_ranking(
 
 AS $BODY$
 
+	WITH constants AS (
+	    SELECT INTERVAL '14 days' AS lookback
+	),
+	
+	-- 1. Pre-filter the "Universe" of allowed symbols based on Style (and calculate cap level)
+	eligible_symbols AS (
+	    SELECT DISTINCT ON (t.symbol) 
+	        t.symbol,
+	        (CASE WHEN tv.market_cap >= 10000000000 THEN 'large' ELSE 'mid_small' END) as calc_cap
+	    FROM public.ticker t
+	    JOIN public.ticker_value tv ON t.symbol = tv.symbol, 
+	    constants
+	    WHERE tv.value_date <= p_as_of_date
+	      AND tv.value_date >= p_as_of_date - lookback
+	      -- Style Filter applied here
+	      AND (p_style_type = 'blend' OR t.style_type = p_style_type)
+	    ORDER BY t.symbol, tv.value_date DESC
+	),
+	
+	-- 2. Further restrict by the Cap Filter
+	filtered_universe AS (
+	    SELECT symbol 
+	    FROM eligible_symbols
+	    WHERE (p_cap_type = 'all_cap' OR calc_cap = p_cap_type)
+	),
+	
+	-- 3. Get the latest date and best rank for only the filtered symbols limited to ETF set
+	symbol_targets AS (
+	    SELECT 
+	        be.symbol, 
+	        MAX(be.value_date) as max_date,
+	        MIN(be.ranking) as best_ranking
+	    FROM public.best_idea be
+	    JOIN filtered_universe fu ON be.symbol = fu.symbol,
+	    constants
+	    WHERE be.value_date <= p_as_of_date
+	      AND be.value_date >= p_as_of_date - lookback
+	      AND (cardinality(p_provider_etf_ids) = 0 OR be.provider_etf_id = ANY(p_provider_etf_ids))
+	      AND be.ranking <= p_ranking_level
+	    GROUP BY be.symbol
+	)
+	
+	-- 4. Final aggregation using the pre-filtered targets
 	SELECT
 	    be.symbol::TEXT,
-	    be.ranking,
+	    st.best_ranking AS ranking,
 	    COUNT(DISTINCT be.provider_etf_id) AS appearances,
 	    MAX(be.delta) AS max_delta,
 	    (array_agg(be.provider_etf_id ORDER BY be.delta DESC))[1] AS source_etf_id,
 	    array_agg(DISTINCT be.provider_etf_id) AS all_provider_ids
 	
 	FROM public.best_idea be
-	JOIN public.ticker t ON be.symbol = t.symbol
-	JOIN public.ticker_value tv ON tv.symbol = be.symbol
-	JOIN (
-	    SELECT symbol, MAX(value_date) AS max_date
-	    FROM public.ticker_value
-	    WHERE value_date <= p_as_of_date
-		  AND value_date >= p_as_of_date - INTERVAL '7 days'
-	    GROUP BY symbol
-	) latest_tv
-	    ON tv.symbol = latest_tv.symbol
-	   AND tv.value_date = latest_tv.max_date
-	
-	-- keep only the best ranking per symbol
-	JOIN (
-	    SELECT symbol, MIN(ranking) AS best_ranking
-	    FROM public.best_idea
-	    WHERE ranking <= p_ranking_level
-	    GROUP BY symbol
-	) best
-	    ON be.symbol = best.symbol
-	   AND be.ranking = best.best_ranking
-	
-	WHERE 
-      -- restrict ETFs
-	  (cardinality(p_provider_etf_ids) = 0 OR be.provider_etf_id = ANY(p_provider_etf_ids))
-
-	  AND
-      -- Style Filter: Match style OR ignore if 'blend'
-      (p_style_type = 'blend' OR t.style_type = p_style_type)
-      
-      AND 
-      -- Cap Filter: Ignore if 'all_cap' OR match the market_cap logic
-      (p_cap_type = 'all_cap' OR (
-          CASE
-              WHEN tv.market_cap >= 10000000000 THEN 'large'
-              ELSE 'mid_small'
-          END
-      ) = p_cap_type)
-	
-	GROUP BY be.symbol, be.ranking
-	ORDER BY be.ranking, appearances DESC, max_delta DESC;
+	JOIN symbol_targets st ON be.symbol = st.symbol 
+	                       AND be.value_date = st.max_date 
+	                       AND be.ranking = st.best_ranking
+	GROUP BY be.symbol, st.best_ranking
+	ORDER BY st.best_ranking, appearances DESC, max_delta DESC;
 
 $BODY$;
+
+ALTER FUNCTION public.get_best_ideas_by_ranking(integer, text, text, date, integer[])
+    OWNER TO admin;
 """

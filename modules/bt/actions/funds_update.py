@@ -2,14 +2,13 @@ import log
 from datetime import date, timedelta
 from typing import List
 from dataclasses import dataclass
-from modules.bt.object.best_idea import fetch_best_ideas_by_ranking
+from modules.bt.object.best_idea import fetch_best_ideas_by_ranking, average_best_ideas_delta_for_etf
 from modules.bt.object.fund import Fund, getStrategyFromJson, fetch_all
 from modules.bt.object.fund_holding import FundHolding, fetch_funds_holdings, insert_fund_holding
 from modules.bt.object.fund_holding_change import FundHoldingChange, insert_fund_changes
 from modules.bt.object.ticker import fetch_by_symbols
 
-RANKING_LEVEL = 3
-GAP_TO_SELL = 2
+RANKING_LEVEL = 5
 
 @dataclass
 class FundChangesResult:
@@ -47,6 +46,9 @@ def results_to_string(results: List[FundChangesResult]):
 
 def run(today: date) -> List[FundChangesResult]:
     try:
+        # if today == date(2022, 2, 1):
+        #     print('stop!!!')  
+
         funds = fetch_all()
 
         log.record_status(f"Running Fund Update - will proccess {len(funds)} funds.")
@@ -57,40 +59,72 @@ def run(today: date) -> List[FundChangesResult]:
             provider_etfs = strategy.provider_etfs or []
             
             if (strategy.style.name == "blend") and (strategy.style.value is not None) and (strategy.style.growth is not None):
-                fresh_ideas_value = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type="value", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
-                fresh_ideas_growth = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type="growth", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
-                growth_count = min(len(fresh_ideas_growth), round(strategy.holdings * strategy.style.growth/100))
-                value_count = min(len(fresh_ideas_value), strategy.holdings - growth_count)
-                fresh_ideas = (fresh_ideas_growth[:growth_count] + fresh_ideas_value[:value_count])
+                all_top_growth = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type="growth", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
+                all_top_value = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type="value", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
+                growth_count = min(len(all_top_growth), round(strategy.holdings * strategy.style.growth/100))
+                value_count = min(len(all_top_value), strategy.holdings - growth_count)
+                all_top = all_top_growth + all_top_value
+                ideal_holdings = (all_top_growth[:growth_count] + all_top_value[:value_count])
             else:
-                fresh_ideas = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type=strategy.style.name, cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
-            
+                all_top = fetch_best_ideas_by_ranking(ranking_level=RANKING_LEVEL, style_type=strategy.style.name, cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
+                ideal_holdings = all_top[:strategy.holdings]
+
             yesterday_holdings = fetch_funds_holdings(f.id, today - timedelta(days=1))
             
             # Find if we need to replace holdings - have droped 2 rankings
             holdings_changed: list[FundHoldingChange] = [] 
             todays_holdings: List[FundHolding] = []
             
+            FACTOR_OF_AVERAGE_DELTA = 0.75
+            RANKING_LEVEL_FOR_AVERAGE_DELTA = 5
+
             for yh in yesterday_holdings:
-                latest_state = next((x for x in fresh_ideas if x.symbol == yh.symbol), None)
-                if latest_state is None or latest_state.ranking - yh.ranking >= GAP_TO_SELL:
-                    # Should sell the holding
-                    holdings_changed.append(FundHoldingChange(fund_id=f.id, symbol=yh.symbol, change_date=today, direction='sell'))
-                else:
-                    # Keep the holding
-                    yh.holding_date = today
-                    todays_holdings.append(yh)
+                found_in_top = next((x for x in all_top if x.symbol == yh.symbol), None)
+                if found_in_top is None:
+                    # Sell: the holding is no longer in the top 5
+                    holdings_changed.append(
+                        FundHoldingChange(
+                            fund_id=f.id, 
+                            symbol=yh.symbol, 
+                            change_date=today, 
+                            direction='sell',
+                            reason='Not in best ideas'
+                        ))
+                    continue
+                
+                if found_in_top.source_etf_id == yh.source_etf_id:
+                    average_delta = average_best_ideas_delta_for_etf(provider_etf_id=found_in_top.source_etf_id, as_of_date=today, use_rankings=RANKING_LEVEL_FOR_AVERAGE_DELTA)
+                    if found_in_top.max_delta < FACTOR_OF_AVERAGE_DELTA * average_delta:
+                        # Sell: the delta is under the average delta by a factor of FACTOR_OF_AVERAGE_DELTA
+                        holdings_changed.append(
+                            FundHoldingChange(
+                                fund_id=f.id, 
+                                symbol=yh.symbol, 
+                                change_date=today, 
+                                direction='sell', 
+                                reason='Delta gap', 
+                                ranking=found_in_top.ranking, 
+                                appearances=found_in_top.appearances, 
+                                max_delta=found_in_top.max_delta, 
+                                top_delta_provider_etf_id=found_in_top.source_etf_id, 
+                                all_provider_etf_ids=found_in_top.all_provider_ids
+                            ))
+                        continue
+                
+                # Keep the holding
+                yh.holding_date = today
+                todays_holdings.append(yh)
 
             # If new holdings are needed get then from the fresh - as long as they are not already in the fund.
             missing = strategy.holdings - len(todays_holdings) 
             if missing != 0:
                 existing_symbols = {th.symbol for th in todays_holdings}
-                for fi in fresh_ideas:
+                for fi in ideal_holdings:
                     if fi.symbol in existing_symbols:
                         continue
 
                     # add holding
-                    todays_holdings.append(FundHolding(fund_id=f.id, holding_date=today, symbol=fi.symbol, ranking=fi.ranking))
+                    todays_holdings.append(FundHolding(fund_id=f.id, holding_date=today, symbol=fi.symbol, ranking=fi.ranking, source_etf_id=fi.source_etf_id, max_delta=fi.max_delta))
                     holdings_changed.append(FundHoldingChange(fund_id=f.id, symbol=fi.symbol, change_date=today, direction="buy", ranking=fi.ranking, appearances=fi.appearances, max_delta=fi.max_delta, top_delta_provider_etf_id=fi.source_etf_id, all_provider_etf_ids=fi.all_provider_ids))
 
                     existing_symbols.add(fi.symbol)
