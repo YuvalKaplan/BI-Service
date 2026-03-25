@@ -11,10 +11,7 @@ from modules.bt.object.ticker_value import TickerValue
 DAYS_NO_PRICING = 7 # Threshold for stale holdings
 MIN_HOLDINGS_WITH_PRICES_PCT=0.9
 LOOK_BACK_FOR_COMMON_DATE=14
-MIN_HOLDINGS = 10
-MAX_DATE_DIFF_DAYS = 5
-MAX_BEST_IDEAS_PER_FUND = 2
-BASE_INDEX_LEVEL = 100.0
+MAX_BEST_IDEAS_PER_FUND = 10
 
 def find_best_ideas(
     holdings: list[ProviderEtfHolding],

@@ -7,7 +7,7 @@ from modules.bt.object.provider_etf_holding_factset import ProviderEtfHoldingFac
 from modules.core.hdata import get_etf_holdings, get_etf_holdings_via_formula
 
 etf_symbols = ["GSGO", "DVAL", "GUSE", "GDIV", "FFTY", "PSET", "PY", "EQIN", "HUSV", "INCE", "GVIP", "LRGE", "USMC", "BOUT", "MMLG", "DIVZ", "ATFV", "PGRO", "JAVA", "WINN", "CGUS", "CGGR", "CGDV", "DUHP", "NBDS", "JGRO", "HAPI", "HIDV", "LOWV", "TOLL", "ECML", "BLCV", "TCAF", "TGRT", "TVAL", "BCHP", "JPEF", "SMRI", "LRGC", "BLCR"]
-etf_symbols = ["DIVZ"]
+# etf_symbols = ["DIVZ"]
 start_date = date(2022,1,1)
 end_date = date(2026,1,15)
 

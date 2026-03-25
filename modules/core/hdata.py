@@ -39,29 +39,26 @@ def get_etf_holdings_via_formula(symbol: str, as_of_date: date) -> pd.DataFrame:
         with fds.sdk.Formula.ApiClient(config) as api_client:           
             # Create Instance
             api_instance = TimeSeriesApi(api_client)
-
             # Request Object to Define Parameters
             time_series_request = TimeSeriesRequest(
                 data=TimeSeriesRequestData(
-                    ids = [
-                        "IBM-US"
-                    ],
                     formulas = [
-                        "PROPER_NAME",
-                        "P_PRICE(0,-5,Q)",
-                        "FF_SALES(QTR,0,-5,Q,,USD)"
+                        "P_PRICE(0)",
                     ],
-                    calendar = "NAY",
-                    flatten = "Y"
+                    flatten = "Y",
+                    universe = f"({symbol}-US)=1",
                 ),
             )
 
-            time_series_response_wrapper = api_instance.get_time_series_data_for_list(time_series_request)
-            time_series_response = time_series_response_wrapper.get_response_200()
+            # Send Request
+            api_response_wrapper = api_instance.get_time_series_data_for_list(
+                time_series_request
+            )
+            api_response = api_response_wrapper.get_response_200()
 
             # Convert to Pandas Dataframe
-            time_series_results = pd.DataFrame(time_series_response.to_dict()['data'])
-            return time_series_results
+            results = pd.DataFrame(api_response.to_dict()["data"])
+            return results
 
     except Exception as e:
         print(f"Error fetching {symbol} @ {as_of_date}: {e}")

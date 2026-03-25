@@ -1,5 +1,5 @@
 import pandas as pd
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from typing import List, Tuple
 from decimal import Decimal
 from dataclasses import dataclass
@@ -44,7 +44,7 @@ class TradeCandidate:
     priority: int
     current_qty: Decimal = Decimal('0')
 
-def identify_rebalance_needs(
+def identify_position_change_needs(
     account_id: int, 
     fund_id: int, 
     eval_date: date,
@@ -276,29 +276,36 @@ def execute_minimal_rebalance(
         )
 
     # --- BUYS SECOND (ENTER POSITIONS) ---
-    for _, row in df[df['symbol'].isin(buy_symbols)].iterrows():
+    if buy_symbols:
+        # Distribute available cash equally among all buy candidates
+        cash_per_buy = local_cash / Decimal(len(buy_symbols))
+        
+        for _, row in df[df['symbol'].isin(buy_symbols)].iterrows():
 
-        if local_cash <= Decimal('2.00'):
-            break
+            if cash_per_buy <= Decimal('50.00'):
+                break
 
-        price = to_price(row['price'])
-        max_gross = (local_cash - Decimal('1.00')) / Decimal('1.001')
-        qty = (Decimal(str(row['target_val'])) / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
-        max_qty = (max_gross / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
-        qty = min(qty, max_qty)
+            price = to_price(row['price'])
+            # Allocate equal cash to each buy candidate
+            gross_target_value = cash_per_buy
+            gross_qty = (gross_target_value / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+            commission = calculate_commission(gross_qty)
+            net_target_value = gross_target_value - commission
+            net_qty = (net_target_value / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+            qty = net_qty
 
-        local_cash = execute_trade(
-            account_id,
-            row['symbol'],
-            "BUY",
-            qty,
-            price,
-            eval_date,
-            local_cash,
-            trades,
-            cash_ledger_entries,
-            f"Bought {qty} units of {row['symbol']}"
-        )
+            local_cash = execute_trade(
+                account_id,
+                row['symbol'],
+                "BUY",
+                qty,
+                price,
+                eval_date,
+                local_cash,
+                trades,
+                cash_ledger_entries,
+                f"Bought {qty} units of {row['symbol']}"
+            )
 
     # --- RECOMPUTE PORTFOLIO AFTER MANDATORY TRADES ---
     df['current_val'] = df['qty_held'] * df['price']
@@ -320,6 +327,8 @@ def execute_minimal_rebalance(
     df = df.sort_values('abs_delta', ascending=False)
 
     # --- DRIFT REBALANCE ---
+
+    #Firstly, only do rebalancing if we had a change in position candidates on the day.
     if any(c.action in ('ENTER', 'EXIT') for c in candidates):
 
         df_drift = df[
@@ -341,9 +350,22 @@ def execute_minimal_rebalance(
 
                     price = to_price(row['price'])
                     deficit = abs(local_cash)
-                    qty = (deficit / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+                    # 1. Calculate how much you are OVERWEIGHT (the surplus)
+                    # delta = current_val - target_val. If delta > 0, it's the $ amount you can sell.
+                    surplus_val = Decimal(str(row['delta']))
+
+                    # 2. Convert that surplus $ into a maximum quantity you're allowed to sell
+                    max_qty_to_rebalance = (surplus_val / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+
+                    # 3. Determine how many units you NEED to sell to cover the cash deficit
+                    qty_needed_for_cash = (deficit / price).quantize(Decimal('1'), rounding=ROUND_UP)
+
+                    # 4. Final qty is the lesser of: what you NEED vs what you are ALLOWED to sell
+                    qty = min(max_qty_to_rebalance, qty_needed_for_cash)
+
+                    # 5. Safety check: never sell more than you actually own
                     held_qty = Decimal(str(row['qty_held'])).quantize(Decimal('1'), rounding=ROUND_DOWN)
-                    qty = min(qty, held_qty)
+                    qty = max(Decimal('0'), min(qty, held_qty))
 
                     local_cash = execute_trade(
                         account_id,
@@ -359,31 +381,45 @@ def execute_minimal_rebalance(
                     )
 
             # BUY underweight if excess cash
-            elif local_cash > Decimal('20'):
+            elif local_cash > Decimal('1000'):
 
                 for _, row in df_drift[df_drift['delta'] < 0].iterrows():
 
-                    if local_cash <= Decimal('5'):
+                    if local_cash <= Decimal('100'):
                         break
 
                     price = to_price(row['price'])
                     target_gap = Decimal(str(abs(row['delta'])))
+                    
+                    # 1. Max we can afford based on current cash
                     max_affordable = (local_cash - Decimal('1.00')) / Decimal('1.001')
-                    buy_value = min(target_gap, max_affordable)
-                    qty = (buy_value / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
-
-                    local_cash = execute_trade(
-                        account_id,
-                        row['symbol'],
-                        "BUY",
-                        qty,
-                        price,
-                        eval_date,
-                        local_cash,
-                        trades,
-                        cash_ledger_entries,
-                        f"Drift rebalance BUY {qty} {row['symbol']}"
-                    )
+                    
+                    # 2. Our "Gross Target" is the smaller of what we need vs what we have
+                    gross_target_value = min(target_gap, max_affordable)
+                    
+                    # 3. Apply your methodology
+                    gross_qty = (gross_target_value / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+                    commission = calculate_commission(gross_qty)
+                    
+                    net_target_value = gross_target_value - commission
+                    
+                    # 4. Final safety check: ensure net value is still positive
+                    if net_target_value > 0:
+                        qty = (net_target_value / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+                        
+                        if qty > 0:
+                            local_cash = execute_trade(
+                                account_id,
+                                row['symbol'],
+                                "BUY",
+                                qty,
+                                price,
+                                eval_date,
+                                local_cash,
+                                trades,
+                                cash_ledger_entries,
+                                f"Drift rebalance BUY {qty} {row['symbol']}"
+                            )
 
     # --- COMMIT ---
     for trade in trades:
@@ -504,10 +540,15 @@ def create_daily_snapshot(
         return Decimal(0.0), []
 
     # 6. Market Value & Weights
-    prices_raw = ticker_value.fetch_tickers_by_symbols_on_date(df['symbol'].tolist(), eval_date)
-    price_map = {p.symbol: float(p.stock_price) for p in prices_raw if p.stock_price and p.stock_price > 0}
+    price_map = {}
+    for symbol in df['symbol'].unique():
+        latest_date = ticker_value.fetch_latest_price_date_for_ticker(symbol, eval_date)
+        if latest_date:
+            tv = ticker_value.fetch_ticker_on_date(symbol, latest_date)
+            if tv and tv.stock_price:
+                price_map[symbol] = float(tv.stock_price)
     
-    # Map today's prices
+    # Map latest available prices
     df['price'] = df['symbol'].map(price_map)
 
     # Fallback logic: If today's price is missing/zero, use previous day's implied price
@@ -604,14 +645,14 @@ def daily_actions(account: account.Account, sim_date: date):
     if account.id is None:
         raise Exception('Account ID not specified')
 
-    # Update Cash: Apply interest and record dividends 
+    # Update Cash: Apply dividends 
     process_daily_dividends(account_id=account.id, eval_date=sim_date)   
 
     if sim_date.weekday() < 5: # Monday -> Friday
         account_holdings = get_account_holdings(account_id=account.id, eval_date=sim_date)
 
         # Check for changes in target fund_holdings
-        fund_symbols, candidates = identify_rebalance_needs(account_id=account.id, fund_id=account.strategy_fund_id, eval_date=sim_date, account_holdings=account_holdings)
+        fund_symbols, candidates = identify_position_change_needs(account_id=account.id, fund_id=account.strategy_fund_id, eval_date=sim_date, account_holdings=account_holdings)
         
         # Execute the changes and rebalance
         today_trades = execute_minimal_rebalance(account_id=account.id, num_fund_holdings=len(fund_symbols), candidates=candidates, eval_date=sim_date, account_holdings=account_holdings)
