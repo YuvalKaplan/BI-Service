@@ -8,9 +8,10 @@ from modules.bt.object.fund_holding import FundHolding, fetch_funds_holdings, in
 from modules.bt.object.fund_holding_change import FundHoldingChange, insert_fund_changes
 from modules.bt.object.ticker import fetch_by_symbols
 
-FETCH_RANKING_LEVEL = 1
+USE_RANKING_HIGH = 1
+USE_RANKING_LOW = 1
 RANKING_DROP_FROM_ENTRY = 2
-DROP_ON_MIN_RANK = 3
+FETCH_RANKING_LEVEL = USE_RANKING_LOW + RANKING_DROP_FROM_ENTRY 
 
 @dataclass
 class FundChangesResult:
@@ -48,8 +49,8 @@ def results_to_string(results: List[FundChangesResult]):
 
 def run(today: date) -> List[FundChangesResult]:
     try:
-        if today == date(2025, 1, 13):
-            print('stop!!!')  
+        # if today == date(2025, 1, 13):
+        #     print('stop!!!')  
 
         funds = fetch_all()
 
@@ -61,15 +62,22 @@ def run(today: date) -> List[FundChangesResult]:
             provider_etfs = strategy.provider_etfs or []
             
             if (strategy.style.name == "blend") and (strategy.style.value is not None) and (strategy.style.growth is not None):
-                all_top_growth = fetch_best_ideas_by_ranking(ranking_level=FETCH_RANKING_LEVEL, style_type="growth", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
-                all_top_value = fetch_best_ideas_by_ranking(ranking_level=FETCH_RANKING_LEVEL, style_type="value", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
-                growth_count = min(len(all_top_growth), round(strategy.holdings * strategy.style.growth/100))
-                value_count = min(len(all_top_value), strategy.holdings - growth_count)
-                all_top = all_top_growth + all_top_value
-                ideal_holdings = (all_top_growth[:growth_count] + all_top_value[:value_count])
+                fetched_growth = fetch_best_ideas_by_ranking(ranking_level=FETCH_RANKING_LEVEL, style_type="growth", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
+                fetched_value = fetch_best_ideas_by_ranking(ranking_level=FETCH_RANKING_LEVEL, style_type="value", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
+                fetched = fetched_growth + fetched_value
+
+                # Filter for items with ranking between USE_RANKING_HIGH and USE_RANKING_LOW
+                growth_in_range = [item for item in fetched_growth if USE_RANKING_HIGH <= item.ranking <= USE_RANKING_LOW]
+                value_in_range = [item for item in fetched_value if USE_RANKING_HIGH <= item.ranking <= USE_RANKING_LOW]
+                in_range = growth_in_range + value_in_range
+                
+                growth_count = min(len(growth_in_range), round(strategy.holdings * strategy.style.growth/100))
+                value_count = min(len(value_in_range), strategy.holdings - growth_count)
+                ideal_holdings = (growth_in_range[:growth_count] + value_in_range[:value_count])
             else:
-                all_top = fetch_best_ideas_by_ranking(ranking_level=FETCH_RANKING_LEVEL, style_type=strategy.style.name, cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
-                ideal_holdings = all_top[:strategy.holdings]
+                fetched = fetch_best_ideas_by_ranking(ranking_level=FETCH_RANKING_LEVEL, style_type=strategy.style.name, cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
+                in_range = [item for item in fetched if USE_RANKING_HIGH <= item.ranking <= USE_RANKING_LOW]
+                ideal_holdings = in_range[:strategy.holdings]
 
             previous_holdings = fetch_funds_holdings(f.id, today - timedelta(days=1))
             
@@ -91,8 +99,8 @@ def run(today: date) -> List[FundChangesResult]:
                     found_in_ideal = next((x for x in ideal_holdings if x.symbol == ph.symbol), None)
                     # if found_in_ideal is None or found_in_ideal.ranking - ph.ranking >= GAP_TO_SELL:
                     if found_in_ideal is None:
-                        found_in_all = next((x for x in all_top if x.symbol == ph.symbol), None)
-                        if found_in_all is None:
+                        found_in_fetched = next((x for x in fetched if x.symbol == ph.symbol), None)
+                        if found_in_fetched is None:
                             # Sell: the holding is no longer in the top MIN_RANK_DROP
                             holdings_changed.append(
                                 FundHoldingChange(
@@ -104,8 +112,7 @@ def run(today: date) -> List[FundChangesResult]:
                                 ))
                             continue
 
-                        if found_in_all.ranking - ph.ranking >= RANKING_DROP_FROM_ENTRY:
-                        # if found_in_all.ranking >= DROP_ON_MIN_RANK:
+                        if found_in_fetched.ranking - ph.ranking >= RANKING_DROP_FROM_ENTRY:
                             holdings_changed.append(
                                 FundHoldingChange(
                                     fund_id=f.id, 
@@ -116,9 +123,9 @@ def run(today: date) -> List[FundChangesResult]:
                                 ))
                             continue
                         
-                        # if found_in_all.source_etf_id == ph.source_etf_id:
-                        #     average_delta = average_best_ideas_delta_for_etf(provider_etf_id=found_in_all.source_etf_id, as_of_date=today, use_rankings=RANKING_LEVEL_FOR_AVERAGE_DELTA)
-                        #     if found_in_all.max_delta < FACTOR_OF_AVERAGE_DELTA * average_delta:
+                        # if found_in_fetched.source_etf_id == ph.source_etf_id:
+                        #     average_delta = average_best_ideas_delta_for_etf(provider_etf_id=found_in_fetched.source_etf_id, as_of_date=today, use_rankings=RANKING_LEVEL_FOR_AVERAGE_DELTA)
+                        #     if found_in_fetched.max_delta < FACTOR_OF_AVERAGE_DELTA * average_delta:
                         #         # Sell: the delta is under the average delta by a factor of FACTOR_OF_AVERAGE_DELTA
                         #         holdings_changed.append(
                         #             FundHoldingChange(
@@ -127,11 +134,11 @@ def run(today: date) -> List[FundChangesResult]:
                         #                 change_date=today, 
                         #                 direction='sell', 
                         #                 reason='Delta gap', 
-                        #                 ranking=found_in_all.ranking, 
-                        #                 appearances=found_in_all.appearances, 
-                        #                 max_delta=found_in_all.max_delta, 
-                        #                 top_delta_provider_etf_id=found_in_all.source_etf_id, 
-                        #                 all_provider_etf_ids=found_in_all.all_provider_ids
+                        #                 ranking=found_in_fetched.ranking, 
+                        #                 appearances=found_in_fetched.appearances, 
+                        #                 max_delta=found_in_fetched.max_delta, 
+                        #                 top_delta_provider_etf_id=found_in_fetched.source_etf_id, 
+                        #                 all_provider_etf_ids=found_in_fetched.all_provider_ids
                         #             ))
                         #         continue
                     

@@ -174,7 +174,7 @@ def execute_trade(
 
 def execute_minimal_rebalance(
     account_id: int,
-    num_fund_holdings: int,
+    num_strategy_holdings: int,
     candidates: List[TradeCandidate],
     eval_date: date,
     account_holdings: List[ah.AccountHolding]
@@ -226,7 +226,7 @@ def execute_minimal_rebalance(
 
     cash_val = float(acl.get_cash_balance(account_id, eval_date))
     tpv = cash_val + df['current_val'].sum()
-    target_val_per_stock = tpv / num_fund_holdings if num_fund_holdings > 0 else 0.0
+    target_val_per_stock = tpv / num_strategy_holdings if num_strategy_holdings > 0 else 0.0
 
     # --- TARGET LOGIC ---
     candidate_map = {c.symbol: c.action for c in candidates}
@@ -277,22 +277,34 @@ def execute_minimal_rebalance(
 
     # --- BUYS SECOND (ENTER POSITIONS) ---
     if buy_symbols:
-        # Distribute available cash equally among all buy candidates
-        cash_per_buy = local_cash / Decimal(len(buy_symbols))
-        
         for _, row in df[df['symbol'].isin(buy_symbols)].iterrows():
 
-            if cash_per_buy <= Decimal('50.00'):
+            if target_val_per_stock <= Decimal('50.00'):
                 break
 
             price = to_price(row['price'])
-            # Allocate equal cash to each buy candidate
-            gross_target_value = cash_per_buy
+            target_val = Decimal(str(row['target_val']))
+            if target_val <= Decimal('0'):
+                continue
+
+            # Use target value from get_target
+            gross_target_value = min(target_val, local_cash)
+            if gross_target_value <= Decimal('0'):
+                break
+
             gross_qty = (gross_target_value / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+            if gross_qty <= 0:
+                continue
+
             commission = calculate_commission(gross_qty)
             net_target_value = gross_target_value - commission
+            if net_target_value <= Decimal('0'):
+                continue
+
             net_qty = (net_target_value / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
             qty = net_qty
+            if qty <= 0:
+                continue
 
             local_cash = execute_trade(
                 account_id,
@@ -312,7 +324,7 @@ def execute_minimal_rebalance(
 
     tpv = float(local_cash) + df['current_val'].sum()
 
-    target_val_per_stock = tpv / num_fund_holdings if num_fund_holdings > 0 else 0.0
+    target_val_per_stock = tpv / num_strategy_holdings if num_strategy_holdings > 0 else 0.0
 
     df['target_val'] = df['symbol'].map(get_target)
 
@@ -644,6 +656,12 @@ def get_account_holdings(account_id: int, eval_date: date) -> list[ah.AccountHol
 def daily_actions(account: account.Account, sim_date: date):
     if account.id is None:
         raise Exception('Account ID not specified')
+    
+    f = fund.fetch_fund(account.strategy_fund_id)
+    if f is None:
+        raise Exception("Missing strategy for fund")
+
+    strategy = fund.getStrategyFromJson(f.strategy)
 
     # Update Cash: Apply dividends 
     process_daily_dividends(account_id=account.id, eval_date=sim_date)   
@@ -655,7 +673,7 @@ def daily_actions(account: account.Account, sim_date: date):
         fund_symbols, candidates = identify_position_change_needs(account_id=account.id, fund_id=account.strategy_fund_id, eval_date=sim_date, account_holdings=account_holdings)
         
         # Execute the changes and rebalance
-        today_trades = execute_minimal_rebalance(account_id=account.id, num_fund_holdings=len(fund_symbols), candidates=candidates, eval_date=sim_date, account_holdings=account_holdings)
+        today_trades = execute_minimal_rebalance(account_id=account.id, num_strategy_holdings=strategy.holdings, candidates=candidates, eval_date=sim_date, account_holdings=account_holdings)
 
         # Create Today's Snapshot
         daily_return, snapshots = create_daily_snapshot(account_id=account.id, eval_date=sim_date, previous_holdings=account_holdings, today_trades=today_trades)

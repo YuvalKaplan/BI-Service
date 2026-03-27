@@ -3,15 +3,16 @@ import pandas as pd
 from datetime import date
 from modules.bt.object import provider, provider_etf
 from modules.bt.object.provider_etf_holding import ProviderEtfHolding, fetch_holding_dates_available_past_period, fetch_valid_holdings_by_provider_etf_id
-from modules.bt.object.ticker_value import TickerValue, fetch_latest_price_date_for_ticker, fetch_tickers_by_symbols_on_date
+from modules.bt.object.ticker_value import TickerValue, fetch_latest_price_date_for_ticker, fetch_ticker_dates_available_past_period, fetch_tickers_by_symbols_on_date
 from modules.bt.object import best_idea
 from modules.bt.object.ticker_value import TickerValue
 
 # Configuration constants
 DAYS_NO_PRICING = 7 # Threshold for stale holdings
-MIN_HOLDINGS_WITH_PRICES_PCT=0.9
-LOOK_BACK_FOR_COMMON_DATE=14
+MIN_HOLDINGS_WITH_PRICES_PCT = 0.9
+LOOK_BACK_FOR_COMMON_DATE = 14
 MAX_BEST_IDEAS_PER_FUND = 10
+HOLDING_DELTA_LIMIT_DROP_OFF = 0.25  # Maximum delta threshold
 
 def find_best_ideas(
     holdings: list[ProviderEtfHolding],
@@ -67,6 +68,13 @@ def find_best_ideas(
         .sort_values("delta", ascending=False)
     )
 
+    # Drop symbols where delta is larger than the defined limit
+    dropped = best_ideas[best_ideas["delta"] > HOLDING_DELTA_LIMIT_DROP_OFF]
+    if not dropped.empty:
+        dropped_symbols = dropped["symbol"].tolist()
+        log.record_status(f"Dropping {len(dropped_symbols)} best-idea(s) above delta limit {HOLDING_DELTA_LIMIT_DROP_OFF}: {dropped_symbols}")
+    best_ideas = best_ideas[best_ideas["delta"] <= HOLDING_DELTA_LIMIT_DROP_OFF]
+
     if limit is not None:
         if limit <= 0:
             raise ValueError("limit must be a positive integer")
@@ -100,21 +108,31 @@ def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
         total_etfs, processed_etfs, problem_etfs = len(etf_ids), 0, []
 
         for etf_id in etf_ids:
+            # if etf_id == 91:
+            #     print('stop')
             try:
                 # 1. Get the most recent holding date on or prior to 'today'
-                available_holding_dates = fetch_holding_dates_available_past_period(
-                    etf_id, today, LOOK_BACK_FOR_COMMON_DATE
-                )
+                available_holding_dates = fetch_holding_dates_available_past_period(etf_id, today, LOOK_BACK_FOR_COMMON_DATE)
                 if not available_holding_dates:
                     record_problem(etf_id=etf_id, error=f"No holdings have been downloaded for the past {LOOK_BACK_FOR_COMMON_DATE} days", message=None, problem_etfs=problem_etfs)
                     continue
+
+                available_ticker_date = fetch_ticker_dates_available_past_period(etf_id, today, LOOK_BACK_FOR_COMMON_DATE)
+                if not available_ticker_date:
+                    record_problem(etf_id=etf_id, error=f"No ticker values are available for the past {LOOK_BACK_FOR_COMMON_DATE} days", message=None, problem_etfs=problem_etfs)
+                    continue
                 
-                target_date = max(available_holding_dates)
-                if target_date.weekday() >= 5:
-                    record_problem(etf_id=etf_id, error=f"No prices on weekends", message=f"Last available price date {target_date}", problem_etfs=problem_etfs)
+                common_dates = set(available_holding_dates) & set(available_ticker_date)
+
+                if common_dates:
+                    # Get the date furthest in the future (the maximum value)
+                    latest_common_date = max(common_dates)
+                else:
+                    # Handle the case where no dates overlap
+                    record_problem(etf_id=etf_id, error="No overlapping dates found", message=None, problem_etfs=problem_etfs)
                     continue
 
-                holdings = fetch_valid_holdings_by_provider_etf_id(etf_id, target_date)
+                holdings = fetch_valid_holdings_by_provider_etf_id(etf_id, latest_common_date)
                 
                 # 2. Preemptively remove holdings with no pricing in the last DAYS_NO_PRICING
                 # This check ensures we don't fail an ETF just because of "dead" tickers
@@ -122,8 +140,8 @@ def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
                 for h in holdings:
                     
                     # Logic assumes fetch_latest_price_date_for_ticker(h.ticker) exists or similar
-                    last_price_date = fetch_latest_price_date_for_ticker(h.ticker, target_date)
-                    if last_price_date and (target_date - last_price_date).days <= DAYS_NO_PRICING:
+                    last_price_date = fetch_latest_price_date_for_ticker(h.ticker, latest_common_date)
+                    if last_price_date and (latest_common_date - last_price_date).days <= DAYS_NO_PRICING:
                         valid_tickers_for_etf.append(h)
                     else:
                         record_problem(etf_id=etf_id, error=f"STALE HOLDING", message=f"The ETF holding {h.ticker} has no prices for over {DAYS_NO_PRICING} days - will not be included in best ideas", problem_etfs=problem_etfs)
@@ -137,7 +155,7 @@ def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
                     continue
 
                 # 3. Fetch prices for EXACT target_date
-                values = fetch_tickers_by_symbols_on_date(ticker_symbols, target_date)
+                values = fetch_tickers_by_symbols_on_date(ticker_symbols, latest_common_date)
                 
                 # 4. Percentage Threshold Case
                 # We filter current_holdings down to only those that actually returned a value for the target_date
@@ -148,7 +166,7 @@ def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
 
                 if coverage_ratio < MIN_HOLDINGS_WITH_PRICES_PCT:
                     missing_count = len(current_holdings) - len(final_holdings_to_process)
-                    msg = f"Coverage {coverage_ratio:.1%}. Missing {missing_count} prices for date {target_date.strftime('%Y-%m-%d')}"
+                    msg = f"Coverage {coverage_ratio:.1%}. Missing {missing_count} prices for date {latest_common_date.strftime('%Y-%m-%d')}"
                     record_problem(etf_id=etf_id, error="Insufficient pricing coverage", message=msg, problem_etfs=problem_etfs)
                     continue
 
@@ -157,12 +175,12 @@ def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
                 rows = best_idea.df_to_rows(
                     best_ideas_df,
                     provider_etf_id=etf_id,
-                    value_date=target_date
+                    value_date=latest_common_date
                 )
                 best_idea.insert_bulk(rows)
                 processed_etfs += 1
 
-                successes.append((f"Generated {len(rows)} best ideas for ETF {etf_id} using holdings from {target_date.strftime('%Y-%m-%d')}."))
+                successes.append((f"Generated {len(rows)} best ideas for ETF {etf_id} using holdings from {latest_common_date.strftime('%Y-%m-%d')}."))
 
             except Exception as e:
                 record_problem(etf_id=etf_id, error=str(e), message="Failed running best ideas for etfs", problem_etfs=problem_etfs)

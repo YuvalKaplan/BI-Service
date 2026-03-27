@@ -126,7 +126,7 @@ CREATE OR REPLACE FUNCTION public.get_best_ideas_by_ranking(
 AS $BODY$
 
 	WITH constants AS (
-	    SELECT INTERVAL '7 days' AS lookback
+	    SELECT INTERVAL '10 days' AS lookback
 	),
 	
 	-- 1. Pre-filter the "Universe" of allowed symbols based on Style (and calculate cap level)

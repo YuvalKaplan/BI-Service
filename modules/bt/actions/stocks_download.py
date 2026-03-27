@@ -30,7 +30,7 @@ def process_symbol(s: str, start_date: date, end_date: date) -> tuple[bool, str,
             return False, s, "Invalid ticker"
 
         # Check if sufficient data already exists
-        available_dates = ticker_value.fetch_tickers_availability_dates(s)
+        available_dates = ticker_value.fetch_tickers_availability_dates(s, start_date, end_date)
         if available_dates:
             available_set = set()
             for row in available_dates:

@@ -22,16 +22,18 @@ def ticker_values_to_df(values: list[TickerValue]) -> pd.DataFrame:
         .query("stock_price > 0 and market_cap > 0")
     )
 
-def fetch_tickers_availability_dates(symbol: str) -> List[dict]:
+def fetch_tickers_availability_dates(symbol: str, start: date,  end: date) -> List[dict]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 query = """
                     SELECT value_date
                     FROM ticker_value
-                    WHERE symbol = %s;
+                    WHERE symbol = %s
+                      AND value_date >= %s
+                      AND value_date <= %s
                 """
-                cur.execute(query, (symbol,))
+                cur.execute(query, (symbol, start, end))
                 return cur.fetchall()
     except Error as e:
         raise Exception(f"Error retrieving dates availability for a ticker symbol TickerValue data: {e}")
@@ -58,6 +60,25 @@ def fetch_latest_price_date_for_ticker(symbol: str, as_of_date: date) -> Optiona
                 
     except Error as e:
         return None
+    
+def fetch_ticker_dates_available_past_period(provider_etf_id: int, end_date: date, look_back_days: int) -> list[date]:
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                query = """
+                    SELECT DISTINCT (tv.value_date::date)
+                    FROM provider_etf_holding AS peh
+                    INNER JOIN ticker AS t ON peh.ticker = t.symbol
+                    INNER JOIN ticker_value AS tv ON t.symbol = tv.symbol
+                    WHERE t.invalid IS null
+                      AND peh.provider_etf_id = %s 
+                      AND (tv.value_date > %s - (%s * INTERVAL '1 day')) AND (tv.value_date <= %s)
+                    ORDER BY tv.value_date::date;
+                """
+                cur.execute(query, (provider_etf_id, end_date, look_back_days, end_date,))
+                return [row[0] for row in cur.fetchall()]
+    except Error as e:
+        raise Exception(f"Error retrieving the list of ticker value dates available in the past {look_back_days} days for ETF {provider_etf_id}: {e}")
     
 def fetch_ticker_on_date(symbol: str, for_date: date) -> Optional[TickerValue]:
     """

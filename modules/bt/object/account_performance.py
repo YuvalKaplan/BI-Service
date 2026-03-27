@@ -18,11 +18,18 @@ class AccountPerformance:
     id: Optional[int] = None
 
 
-def fetch_total_value(account_id: int, prev_date: date) -> Decimal:
+def fetch_latest_total_value(account_id: int, prev_date: date) -> Decimal:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT total_value FROM account_performance_daily WHERE account_id = %s AND performance_date = %s", (account_id, prev_date))
+                cur.execute("""
+                    SELECT total_value 
+                    FROM account_performance_daily 
+                    WHERE account_id = %s 
+                      AND performance_date = (
+                        SELECT MAX(performance_date) FROM account_performance_daily 
+                        WHERE account_id = %s AND performance_date <= %s)
+                """, (account_id, account_id, prev_date))
                 res = cur.fetchone()
                 return Decimal(res[0]) if res else Decimal('0')
     except Error as e:
@@ -37,7 +44,7 @@ def record_daily_performance(account_id: int, eval_date: date, cash_balance: Dec
 
         # 2. Fetch Yesterday's TPV to calculate return
         yesterday = eval_date - timedelta(days=1)
-        tpv_yesterday = fetch_total_value(account_id, yesterday)
+        tpv_yesterday = fetch_latest_total_value(account_id, yesterday)
 
         # Daily Return = (Today / Yesterday) - 1
         # Handle the first day of backtest where yesterday is 0

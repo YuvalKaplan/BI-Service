@@ -44,8 +44,6 @@ def get_first_weekday_samples(start_date, end_date):
     return target_dates
 
 
-
-
 def run(start_date: date, end_date: date):
 
     accounts = account.fetch_all()
@@ -53,7 +51,7 @@ def run(start_date: date, end_date: date):
     symbols = provider_etf_holding.fetch_tickers_for_etfs(etf_ids)
 
     # Stock data gathering
-    do_ticker_download_and_prep = False
+    do_ticker_download_and_prep = True
     if do_ticker_download_and_prep == True:
         # Download all stock information (prices, market cap and dividends)
         stocks_download.run(symbols, start_date - timedelta(days=15), end_date + timedelta(days=15))
@@ -67,29 +65,27 @@ def run(start_date: date, end_date: date):
     do_best_ideas = False
     if do_best_ideas:
         best_idea.reset()
+
+        # Run once a week
         current_sim_date = start_date
         while current_sim_date <= end_date:
-            if current_sim_date.weekday() < 5: # Monday through Friday
+            if current_sim_date.weekday() == 2:  # Tuesday
                 print(f"Identifying best ideas per ETF on: {current_sim_date.strftime("%A, %d-%m-%Y")}")
                 best_ideas_generator.run(etf_ids, current_sim_date)
 
             current_sim_date += timedelta(days=1)
-
+ 
     first_samples = get_first_weekday_samples(start_date, end_date)
 
     # Construct todays target fund holdings. 
     do_target_fund = True
     if do_target_fund:
         fund.reset_funds()
-        # Run on first sample of month
-        # for sample_date in first_samples:
-        #     print(f"Constructing target funds holdings on: {sample_date.strftime("%A, %d-%m-%Y")}")
-        #     funds_update.run(sample_date)
 
-        # Run daily
+        # Run once a week
         current_sim_date = start_date
         while current_sim_date <= end_date:
-            if current_sim_date.weekday() < 5: # Monday through Friday
+            if current_sim_date.weekday() == 2: # Tuesday
                 print(f"Constructing target funds holdings on: {current_sim_date.strftime("%A, %d-%m-%Y")}")
                 funds_update.run(current_sim_date)
             current_sim_date += timedelta(days=1)

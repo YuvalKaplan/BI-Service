@@ -33,7 +33,7 @@ def fetch_holding_dates_available_past_period(provider_etf_id: int, end_date: da
                 cur.execute(query, (provider_etf_id, end_date, look_back_days, end_date,))
                 return [row[0] for row in cur.fetchall()]
     except Error as e:
-        raise Exception(f"Error retrieving the list of holding dates available in the past week: {e}")
+        raise Exception(f"Error retrieving the list of holding dates available in the past {look_back_days} days for ETF {provider_etf_id}: {e}")
     
 def fetch_valid_tickers_in_holdings() -> List[str]:
     try:
