@@ -64,11 +64,16 @@ def run(today: date) -> List[FundChangesResult]:
             if (strategy.style.name == "blend") and (strategy.style.value is not None) and (strategy.style.growth is not None):
                 fetched_growth = fetch_best_ideas_by_ranking(ranking_level=FETCH_RANKING_LEVEL, style_type="growth", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
                 fetched_value = fetch_best_ideas_by_ranking(ranking_level=FETCH_RANKING_LEVEL, style_type="value", cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
+                
+                if USE_RANKING_HIGH != 1:
+                    fetched_growth = [item for item in fetched_growth if USE_RANKING_HIGH <= item.ranking]
+                    fetched_value = [item for item in fetched_value if USE_RANKING_HIGH <= item.ranking]
+                
                 fetched = fetched_growth + fetched_value
 
-                # Filter for items with ranking between USE_RANKING_HIGH and USE_RANKING_LOW
-                growth_in_range = [item for item in fetched_growth if USE_RANKING_HIGH <= item.ranking <= USE_RANKING_LOW]
-                value_in_range = [item for item in fetched_value if USE_RANKING_HIGH <= item.ranking <= USE_RANKING_LOW]
+                # Filter for items with ranking between not over USE_RANKING_LOW
+                growth_in_range = [item for item in fetched_growth if item.ranking <= USE_RANKING_LOW]
+                value_in_range = [item for item in fetched_value if item.ranking <= USE_RANKING_LOW]
                 in_range = growth_in_range + value_in_range
                 
                 growth_count = min(len(growth_in_range), round(strategy.holdings * strategy.style.growth/100))
@@ -76,7 +81,13 @@ def run(today: date) -> List[FundChangesResult]:
                 ideal_holdings = (growth_in_range[:growth_count] + value_in_range[:value_count])
             else:
                 fetched = fetch_best_ideas_by_ranking(ranking_level=FETCH_RANKING_LEVEL, style_type=strategy.style.name, cap_type=strategy.cap.name, as_of_date=today, provider_etf_ids=provider_etfs)
-                in_range = [item for item in fetched if USE_RANKING_HIGH <= item.ranking <= USE_RANKING_LOW]
+                
+                if USE_RANKING_HIGH != 1:
+                    fetched = [item for item in fetched if USE_RANKING_HIGH <= item.ranking]
+
+                # Filter for items with ranking between not over USE_RANKING_LOW
+                in_range = [item for item in fetched if item.ranking <= USE_RANKING_LOW]
+
                 ideal_holdings = in_range[:strategy.holdings]
 
             previous_holdings = fetch_funds_holdings(f.id, today - timedelta(days=1))
@@ -84,9 +95,6 @@ def run(today: date) -> List[FundChangesResult]:
             # Find if we need to replace holdings - have droped 2 rankings
             holdings_changed: list[FundHoldingChange] = [] 
             todays_holdings: List[FundHolding] = []
-            
-            FACTOR_OF_AVERAGE_DELTA = 0.75
-            RANKING_LEVEL_FOR_AVERAGE_DELTA = 5
 
             if len(ideal_holdings) == 0:
                 # Carry over everything from yesterday to today
@@ -123,6 +131,8 @@ def run(today: date) -> List[FundChangesResult]:
                                 ))
                             continue
                         
+                        # FACTOR_OF_AVERAGE_DELTA = 0.75
+                        # RANKING_LEVEL_FOR_AVERAGE_DELTA = 5
                         # if found_in_fetched.source_etf_id == ph.source_etf_id:
                         #     average_delta = average_best_ideas_delta_for_etf(provider_etf_id=found_in_fetched.source_etf_id, as_of_date=today, use_rankings=RANKING_LEVEL_FOR_AVERAGE_DELTA)
                         #     if found_in_fetched.max_delta < FACTOR_OF_AVERAGE_DELTA * average_delta:

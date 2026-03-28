@@ -19,7 +19,7 @@ if __name__ == '__main__':
         start_time = datetime.now(timezone.utc)
         
         try:
-            start_date = date(2022,1,1)
+            start_date = date(2025,1,1)
             end_date = date(2025,12,31)
             results = orchestrator.run(start_date, end_date)
         except Exception as e:

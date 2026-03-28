@@ -62,7 +62,7 @@ def run(start_date: date, end_date: date):
         # ticker.mark_split_invalid(symbols, start_date - timedelta(days=5), end_date + timedelta(days=5))
 
     # Identify the lateset best ideas per ETF.
-    do_best_ideas = False
+    do_best_ideas = True
     if do_best_ideas:
         best_idea.reset()
 

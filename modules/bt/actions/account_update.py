@@ -41,8 +41,10 @@ def process_daily_dividends(account_id: int, eval_date: date):
 class TradeCandidate:
     symbol: str
     action: str  # 'ENTER', 'EXIT', 'DRIFT'
-    priority: int
+    ranking: int
     current_qty: Decimal = Decimal('0')
+    max_delta: float | None = None
+    priority: float = 0.0
 
 def identify_position_change_needs(
     account_id: int, 
@@ -73,16 +75,27 @@ def identify_position_change_needs(
 
             if target and not actual:
                 candidates.append(TradeCandidate(
-                    symbol=symbol, action="ENTER", priority=target.ranking
+                    symbol=symbol, action="ENTER", ranking=target.ranking, max_delta=target.max_delta
                 ))
             elif actual and not target:
                 candidates.append(TradeCandidate(
-                    symbol=symbol, action="EXIT", priority=0, 
+                    symbol=symbol, action="EXIT", ranking=0, 
                     current_qty=Decimal(str(actual.quantity))
                 ))
             elif actual and target:
                 # Optional: Logic for drift rebalance can be added here
                 pass 
+
+        # Sort ENTER candidates by ranking (ascending) then by max_delta (descending)
+        enter_candidates = [c for c in candidates if c.action == "ENTER"]
+        enter_candidates.sort(key=lambda c: (c.ranking, -(c.max_delta if c.max_delta is not None else 0)))
+
+        # Assign priority based on sort order
+        for idx, candidate in enumerate(enter_candidates):
+            candidate.priority = float(idx)
+
+        other_candidates = [c for c in candidates if c.action != "ENTER"]
+        candidates = enter_candidates + other_candidates
 
         return target_symbols, candidates
 
@@ -232,6 +245,7 @@ def execute_minimal_rebalance(
     candidate_map = {c.symbol: c.action for c in candidates}
     sell_symbols = [c.symbol for c in candidates if c.action == "EXIT"]
     buy_symbols = [c.symbol for c in candidates if c.action == "ENTER"]
+    enter_priority_map = {c.symbol: c.priority for c in candidates if c.action == "ENTER"}
 
     # Use the keys from your synced quantities dictionary where qty > 0
     held_symbols = {sym for sym, qty in quantities.items() if qty > 0}
@@ -249,7 +263,16 @@ def execute_minimal_rebalance(
     df['target_val'] = df['symbol'].map(get_target)
     df['delta'] = df['current_val'] - df['target_val']
     df['abs_delta'] = df['delta'].abs()
-    df = df.sort_values('abs_delta', ascending=False)
+    
+    # Sort: ENTER candidates by priority, others by abs_delta and symbol
+    df['_sort_priority'] = df['symbol'].map(enter_priority_map)
+    df['_is_enter'] = df['symbol'].isin(enter_priority_map.keys())
+    df = df.sort_values(
+        by=['_is_enter', '_sort_priority', 'abs_delta', 'symbol'],
+        ascending=[False, True, False, True],
+        na_position='last'
+    )
+    df = df.drop(columns=['_is_enter', '_sort_priority'])
 
     trades: List[at.AccountTrade] = []
     cash_ledger_entries: List[acl.AccountCashLedger] = []
@@ -336,7 +359,15 @@ def execute_minimal_rebalance(
 
     df.loc[mask, 'drift_pct'] = df.loc[mask, 'abs_delta'] / df.loc[mask, 'target_val']
 
-    df = df.sort_values('abs_delta', ascending=False)
+    # Sort: ENTER candidates by priority, others by abs_delta and symbol
+    df['_sort_priority'] = df['symbol'].map(enter_priority_map)
+    df['_is_enter'] = df['symbol'].isin(enter_priority_map.keys())
+    df = df.sort_values(
+        by=['_is_enter', '_sort_priority', 'abs_delta', 'symbol'],
+        ascending=[False, True, False, True],
+        na_position='last'
+    )
+    df = df.drop(columns=['_is_enter', '_sort_priority'])
 
     # --- DRIFT REBALANCE ---
 
