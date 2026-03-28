@@ -10,8 +10,8 @@ from modules.bt.object.ticker import fetch_by_symbols
 
 USE_RANKING_HIGH = 1
 USE_RANKING_LOW = 1
-RANKING_DROP_FROM_ENTRY = 2
-FETCH_RANKING_LEVEL = USE_RANKING_LOW + RANKING_DROP_FROM_ENTRY 
+RANKING_GAP_DROP_FROM_ENTRY = 2
+FETCH_RANKING_LEVEL = USE_RANKING_LOW + RANKING_GAP_DROP_FROM_ENTRY 
 
 @dataclass
 class FundChangesResult:
@@ -120,7 +120,7 @@ def run(today: date) -> List[FundChangesResult]:
                                 ))
                             continue
 
-                        if found_in_fetched.ranking - ph.ranking >= RANKING_DROP_FROM_ENTRY:
+                        if found_in_fetched.ranking - ph.ranking >= RANKING_GAP_DROP_FROM_ENTRY:
                             holdings_changed.append(
                                 FundHoldingChange(
                                     fund_id=f.id, 

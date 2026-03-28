@@ -3,6 +3,9 @@ from modules.bt.object import fund, best_idea, ticker, provider_etf_holding
 from modules.bt.object import account
 from modules.bt.actions import stocks_download, best_ideas_generator, funds_update, account_update
 
+# Strategy frequency: 7 for weekly, 14 for bi-weekly
+STRATEGY_RUN_INTERVAL_DAYS = 7
+
 def distinct_provider_etfs(accounts) -> list[int]:
     distinct_etfs = set()
     for current_account in accounts:
@@ -17,33 +20,6 @@ def distinct_provider_etfs(accounts) -> list[int]:
 
     return list(distinct_etfs)
 
-def get_first_weekday_samples(start_date, end_date):
-    """
-    Finds the first weekday (Mon-Fri) sample for each month 
-    based on a 4-day cadence (1, 5, 9, 13...).
-    """
-    current_date = start_date
-    last_processed_month = None
-    target_dates = []
-
-    while current_date <= end_date:
-        # 1. Check if we are in a new month
-        # Use a tuple of (year, month) to ensure it works across multiple years
-        current_month_key = (current_date.year, current_date.month)
-        
-        if current_month_key != last_processed_month:
-            # 2. Check if it's a weekday (0-4 is Mon-Fri)
-            if current_date.weekday() < 5:
-                target_dates.append(current_date)
-                # Mark this specific year/month as 'done'
-                last_processed_month = current_month_key
-        
-        # 3. Increment by 4 days to stay synced with your DB (1, 5, 9, 13...)
-        current_date += timedelta(days=4)
-        
-    return target_dates
-
-
 def run(start_date: date, end_date: date):
 
     accounts = account.fetch_all()
@@ -51,7 +27,7 @@ def run(start_date: date, end_date: date):
     symbols = provider_etf_holding.fetch_tickers_for_etfs(etf_ids)
 
     # Stock data gathering
-    do_ticker_download_and_prep = True
+    do_ticker_download_and_prep = False
     if do_ticker_download_and_prep == True:
         # Download all stock information (prices, market cap and dividends)
         stocks_download.run(symbols, start_date - timedelta(days=15), end_date + timedelta(days=15))
@@ -62,32 +38,36 @@ def run(start_date: date, end_date: date):
         # ticker.mark_split_invalid(symbols, start_date - timedelta(days=5), end_date + timedelta(days=5))
 
     # Identify the lateset best ideas per ETF.
-    do_best_ideas = True
+    do_best_ideas = False
     if do_best_ideas:
         best_idea.reset()
 
-        # Run once a week
+        # Run on interval (weekly or bi-weekly based on STRATEGY_RUN_INTERVAL_DAYS)
+        last_run_date = None
         current_sim_date = start_date
         while current_sim_date <= end_date:
             if current_sim_date.weekday() == 2:  # Tuesday
-                print(f"Identifying best ideas per ETF on: {current_sim_date.strftime("%A, %d-%m-%Y")}")
-                best_ideas_generator.run(etf_ids, current_sim_date)
+                if last_run_date is None or (current_sim_date - last_run_date).days >= STRATEGY_RUN_INTERVAL_DAYS:
+                    print(f"Identifying best ideas per ETF on: {current_sim_date.strftime("%A, %d-%m-%Y")}")
+                    best_ideas_generator.run(etf_ids, current_sim_date)
+                    last_run_date = current_sim_date
 
             current_sim_date += timedelta(days=1)
- 
-    first_samples = get_first_weekday_samples(start_date, end_date)
 
     # Construct todays target fund holdings. 
     do_target_fund = True
     if do_target_fund:
         fund.reset_funds()
 
-        # Run once a week
+        # Run on interval (weekly or bi-weekly based on STRATEGY_RUN_INTERVAL_DAYS)
+        last_run_date = None
         current_sim_date = start_date
         while current_sim_date <= end_date:
             if current_sim_date.weekday() == 2: # Tuesday
-                print(f"Constructing target funds holdings on: {current_sim_date.strftime("%A, %d-%m-%Y")}")
-                funds_update.run(current_sim_date)
+                if last_run_date is None or (current_sim_date - last_run_date).days >= STRATEGY_RUN_INTERVAL_DAYS:
+                    print(f"Constructing target funds holdings on: {current_sim_date.strftime("%A, %d-%m-%Y")}")
+                    funds_update.run(current_sim_date)
+                    last_run_date = current_sim_date
             current_sim_date += timedelta(days=1)
 
     # Update account based on daily activity (interest, dividends, transactions, performance)
