@@ -2,10 +2,12 @@ import atexit
 import log
 import os
 from datetime import datetime, timezone
-from modules.init.exit import cleanup
+from modules.object.exit import cleanup
 from modules.core.db import db_pool_instance
 from modules.core import sender
+from modules.calc.model_fund import results_to_string
 from modules.cron import etf_downloader, categorize_tickers, stock_downloader, best_ideas_generator, funds_update
+from modules.object import ticker
 
 SEPERATOR_LINE = "-" * 20 + "\n"
 BREAKER_LINE = "=" * 20 + "\n\n"
@@ -24,7 +26,7 @@ if __name__ == '__main__':
         start_time = datetime.now(timezone.utc)
         message_actions = ""
 
-        if 1 <= start_time.weekday() <= 5: # Tuesday through Saturday
+        if 0 <= start_time.weekday() <= 4: # Monday through Friday
             try:
                 stats_downloader, total_downloaded, provider_ids, = etf_downloader.run(start_time)
             except Exception as e:
@@ -36,17 +38,7 @@ if __name__ == '__main__':
             message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
             message_actions += BREAKER_LINE
 
-        if start_time.day == 15: # middle of each month - the ETF data is updated once a month on the website
-            try:
-                total_symbols = categorize_tickers.run()
-            except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on categorize tickers with error:\n{e}\n\n")
-                raise e
-            
-            message_actions += f"Categorized tickers: {total_symbols}\n"
-            message_actions += BREAKER_LINE
-
-        if 0 <= start_time.weekday() <= 6: # All days of the week
+        if 0 <= start_time.weekday() <= 4: # Monday through Friday
             try:
                 total_updated, missing_data = stock_downloader.run()
             except Exception as e:
@@ -57,30 +49,41 @@ if __name__ == '__main__':
             message_actions += f"Stocks missing data: {missing_data}\n"
             message_actions += BREAKER_LINE
 
-        # if 1 <= start_time.weekday() <= 5: # Tuesday through Saturday
-        #     try:
-        #         etfs_processed, generated_etfs, problems = best_ideas_generator.run()
-        #     except Exception as e:
-        #         sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on best ideas processing with error:\n{e}\n\n")
-        #         raise e
+        if start_time.weekday() == 0: # Monday only
+            try:
+                total_symbols = categorize_tickers.run()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on categorize tickers with error:\n{e}\n\n")
+                raise e
             
-        #     message_actions += f"Total ETFs available: {etfs_processed}\n"
-        #     message_actions += f"ETFS with best ideas: {generated_etfs}\n"
-        #     message_actions += f"ETFS with problems: {len(problems)}\n" + SEPERATOR_LINE
-        #     for p in problems:
-        #         message_actions += f"{p}\n"
-        #     message_actions += BREAKER_LINE
+            message_actions += f"Categorized tickers: {total_symbols}\n"
+            message_actions += BREAKER_LINE
 
-        # if 1 <= start_time.weekday() <= 5: # Tuesday through Saturday
-        #     try:
-        #         results = funds_update.run()
-        #     except Exception as e:
-        #         sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on fund update with error:\n{e}\n\n")
-        #         raise e
+        if 0 <= start_time.weekday() <= 3: # Monday through Thursday
+            try:
+                etfs_processed, generated_etfs, problems = best_ideas_generator.run()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on best ideas processing with error:\n{e}\n\n")
+                raise e
+            
+            message_actions += f"Total ETFs available: {etfs_processed}\n"
+            message_actions += f"ETFS with best ideas: {generated_etfs}\n"
+            message_actions += f"ETFS with problems: {len(problems)}\n" + SEPERATOR_LINE
+            for p in problems:
+                message_actions += f"{p}\n"
+            message_actions += BREAKER_LINE
 
-        #     message_actions += f"Fund Updates\n" + SEPERATOR_LINE
-        #     message_actions += f"{funds_update.results_to_string(results)}\n"
-        #     message_actions += BREAKER_LINE
+        if 0 <= start_time.weekday() <= 3: # Monday through Thursday
+            try:
+                results = funds_update.run()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on fund update with error:\n{e}\n\n")
+                raise e
+
+            message_actions += f"Fund Updates:\n" + SEPERATOR_LINE
+            for r in results:
+                message_actions += f"{results_to_string(r, ticker)}\n"
+                message_actions += BREAKER_LINE
 
         end = datetime.now(timezone.utc)
         message_full = f"Activated at {start_time.strftime("%H:%M:%S")}\nCompleted at {end.strftime("%H:%M:%S")}.\n\n"

@@ -2,7 +2,7 @@ import atexit
 import log
 import os
 from datetime import datetime, timezone
-from modules.init.exit import cleanup
+from modules.object.exit import cleanup
 from modules.categorization import downloader
 
 

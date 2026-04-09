@@ -260,12 +260,12 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
         df["weight"] = df["weight"] / 100
         df["weight"] = df["weight"].round(DECIMAL_PRECISION)
 
-    # Sum up holdings that have the same ticker
+    # Sum up holdings that have the same ticker; take latest trade_date if rows differ
     df = df.groupby('ticker', as_index=False).agg({
         'market_value': 'sum',
         'shares': 'sum',
         'weight': 'sum',
-        'trade_date': 'first'
+        'trade_date': 'max'
     })
 
     return df    

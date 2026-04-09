@@ -1,5 +1,5 @@
 import atexit
-from modules.init.exit import cleanup
+from modules.object.exit import cleanup
 from modules.object import provider, provider_etf_holding 
 from modules.parse.url import scrape_provider
 from modules.parse.convert import load, map_data
@@ -9,7 +9,7 @@ atexit.register(cleanup)
 
 if __name__ == '__main__':
     try:
-        provider_id = 6
+        provider_id = 16
         p = provider.fetch_by_id(provider_id)
         if p and p.url_start:
             # process_provider(p)         

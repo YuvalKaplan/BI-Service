@@ -1,9 +1,10 @@
 import log
 from modules.object import batch_run
-from modules.object import provider, categorize_etf, ticker
+from modules.object import provider, categorize_etf, ticker, categorize_ticker
 from modules.parse.url import scrape_categorizer
 from modules.parse.convert import load, get_tickers
-
+from modules.calc import classification
+from modules.calc.classification import to_categorize_ticker_item
 def run() -> int:
     try:
         batch_run_id = None
@@ -29,7 +30,15 @@ def run() -> int:
                 
                 categorize_etf.update_last_download(etf.id)
 
-        batch_run.update_completed_at(batch_run_id)       
+        categorize_ticker.sync_categorize_ticker()
+        ct_symbols = categorize_ticker.fetch_symbols()
+        factor_updates = classification.update_factor_cache(ct_symbols)
+        categorize_ticker.bulk_update(factor_updates)
+        categorized_tickers = [to_categorize_ticker_item(t) for t in categorize_ticker.fetch_all()]
+        classifier = classification.get_classifier(categorized_tickers)
+        ticker.mark_style(classifier)
+
+        batch_run.update_completed_at(batch_run_id)
         log.record_status(f"Finished Categorize Tickers batch run on {len(etfs)} items.\n")
         log.record_status(f"Processed {total_symbols} tickers.\n")
         return total_symbols

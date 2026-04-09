@@ -3,7 +3,7 @@ import log
 import os
 from datetime import date, datetime, timezone
 from modules.bt.object.exit import cleanup
-from modules.bt.simulation import orchestrator
+from modules.bt import orchestrator
 
 
 atexit.register(cleanup)
@@ -19,8 +19,8 @@ if __name__ == '__main__':
         start_time = datetime.now(timezone.utc)
         
         try:
-            start_date = date(2026,1,20)
-            end_date = date(2026,3,20)
+            start_date = date(2022,1,1)
+            end_date = date(2025,12,31)
             results = orchestrator.run(start_date, end_date)
         except Exception as e:
             print(f"Best Ideas Cron Failed with error:\n{e}\n\n")

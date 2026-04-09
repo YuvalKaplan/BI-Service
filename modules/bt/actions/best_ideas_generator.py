@@ -1,94 +1,16 @@
 import log
-import pandas as pd
 from datetime import date
 from modules.bt.object import provider, provider_etf
-from modules.bt.object.provider_etf_holding import ProviderEtfHolding, fetch_holding_dates_available_past_period, fetch_valid_holdings_by_provider_etf_id
-from modules.bt.object.ticker_value import TickerValue, fetch_latest_price_date_for_ticker, fetch_ticker_dates_available_past_period, fetch_tickers_by_symbols_on_date
+from modules.bt.object.provider_etf_holding import fetch_holding_dates_available_past_period, fetch_valid_holdings_by_provider_etf_id
+from modules.bt.object.ticker_value import fetch_latest_price_date_for_ticker, fetch_ticker_dates_available_past_period, fetch_tickers_by_symbols_on_date
 from modules.bt.object import best_idea
-from modules.bt.object.ticker_value import TickerValue
+from modules.calc.best_ideas import find_best_ideas, to_holding_item, to_ticker_value_item
 
 # Configuration constants
 DAYS_NO_PRICING = 7 # Threshold for stale holdings
 MIN_HOLDINGS_WITH_PRICES_PCT = 0.9
 LOOK_BACK_FOR_COMMON_DATE = 14
 MAX_BEST_IDEAS_PER_FUND = 10
-HOLDING_DELTA_LIMIT_DROP_OFF = 0.25  # Maximum delta threshold
-
-def find_best_ideas(
-    holdings: list[ProviderEtfHolding],
-    values: list[TickerValue],
-    limit: int | None = None
-) -> pd.DataFrame:
-    """
-        Compare the delta between a virtual market-cap based benchmark and the real invested amount (stocks * price).
-        Extract the holdings on which the manager has a positive conviction.
-    """
-    # --- Holdings DataFrame ---
-    df_holdings = pd.DataFrame(
-        {
-            "symbol": h.ticker,
-            "shares": h.shares
-        }
-        for h in holdings
-        if h.ticker and h.shares and h.shares > 0
-    )
-
-    # --- Prices / market caps ---
-    df_values = pd.DataFrame(
-        {
-            "symbol": v.symbol,
-            "price": v.stock_price,
-            "market_cap": v.market_cap
-        }
-        for v in values
-        if v.symbol and v.stock_price and v.market_cap
-    )
-
-    # --- Merge ---
-    df = df_holdings.merge(df_values, on="symbol", how="inner")
-
-    if df.empty:
-        raise ValueError("No overlapping symbols between holdings and values")
-
-    # --- ETF weights ---
-    df["etf_value"] = df["shares"] * df["price"]
-    total_etf_value = df["etf_value"].sum()
-    df["etf_weight"] = df["etf_value"] / total_etf_value
-
-    # --- Benchmark weights ---
-    total_market_cap = df["market_cap"].sum()
-    df["benchmark_weight"] = df["market_cap"] / total_market_cap
-
-    # --- Active weight (manager conviction) ---
-    df["delta"] = df["etf_weight"] - df["benchmark_weight"]
-
-    # --- Best ideas = overweight positions ---
-    best_ideas = (
-        df[df["delta"] > 0]
-        .sort_values("delta", ascending=False)
-    )
-
-    # Drop symbols where delta is larger than the defined limit
-    dropped = best_ideas[best_ideas["delta"] > HOLDING_DELTA_LIMIT_DROP_OFF]
-    if not dropped.empty:
-        dropped_symbols = dropped["symbol"].tolist()
-        log.record_status(f"Dropping {len(dropped_symbols)} best-idea(s) above delta limit {HOLDING_DELTA_LIMIT_DROP_OFF}: {dropped_symbols}")
-    best_ideas = best_ideas[best_ideas["delta"] <= HOLDING_DELTA_LIMIT_DROP_OFF]
-
-    if limit is not None:
-        if limit <= 0:
-            raise ValueError("limit must be a positive integer")
-        best_ideas = best_ideas.head(limit)
-
-    return best_ideas.reset_index(drop=True)
-
-
-def print_best_ideas(best_ideas_df):
-    print(
-        best_ideas_df[
-            ["symbol", "etf_weight", "benchmark_weight", "delta"]
-        ]
-    )
 
 def record_problem(etf_id: int, error: str, message: str | None, problem_etfs: list[str]):
     p = provider.fetch_by_etf_id(etf_id)
@@ -171,7 +93,11 @@ def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
                     continue
 
                 # 5. Generate and batch insert
-                best_ideas_df = find_best_ideas(current_holdings, values, MAX_BEST_IDEAS_PER_FUND)
+                best_ideas_df = find_best_ideas(
+                    [to_holding_item(h) for h in current_holdings],
+                    [to_ticker_value_item(v) for v in values],
+                    MAX_BEST_IDEAS_PER_FUND
+                )
                 rows = best_idea.df_to_rows(
                     best_ideas_df,
                     provider_etf_id=etf_id,

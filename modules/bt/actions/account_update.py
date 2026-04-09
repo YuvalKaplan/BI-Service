@@ -5,9 +5,10 @@ from decimal import Decimal
 from dataclasses import dataclass
 from datetime import date, timedelta
 from modules.bt.object import fund, fund_holding
+from modules.calc.model_fund import getStrategyFromJson
 from modules.bt.object import account, account_holding as ah, account_cash_ledger as acl, account_trade as at, account_performance as ap, account_benchmark_comparison as abc
 from modules.bt.object import benchmark_value as bv
-from modules.bt.object import interest_config, ticker_value, ticker_dividend_history, ticker_split_history
+from modules.bt.object import interest_config, ticker_value, ticker_dividend_history
 
 DRIFT_THRESHOLD = 0.05   # 5%
 
@@ -638,7 +639,7 @@ def benchmark_comparison(account_id: int, fund_id: int, eval_date: date, daily_r
     if (fund_data is None):
         raise Exception("Account has not been assoicated a fund strategy")
 
-    strategy = fund.getStrategyFromJson(fund_data.strategy)
+    strategy = getStrategyFromJson(fund_data.strategy)
     
     if not strategy or not strategy.benchmarks:
         return
@@ -692,7 +693,7 @@ def daily_actions(account: account.Account, sim_date: date):
     if f is None:
         raise Exception("Missing strategy for fund")
 
-    strategy = fund.getStrategyFromJson(f.strategy)
+    strategy = getStrategyFromJson(f.strategy)
 
     # Update Cash: Apply dividends 
     process_daily_dividends(account_id=account.id, eval_date=sim_date)   

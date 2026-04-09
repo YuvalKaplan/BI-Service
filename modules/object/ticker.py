@@ -1,8 +1,10 @@
+import log
 from datetime import datetime
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
 from modules.core.db import db_pool_instance
+from modules.calc.classification import StyleClassifier
 
 @dataclass
 class Ticker:
@@ -38,14 +40,6 @@ class Ticker:
         self.sector = sector
         self.invalid = invalid
 
-def sync_tickers_with_etf_holdings():
-    try:
-        with db_pool_instance.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT public.sync_tickers_symbols();")
-        
-    except Error as e:
-        raise Exception(f"Error executing stored procedure: {e}")
 
 def fetch_by_symbol(symbol: str):
     try:
@@ -80,13 +74,14 @@ def upsert_tickers_style_and_cap(symbols: list[str], cap_type: str, style_type: 
             with conn.cursor() as cur:
                 query = """
                     INSERT INTO ticker (symbol, cap_type, style_type, source, type_from)
-                    SELECT unnest(%s::text[]), %s, %s, 'cat_etf', 'cat_etf'
+                    SELECT unnest(%s::text[]), %s, %s, 'provider_etf', 'ETF'
                     ON CONFLICT (symbol)
                     DO UPDATE
                     SET
                         cap_type = EXCLUDED.cap_type,
                         style_type = EXCLUDED.style_type,
-                        type_from = 'cat_etf'
+                        style_type = 'provider_etf'
+                        type_from = 'ETF'
                     WHERE ticker.cap_type IS DISTINCT FROM EXCLUDED.cap_type
                        OR ticker.style_type IS DISTINCT FROM EXCLUDED.style_type;
                 """
@@ -115,3 +110,49 @@ def update_invalid(symbol: str, reason: str):
 
     except Error as e:
         raise Exception(f"Error updating the Ticker invalid reason into the DB: {e}")
+
+
+def mark_style(classifier: StyleClassifier) -> None:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            # 1. Update from ETF categorization
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE public.ticker t
+                    SET
+                        style_type = c.style_type,
+                        type_from = 'ETF'
+                    FROM public.categorize_ticker c
+                    WHERE t.symbol = c.symbol
+                    AND c.style_type IS NOT NULL;
+                """)
+            conn.commit()
+
+            # 2. Find symbols still missing a style classification
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT symbol
+                    FROM public.ticker
+                    WHERE style_type IS NULL
+                      AND invalid IS NULL
+                """)
+                missing_symbols = [row[0] for row in cur.fetchall()]
+            conn.commit()
+
+            log.record_status(f"Classification using model needed for {len(missing_symbols)} tickers")
+
+            # 3. Classify remaining symbols via the ML model
+            results = classifier.classify_symbols(missing_symbols)
+
+            updates = [(r["style"], "MODEL", r["symbol"]) for r in results]
+            with conn.cursor() as cur:
+                cur.executemany("""
+                    UPDATE public.ticker
+                    SET style_type = %s,
+                        type_from = %s
+                    WHERE symbol = %s
+                """, updates)
+            conn.commit()
+
+    except Error as e:
+        raise Exception(f"Error marking style for tickers in the DB: {e}")

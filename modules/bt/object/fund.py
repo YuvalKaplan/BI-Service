@@ -1,6 +1,4 @@
 from datetime import datetime
-from typing import Dict, Optional
-from pydantic import BaseModel
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
@@ -14,24 +12,6 @@ class Fund:
     strategy: dict
     active: bool
 
-class Cap(BaseModel):
-    name: str    
-
-class Style(BaseModel):
-    name: str
-    value: Optional[int] = None
-    growth: Optional[int] = None
-    
-class Strategy(BaseModel):
-    holdings: int
-    cap: Cap
-    style: Style
-    thematic: Optional[str] = None
-    benchmarks: Optional[list[str]] = None
-    provider_etfs: Optional[list[int]] = None
-
-def getStrategyFromJson(data: dict) -> Strategy:
-    return Strategy.model_validate(data)
 
 def fetch_all():
     try:

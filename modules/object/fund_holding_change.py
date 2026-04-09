@@ -2,22 +2,8 @@ from datetime import date
 from typing import List
 from psycopg.errors import Error
 from psycopg.rows import class_row
-from dataclasses import dataclass
 from modules.core.db import db_pool_instance
-from modules.object.fund import Fund
-import pandas as pd
-
-@dataclass
-class FundHoldingChange:
-    fund_id: int
-    symbol: str
-    change_date: date
-    direction: str
-    ranking: int | None = None
-    appearances: int | None = None
-    max_delta: float | None = None
-    top_delta_provider_etf_id: int | None = None
-    all_provider_etf_ids: list[int] | None = None
+from modules.calc.model_fund import FundHoldingChange  # noqa: F401
 
 def normalize_ids(ids: list[int] | None) -> list[int] | None:
     return ids if ids else None
@@ -51,9 +37,10 @@ def insert_fund_changes(items: List[FundHoldingChange]):
                         appearances,
                         max_delta,
                         top_delta_provider_etf_id,
-                        all_provider_etf_ids
+                        all_provider_etf_ids,
+                        reason
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::integer[]);
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::integer[], %s);
                 """
 
                 insert_values = [
@@ -67,6 +54,7 @@ def insert_fund_changes(items: List[FundHoldingChange]):
                         i.max_delta,
                         i.top_delta_provider_etf_id,
                         normalize_ids(i.all_provider_etf_ids),
+                        i.reason,
                     )
                     for i in items
                 ]

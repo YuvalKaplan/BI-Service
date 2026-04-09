@@ -19,8 +19,12 @@ def run(start_time: datetime) -> tuple[str, int, list[int] | None]:
         log.record_status(f"Running ETF Downloader batch job ID {batch_run_id} - will proccess {len(to_scrape)} items.")
 
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = [executor.submit(process_provider, item) for item in to_scrape]
-            wait(futures)
+            future_to_provider = {executor.submit(process_provider, item): item for item in to_scrape}
+            wait(future_to_provider)
+
+        failed_providers = [p.name for f, p in future_to_provider.items() if f.exception() is not None]
+        if failed_providers:
+            log.record_error(f"{len(failed_providers)} provider(s) failed during collection: {', '.join(str(n) for n in failed_providers)}")
 
         batch_run.update_completed_at(batch_run_id)
 
@@ -36,8 +40,6 @@ def run(start_time: datetime) -> tuple[str, int, list[int] | None]:
                 stats_downloader += "{:<8}{:<20}{}\n".format(line['id'], f"{line['downloaded']} out of {line['available']}", line['name'])
 
         log.record_status(f"Finished ETF Downloader batch run on {len(to_scrape)} items.\n{stats_downloader}")
-
-        ticker.sync_tickers_with_etf_holdings()
 
         return stats_downloader, total_downloaded, provider_ids
 

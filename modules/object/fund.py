@@ -4,14 +4,15 @@ from psycopg.rows import class_row
 from dataclasses import dataclass
 from modules.core.db import db_pool_instance
 
+
 @dataclass
 class Fund:
     id: int
-    created_at: datetime 
-    style_type: str 
-    cap_type: str
+    created_at: datetime
     name: str
-    last_updated: datetime | None
+    strategy: dict
+    active: bool
+
 
 def fetch_all():
     try:

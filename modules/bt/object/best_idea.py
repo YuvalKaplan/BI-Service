@@ -75,32 +75,6 @@ def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: s
     except Error as e:
         raise Exception(f"Error fetching the BestIdeaResult from the DB: {e}")
 
-def average_best_ideas_delta_for_etf(provider_etf_id: int, as_of_date: date, use_rankings: int) -> float:
-    try:
-        with db_pool_instance_bt.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT AVG(delta)
-                    FROM (
-                        SELECT delta
-                        FROM best_idea
-                        WHERE provider_etf_id = %s
-                          AND value_date = (
-                                SELECT MAX(value_date) FROM best_idea 
-                                WHERE provider_etf_id = %s AND value_date <= %s)
-                        ORDER BY ranking
-                        LIMIT %s
-                    ) sub;
-                """, (provider_etf_id, provider_etf_id, as_of_date, use_rankings))
-                item = cur.fetchone()
-                
-                if not item or item[0] is None:
-                    return 0.0
-
-                return float(item[0])
-    except Error as e:
-        raise Exception(f"Error fetching the BestIdeaResult from the DB: {e}")
-
 def reset():
     try:
         with db_pool_instance_bt.get_connection() as conn:

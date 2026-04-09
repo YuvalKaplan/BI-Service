@@ -1,5 +1,5 @@
 import atexit
-from modules.init.exit import cleanup
+from modules.object.exit import cleanup
 from modules.cron.categorize_tickers import run
 
 atexit.register(cleanup)

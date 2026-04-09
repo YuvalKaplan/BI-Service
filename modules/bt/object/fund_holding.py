@@ -2,17 +2,8 @@ from datetime import date
 from typing import List
 from psycopg.errors import Error
 from psycopg.rows import class_row
-from dataclasses import dataclass
 from modules.core.db import db_pool_instance_bt
-
-@dataclass
-class FundHolding:
-    fund_id: int
-    symbol: str
-    holding_date: date
-    ranking: int
-    source_etf_id: int 
-    max_delta: float | None
+from modules.calc.model_fund import FundHolding  # noqa: F401
 
 def fetch_funds_holdings(fund_id: int, eval_date: date):
     try:

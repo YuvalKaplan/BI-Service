@@ -2,8 +2,9 @@ from datetime import date, datetime
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
+import log
 from modules.core.db import db_pool_instance_bt
-from modules.bt.actions.classification import get_classifier
+from modules.calc.classification import StyleClassifier
 
 @dataclass
 class Ticker:
@@ -38,15 +39,6 @@ class Ticker:
         self.industry = industry
         self.sector = sector
         self.invalid = invalid
-
-def sync_tickers_with_etf_holdings():
-    try:
-        with db_pool_instance_bt.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT public.sync_tickers_symbols();")
-        
-    except Error as e:
-        raise Exception(f"Error executing stored procedure: {e}")
 
 def fetch_by_symbol(symbol: str):
     try:
@@ -139,7 +131,7 @@ def upsert(item: Ticker):
     except Error as e:
         raise Exception(f"Error upserting ticker into the DB: {e}")
 
-def mark_style():
+def mark_style(classifier: StyleClassifier) -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             # 1. Update from ETF categorization
@@ -164,13 +156,12 @@ def mark_style():
                       AND invalid IS NULL
                 """)
                 missing_symbols = [row[0] for row in cur.fetchall()]
-            
+
             conn.commit()
 
-            print(f"Classification using model needed for {len(missing_symbols)} tickers")
+            log.record_status(f"Classification using model needed for {len(missing_symbols)} tickers")
 
             # 3. Classify missing symbols
-            classifier = get_classifier(update_training_set=False)
             results = classifier.classify_symbols(missing_symbols)
 
             updates = [(r["style"], "MODEL", r["symbol"]) for r in results]

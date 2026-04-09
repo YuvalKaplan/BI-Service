@@ -150,8 +150,17 @@ def open_page(page: Page, url: str, wait_pre_events: str | None, wait_post_event
         # Run any instruction on the page to open the page content.
         if events:
             for event in events:
-                dispatch(page, event)
-                page.wait_for_timeout(2000)  # final paint
+                max_retries = 2
+                for attempt in range(max_retries):
+                    try:
+                        dispatch(page, event)
+                        page.wait_for_timeout(2000)  # final paint
+                        break
+                    except Exception as e:
+                        if attempt == max_retries - 1:
+                            raise
+                        log.record_notice(f"Dispatch failed on attempt {attempt + 1}, retrying... Error: {e}")
+                        page.wait_for_timeout(1000)
 
 
         page.wait_for_timeout(2000)  # final paint
@@ -175,16 +184,16 @@ def scrape_provider(cp: Provider):
 
     try:
         with Stealth().use_sync(sync_playwright()) as p:
-            open_browser.browser = p.chromium.launch(headless=True,
+            open_browser.browser = p.chromium.launch(headless=False,
             # Add extra launch arguments to mimic real Chrome
             # args=[
             #     "--disable-blink-features=AutomationControlled",
             #     "--disable-infobars",
-            #     "--disable-web-security",
-            #     "--disable-site-isolation-trials",
             #     "--disable-dev-shm-usage",
             #     "--no-sandbox",
+            #     "--disable-web-security",
             #     "--ignore-certificate-errors"
+            #     "--disable-site-isolation-trials",
             # ])
             args=[
                 "--disable-blink-features=AutomationControlled",

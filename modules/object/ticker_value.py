@@ -23,6 +23,43 @@ def ticker_values_to_df(values: list[TickerValue]) -> pd.DataFrame:
     )
 
 
+def fetch_ticker_dates_available_past_period(provider_etf_id: int, look_back_days: int) -> list[date]:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                query = """
+                    SELECT DISTINCT (tv.value_date::date)
+                    FROM provider_etf_holding AS peh
+                    INNER JOIN ticker AS t ON peh.ticker = t.symbol
+                    INNER JOIN ticker_value AS tv ON t.symbol = tv.symbol
+                    WHERE t.invalid IS NULL
+                      AND peh.provider_etf_id = %s
+                      AND tv.value_date > NOW() - (%s * INTERVAL '1 day')
+                    ORDER BY tv.value_date::date;
+                """
+                cur.execute(query, (provider_etf_id, look_back_days))
+                return [row[0] for row in cur.fetchall()]
+    except Error as e:
+        raise Exception(f"Error retrieving ticker value dates for ETF {provider_etf_id}: {e}")
+
+
+def fetch_latest_price_date_for_ticker(symbol: str, as_of_date: date) -> date | None:
+    """Return the most recent value_date on or before as_of_date, or None if no price exists."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT MAX(value_date)::date
+                    FROM public.ticker_value
+                    WHERE symbol = %s
+                      AND value_date <= %s
+                """, (symbol, as_of_date))
+                result = cur.fetchone()
+                return result[0] if result and result[0] is not None else None
+    except Error:
+        return None
+
+
 def fetch_price_dates_available_past_period(look_back_days: int) -> list[date]:
     try:
         with db_pool_instance.get_connection() as conn:

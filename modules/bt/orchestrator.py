@@ -1,7 +1,9 @@
 from datetime import date, timedelta
-from modules.bt.object import fund, best_idea, ticker, provider_etf_holding
+from modules.bt.object import fund, best_idea, ticker, provider_etf_holding, categorize_ticker
 from modules.bt.object import account
 from modules.bt.actions import stocks_download, best_ideas_generator, funds_update, account_update
+from modules.calc.model_fund import getStrategyFromJson
+from modules.calc.classification import get_classifier, to_categorize_ticker_item
 
 # Strategy frequency: 7 for weekly, 14 for bi-weekly
 STRATEGY_RUN_INTERVAL_DAYS = 7
@@ -13,7 +15,7 @@ def distinct_provider_etfs(accounts) -> list[int]:
         if f is None:
             raise Exception("Missing strategy for fund")
 
-        strategy = fund.getStrategyFromJson(f.strategy)
+        strategy = getStrategyFromJson(f.strategy)
         strategy_etfs = strategy.provider_etfs
         if strategy_etfs:
             distinct_etfs.update(strategy_etfs)
@@ -26,19 +28,25 @@ def run(start_date: date, end_date: date):
     etf_ids = distinct_provider_etfs(accounts)
     symbols = provider_etf_holding.fetch_tickers_for_etfs(etf_ids)
 
+    do_data_download = True
+    do_best_ideas = True
+    do_target_fund = True
+    do_accounts = True
+
     # Stock data gathering
-    do_ticker_download_and_prep = False
-    if do_ticker_download_and_prep == True:
+    if do_data_download == True:
         # Download all stock information (prices, market cap and dividends)
         stocks_download.run(symbols, start_date - timedelta(days=15), end_date + timedelta(days=15))
 
         # Mark the stocks as value/growh, based on Value/Growth ETF sources and for not found in ETFs, use the classification model
-        ticker.mark_style()
+        categorize_ticker.sync_categorize_ticker()
+        categorized_tickers = [to_categorize_ticker_item(t) for t in categorize_ticker.fetch_all()]
+        classifier = get_classifier(categorized_tickers)
+        ticker.mark_style(classifier)
         
         # ticker.mark_split_invalid(symbols, start_date - timedelta(days=5), end_date + timedelta(days=5))
 
     # Identify the lateset best ideas per ETF.
-    do_best_ideas = False
     if do_best_ideas:
         best_idea.reset()
 
@@ -55,7 +63,6 @@ def run(start_date: date, end_date: date):
             current_sim_date += timedelta(days=1)
 
     # Construct todays target fund holdings. 
-    do_target_fund = True
     if do_target_fund:
         fund.reset_funds()
 
@@ -71,7 +78,6 @@ def run(start_date: date, end_date: date):
             current_sim_date += timedelta(days=1)
 
     # Update account based on daily activity (interest, dividends, transactions, performance)
-    do_accounts = True
     if do_accounts:
         account.reset_accounts()
 

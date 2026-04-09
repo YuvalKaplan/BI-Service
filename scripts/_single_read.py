@@ -1,5 +1,5 @@
 import atexit
-from modules.init.exit import cleanup
+from modules.object.exit import cleanup
 from modules.object import provider, provider_etf
 from modules.parse.convert import read_file, map_data
 

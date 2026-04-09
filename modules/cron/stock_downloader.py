@@ -9,6 +9,7 @@ from modules.object.provider_etf_holding import fetch_valid_tickers_in_holdings
 from modules.object import ticker, ticker_value
 
 REMOVE_ETFS_AND_FUNDS = r'\b(ETF|fund)\b'
+BATCH_SIZE = 100
 
 def run() -> tuple[int, int]:
     try:
@@ -17,17 +18,16 @@ def run() -> tuple[int, int]:
             batch_run_id = batch_run.insert(batch_run.BatchRun('stock_downloader', 'auto'))
 
         symbols = fetch_valid_tickers_in_holdings()
-        group_size = 100
         group_count = 1
         today = datetime.today()
         missing_symbols = []
         start = time.monotonic()
-        num_groups = math.ceil(len(symbols) / group_size)
+        num_groups = math.ceil(len(symbols) / BATCH_SIZE)
 
-        print(f"Starting Stock Info Download in {num_groups} batches of {group_size} stocks each.")
+        log.record_status(f"Starting Stock Info Download in {num_groups} batches of {BATCH_SIZE} stocks each.")
 
-        for i in range(0, len(symbols), group_size):
-            batch = symbols[i : i + group_size]
+        for i in range(0, len(symbols), BATCH_SIZE):
+            batch = symbols[i : i + BATCH_SIZE]
             for s in batch:
                 sd = get_stock_profile(s)
                 if isinstance(sd, str):
@@ -43,7 +43,7 @@ def run() -> tuple[int, int]:
                         tv = ticker_value.TickerValue(symbol=s, value_date=today, stock_price=float(sd['price']), market_cap=float(sd['marketCap']))
                         ticker_value.upsert(tv)
 
-            print(f"Batch {group_count} completed.")
+            log.record_status(f"Batch {group_count} of {num_groups} completed.")
             group_count += 1
 
         log.record_status(f"Run time (seconds): {time.monotonic() - start}")

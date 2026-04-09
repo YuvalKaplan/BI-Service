@@ -1,3 +1,4 @@
+import sys
 from psycopg.errors import Error
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -30,7 +31,7 @@ def insert(item: Log):
                 new_id = row[0] if row is not None else None
                 return new_id
     except Error as e:
-        print(f"Error inserting the log record into the DB: {e}")
+        print(f"[LOG DB ERROR] {e} | Original message: {item.msg}", file=sys.stderr)
         return None
 
 

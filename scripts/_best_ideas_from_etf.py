@@ -1,5 +1,5 @@
 import atexit
-from modules.init.exit import cleanup
+from modules.object.exit import cleanup
 from modules.cron.best_ideas_generator import run
 
 

@@ -2,23 +2,8 @@ from datetime import date
 from typing import List
 from psycopg.errors import Error
 from psycopg.rows import class_row
-from dataclasses import dataclass
 from modules.core.db import db_pool_instance_bt
-from modules.object.fund import Fund
-import pandas as pd
-
-@dataclass
-class FundHoldingChange:
-    fund_id: int
-    symbol: str
-    change_date: date
-    direction: str
-    ranking: int | None = None
-    appearances: int | None = None
-    max_delta: float | None = None
-    top_delta_provider_etf_id: int | None = None
-    all_provider_etf_ids: list[int] | None = None
-    reason: str | None = None
+from modules.calc.model_fund import FundHoldingChange  # noqa: F401
 
 def normalize_ids(ids: list[int] | None) -> list[int] | None:
     return ids if ids else None
