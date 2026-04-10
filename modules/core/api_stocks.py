@@ -66,12 +66,6 @@ def get_stock_profile(symbol: str) -> dict[str,str] | str:
     try:
         throttle_api_calls()
         url = (f"{FMP_API_URL}/profile?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
-        log.record_status("UUUUUUUUUUUUUURRRRRRRRRRRRRRLLLLLLLLLLLLLL")
-        log.record_status(url)
-        log.record_status("KKKKKKKKKKKKKKKKKKKKKKK")
-        log.record_status(f"{os.getenv('SECRET_MARKET_DATA_API_KEY')}")
-        log.record_status("--------------------------------------")
-
         array = get_jsonparsed_data(url)
         
         if not isinstance(array, list) or len(array) == 0:
