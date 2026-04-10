@@ -43,7 +43,8 @@ def fetch_valid_tickers_in_holdings() -> List[str]:
                     SELECT DISTINCT peh.ticker 
                     FROM public.provider_etf_holding AS peh
                     INNER JOIN ticker AS t ON peh.ticker = t.symbol
-                    WHERE t.invalid IS null;
+                    WHERE t.invalid IS null
+                    ORDER BY peh.ticker
                 """
                 cur.execute(query)
                 return [row[0] for row in cur.fetchall()]
