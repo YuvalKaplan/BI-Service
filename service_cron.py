@@ -28,16 +28,16 @@ if __name__ == '__main__':
         message_actions = ""
 
         if 1 <= weekday <= 5: # Tuesday through Saturday
-            # try:
-            #     stats_downloader, total_downloaded, provider_ids, = etf_downloader.run(start_time)
-            # except Exception as e:
-            #     sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
-            #     raise e
+            try:
+                stats_downloader, total_downloaded, provider_ids, = etf_downloader.run(start_time)
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
+                raise e
             
-            # message_actions += f"Holdings Download\n" + SEPERATOR_LINE
-            # message_actions += f"{stats_downloader}\n" + SEPERATOR_LINE
-            # message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
-            # message_actions += BREAKER_LINE
+            message_actions += f"Holdings Download\n" + SEPERATOR_LINE
+            message_actions += f"{stats_downloader}\n" + SEPERATOR_LINE
+            message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
+            message_actions += BREAKER_LINE
 
             try:
                 total_updated, missing_data = stock_downloader.run()
