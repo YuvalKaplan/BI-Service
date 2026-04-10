@@ -1,9 +1,9 @@
 from datetime import date, timedelta
-from modules.bt.object import fund, best_idea, ticker, provider_etf_holding, categorize_ticker
+from modules.bt.object import fund, best_idea, ticker, provider_etf_holding, categorize_etf_holding, categorize_ticker
 from modules.bt.object import account
 from modules.bt.actions import stocks_download, best_ideas_generator, funds_update, account_update
 from modules.calc.model_fund import getStrategyFromJson
-from modules.calc.classification import get_classifier, to_categorize_ticker_item
+from modules.calc import classification
 
 # Strategy frequency: 7 for weekly, 14 for bi-weekly
 STRATEGY_RUN_INTERVAL_DAYS = 7
@@ -38,10 +38,13 @@ def run(start_date: date, end_date: date):
         # Download all stock information (prices, market cap and dividends)
         stocks_download.run(symbols, start_date - timedelta(days=15), end_date + timedelta(days=15))
 
-        # Mark the stocks as value/growh, based on Value/Growth ETF sources and for not found in ETFs, use the classification model
-        categorize_ticker.sync_categorize_ticker()
-        categorized_tickers = [to_categorize_ticker_item(t) for t in categorize_ticker.fetch_all()]
-        classifier = get_classifier(categorized_tickers)
+        last_update = categorize_ticker.fetch_last_update()
+        last_update_date = last_update.date() if last_update else None
+        if last_update_date is None or (date.today() - last_update_date) > timedelta(days=90):
+            raise Exception("Table categorize_ticker data is stale or empty — sync it from the live DB before running the back test (tables: categorize_etf_holding and categorize_ticker).")
+
+        categorized_tickers = [classification.to_categorize_ticker_item(t) for t in categorize_ticker.fetch_all()]
+        classifier = classification.get_classifier(categorized_tickers)
         ticker.mark_style(classifier)
         
         # ticker.mark_split_invalid(symbols, start_date - timedelta(days=5), end_date + timedelta(days=5))

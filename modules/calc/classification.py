@@ -7,7 +7,7 @@ from sklearn.preprocessing import OneHotEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import GradientBoostingClassifier
-from modules.core.fdata import fetch_company_factors
+from modules.core.api_stocks import fetch_company_factors
 
 FEATURE_COLS = [
     "market_cap",

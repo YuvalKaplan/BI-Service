@@ -65,41 +65,28 @@ def fetch_by_symbols(symbols: list[str]):
     except Error as e:
         raise Exception(f"Error fetching the Ticker list page from the DB: {e}")
 
-def upsert_tickers_style_and_cap(symbols: list[str], cap_type: str, style_type: str):
-    if not symbols:
-        return
-
+def upsert(item: Ticker):
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 query = """
-                    INSERT INTO ticker (symbol, cap_type, style_type, source, type_from)
-                    SELECT unnest(%s::text[]), %s, %s, 'provider_etf', 'ETF'
+                    INSERT INTO ticker (symbol, isin, cik, name, exchange, industry, sector, source, type_from)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (symbol)
                     DO UPDATE
-                    SET
-                        cap_type = EXCLUDED.cap_type,
-                        style_type = EXCLUDED.style_type,
-                        style_type = 'provider_etf'
-                        type_from = 'ETF'
-                    WHERE ticker.cap_type IS DISTINCT FROM EXCLUDED.cap_type
-                       OR ticker.style_type IS DISTINCT FROM EXCLUDED.style_type;
+                    SET isin = EXCLUDED.isin, 
+                        cik = EXCLUDED.cik, 
+                        name = EXCLUDED.name, 
+                        exchange = EXCLUDED.exchange, 
+                        industry = EXCLUDED.industry, 
+                        sector = EXCLUDED.sector,
+                        source = EXCLUDED.source,
+                        type_from = EXCLUDED.type_from;
                 """
-
-                cur.execute(query, (symbols, cap_type, style_type))
-
+                cur.execute(query, (item.symbol, item.isin, item.cik, item.name, item.exchange, item.industry, item.sector, item.source, item.type_from))
+    
     except Error as e:
-        raise Exception(f"Error upserting Tickers: {e}")
-
-def update_info(item: Ticker):
-    try:
-        with db_pool_instance.get_connection() as conn:
-            with conn.cursor() as cur:
-                insert_query = "UPDATE ticker SET isin =%s, cik = %s, name = %s, industry = %s, sector = %s WHERE symbol = %s;"
-                cur.execute(insert_query, (item.isin, item.cik, item.name, item.industry, item.sector, item.symbol))
-
-    except Error as e:
-        raise Exception(f"Error updating the Ticker item into the DB: {e}")
+        raise Exception(f"Error upserting ticker into the DB: {e}")
 
 def update_invalid(symbol: str, reason: str):
     try:
@@ -112,23 +99,23 @@ def update_invalid(symbol: str, reason: str):
         raise Exception(f"Error updating the Ticker invalid reason into the DB: {e}")
 
 
-def mark_style(classifier: StyleClassifier) -> None:
+def mark_style(classifier: StyleClassifier) -> int:
     try:
         with db_pool_instance.get_connection() as conn:
-            # 1. Update from ETF categorization
+            # Update from ETF categorization
             with conn.cursor() as cur:
                 cur.execute("""
                     UPDATE public.ticker t
                     SET
                         style_type = c.style_type,
-                        type_from = 'ETF'
+                        type_from = 'CAT_ETF'
                     FROM public.categorize_ticker c
                     WHERE t.symbol = c.symbol
                     AND c.style_type IS NOT NULL;
                 """)
             conn.commit()
-
-            # 2. Find symbols still missing a style classification
+            
+            # Find symbols still missing a style classification
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT symbol
@@ -141,7 +128,7 @@ def mark_style(classifier: StyleClassifier) -> None:
 
             log.record_status(f"Classification using model needed for {len(missing_symbols)} tickers")
 
-            # 3. Classify remaining symbols via the ML model
+            # Classify remaining symbols via the ML model
             results = classifier.classify_symbols(missing_symbols)
 
             updates = [(r["style"], "MODEL", r["symbol"]) for r in results]
@@ -153,6 +140,8 @@ def mark_style(classifier: StyleClassifier) -> None:
                     WHERE symbol = %s
                 """, updates)
             conn.commit()
+
+            return len(missing_symbols)
 
     except Error as e:
         raise Exception(f"Error marking style for tickers in the DB: {e}")

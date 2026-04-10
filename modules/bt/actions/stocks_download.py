@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import List
 from datetime import date, timedelta
 from concurrent.futures import ThreadPoolExecutor
-from modules.core.fdata import get_stock_profile, get_stock_historic_prices, get_stock_historic_dividend, get_stock_historic_splits, get_stock_historic_market_cap
+from modules.core.api_stocks import get_stock_profile, get_stock_historic_prices, get_stock_historic_dividend, get_stock_historic_splits, get_stock_historic_market_cap
 
 from modules.bt.object import account, ticker_split_history
 from modules.bt.object import fund
@@ -79,7 +79,16 @@ def process_symbol(s: str, start_date: date, end_date: date) -> tuple[bool, str,
             ticker.update_invalid(s, sd)
             return False, s, sd
 
-        t = ticker.Ticker(symbol=s, isin=sd['isin'], cik=sd['cik'], exchange=sd['exchange'], name=sd['companyName'], industry=sd['industry'], sector=sd['sector'])
+        t = ticker.Ticker(
+            symbol=s, 
+            isin=sd['isin'], 
+            cik=sd['cik'], 
+            exchange=sd['exchange'], 
+            name=sd['companyName'], 
+            industry=sd['industry'], 
+            sector=sd['sector'], 
+            source='provider_etf'
+        )
         if t.name is None or re.search(REMOVE_ETFS_AND_FUNDS, t.name, flags=re.IGNORECASE):
             ticker.update_invalid(s, 'Fund or ETF')
             return False, s, 'Fund or ETF'

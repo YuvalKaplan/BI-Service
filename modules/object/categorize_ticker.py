@@ -91,6 +91,18 @@ def fetch_all() -> List[CategorizeTicker]:
         raise Exception(f"Error loading categorize ticker: {e}")
 
 
+def fetch_last_update() -> datetime | None:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT MAX(last_update) FROM categorize_ticker")
+                result = cur.fetchone()
+                return result[0] if result else None
+
+    except Error as e:
+        raise Exception(f"Error fetching categorize_ticker last update: {e}")
+
+
 def fetch_symbols() -> list[str]:
     try:
         with db_pool_instance.get_connection() as conn:

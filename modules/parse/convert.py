@@ -285,7 +285,7 @@ def get_tickers(full_rows: list[list[str]], mapping: Mapping) -> list[str]:
     # Apply filters
     df = df[
         df[ticker_col_name].str.fullmatch(r'[A-Z]+', na=False) &   # only A–Z
-        ~df[ticker_col_name].isin(['USD', 'CAD', 'TICKER']) &                # exclude currencies
+        ~df[ticker_col_name].isin(['USD', 'CAD', 'TICKER']) &      # exclude currencies
         ~df[ticker_col_name].isin(mapping.remove_tickers)          # exclude custom list
     ]
     distinct_tickers = df[ticker_col_name].unique().tolist()    

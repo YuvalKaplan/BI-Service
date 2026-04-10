@@ -2,6 +2,7 @@ import os
 import log
 import re
 import tempfile
+import time
 from datetime import date
 from typing import List
 from dataclasses import dataclass
@@ -13,6 +14,20 @@ from modules.object.provider_etf import EtfDownload, fetch_by_provider_id
 from modules.object.categorize_etf import CategorizeEtf, CategorizeEtfDownload
 
 ENV_TYPE = os.environ.get("ENV_TYPE")
+
+SCRAPE_MAX_RETRIES = 3
+SCRAPE_RETRY_DELAY_SECONDS = 3
+
+# Add extra launch arguments to mimic real Chrome
+CHROME_LAUNCH_ARGS = [
+        "--disable-blink-features=AutomationControlled",
+        "--disable-infobars",
+        "--disable-dev-shm-usage",
+        "--no-sandbox"
+        #     "--disable-web-security",
+        #     "--ignore-certificate-errors"
+        #     "--disable-site-isolation-trials",
+    ]
 
 # A common, modern user-agent string
 REAL_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -179,105 +194,93 @@ def open_page(page: Page, url: str, wait_pre_events: str | None, wait_post_event
 
 
 def scrape_provider(cp: Provider):
-    downloads: List[EtfDownload] = []
-    open_browser: OpenBrowser = OpenBrowser(browser=None, context=None, page=None)
+    last_error = None
+    for attempt in range(SCRAPE_MAX_RETRIES):
+        try:
+            downloads: List[EtfDownload] = []
+            open_browser: OpenBrowser = OpenBrowser(browser=None, context=None, page=None)
 
-    try:
-        with Stealth().use_sync(sync_playwright()) as p:
-            open_browser.browser = p.chromium.launch(headless=False,
-            # Add extra launch arguments to mimic real Chrome
-            # args=[
-            #     "--disable-blink-features=AutomationControlled",
-            #     "--disable-infobars",
-            #     "--disable-dev-shm-usage",
-            #     "--no-sandbox",
-            #     "--disable-web-security",
-            #     "--ignore-certificate-errors"
-            #     "--disable-site-isolation-trials",
-            # ])
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--disable-dev-shm-usage",
-                "--no-sandbox"
-            ])
-            open_browser.context = open_browser.browser.new_context(
-                user_agent=REAL_USER_AGENT,
-                viewport={'width': 1920, 'height': 1080},
-                accept_downloads=True
-            )      
-            open_browser.page = open_browser.context.new_page()
+            with Stealth().use_sync(sync_playwright()) as p:
+                open_browser.browser = p.chromium.launch(headless=True, args=CHROME_LAUNCH_ARGS)
+                open_browser.context = open_browser.browser.new_context(
+                    user_agent=REAL_USER_AGENT,
+                    viewport={'width': 1920, 'height': 1080},
+                    accept_downloads=True
+                )
+                open_browser.page = open_browser.context.new_page()
 
-            if cp.id == None or cp.url_start == None:
-                raise Exception('Missing URL for provider.')
-            
-            if cp.id and open_page(page=open_browser.page, url=cp.url_start, wait_pre_events=cp.wait_pre_events, wait_post_events=cp.wait_post_events, events=cp.events):
-                etf_list = fetch_by_provider_id(cp.id)
-                log.record_status(f"Scraping {len(etf_list)} ETFs from provider '{cp.name}'")
-                for etf in etf_list:
-                    trigger_download = etf.trigger_download or cp.trigger_download
-                    if etf.id == None or etf.url == None or trigger_download == None:
-                        raise Exception('Missing URL or Trigger Method for provider etf.')
-                    
-                    if open_page(page=open_browser.page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
-                        found_date_from_page = None
-                        mapping  = etf.mapping or cp.mapping
-                        if mapping:
-                            map = getMappingFromJson(mapping)
-                            if mapping and map.date.on_page:
-                                found_date_from_page = get_date_on_page(page=open_browser.page, mapping=map)
-                                if not found_date_from_page:
-                                    raise Exception('ETF holdings date from page could not be confirmed - skipping this ETF.')
-                        file_name, data = get_holdings(page=open_browser.page, trigger_download=trigger_download)
-                        if file_name and data:
-                            downloads.append(EtfDownload(provider=cp, etf=etf, file_name=file_name, data=data, date_from_page=found_date_from_page))
+                if cp.id == None or cp.url_start == None:
+                    raise Exception('Missing URL for provider.')
 
-            open_browser.context.close()
-            open_browser.browser.close()
+                if cp.id and open_page(page=open_browser.page, url=cp.url_start, wait_pre_events=cp.wait_pre_events, wait_post_events=cp.wait_post_events, events=cp.events):
+                    etf_list = fetch_by_provider_id(cp.id)
+                    log.record_status(f"Scraping {len(etf_list)} ETFs from provider '{cp.name}'")
+                    for etf in etf_list:
+                        trigger_download = etf.trigger_download or cp.trigger_download
+                        if etf.id == None or etf.url == None or trigger_download == None:
+                            raise Exception('Missing URL or Trigger Method for provider etf.')
 
-            return downloads
-        
-    except Exception as e:
-        raise Exception(f"Failed to extract URLs and subsequent files from webpage content and related links: {e}")
+                        if open_page(page=open_browser.page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
+                            found_date_from_page = None
+                            mapping  = etf.mapping or cp.mapping
+                            if mapping:
+                                map = getMappingFromJson(mapping)
+                                if mapping and map.date.on_page:
+                                    found_date_from_page = get_date_on_page(page=open_browser.page, mapping=map)
+                                    if not found_date_from_page:
+                                        raise Exception('ETF holdings date from page could not be confirmed - skipping this ETF.')
+                            file_name, data = get_holdings(page=open_browser.page, trigger_download=trigger_download)
+                            if file_name and data:
+                                downloads.append(EtfDownload(provider=cp, etf=etf, file_name=file_name, data=data, date_from_page=found_date_from_page))
+
+                open_browser.context.close()
+                open_browser.browser.close()
+
+                return downloads
+
+        except Exception as e:
+            last_error = e
+            if attempt < SCRAPE_MAX_RETRIES - 1:
+                log.record_notice(f"scrape_provider attempt {attempt + 1}/{SCRAPE_MAX_RETRIES} failed, retrying in {(attempt + 1) * SCRAPE_RETRY_DELAY_SECONDS}s... Error: {e}")
+                time.sleep((attempt + 1) * SCRAPE_RETRY_DELAY_SECONDS)
+
+    raise Exception(f"Failed to extract URLs and subsequent files from webpage content and related links after {SCRAPE_MAX_RETRIES} attempts: {last_error}")
 
 def scrape_categorizer(etf: CategorizeEtf):
-    download: CategorizeEtfDownload = CategorizeEtfDownload(etf=etf)
-    open_browser: OpenBrowser = OpenBrowser(browser=None, context=None, page=None)
+    last_error = None
+    for attempt in range(SCRAPE_MAX_RETRIES):
+        try:
+            download: CategorizeEtfDownload = CategorizeEtfDownload(etf=etf)
+            open_browser: OpenBrowser = OpenBrowser(browser=None, context=None, page=None)
 
-    try:
-        with Stealth().use_sync(sync_playwright()) as p:
-            open_browser.browser = p.chromium.launch(headless=True,
-            # Add extra launch arguments to mimic real Chrome
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--disable-web-security",
-                "--disable-site-isolation-trials",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-                "--ignore-certificate-errors"
-            ])
-            open_browser.context = open_browser.browser.new_context(
-                user_agent=REAL_USER_AGENT,
-                viewport={'width': 1920, 'height': 1080},
-                accept_downloads=True
-            )      
-            open_browser.page = open_browser.context.new_page()
-            
-            if etf.id == None or etf.url == None or etf.trigger_download == None:
-                raise Exception('Missing URL or Trigger Method for categorizer etf.')
-            
-            if open_page(page=open_browser.page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
-                file_name, data = get_holdings(page=open_browser.page, trigger_download=etf.trigger_download)
-                if file_name and data:
-                    download.file_name = file_name
-                    download.data = data
+            with Stealth().use_sync(sync_playwright()) as p:
+                open_browser.browser = p.chromium.launch(headless=True, args=CHROME_LAUNCH_ARGS)
+                open_browser.context = open_browser.browser.new_context(
+                    user_agent=REAL_USER_AGENT,
+                    viewport={'width': 1920, 'height': 1080},
+                    accept_downloads=True
+                )
+                open_browser.page = open_browser.context.new_page()
 
-            open_browser.context.close()
-            open_browser.browser.close()
+                if etf.id == None or etf.url == None or etf.trigger_download == None:
+                    raise Exception('Missing URL or Trigger Method for categorizer etf.')
 
-            return download
-        
-    except Exception as e:
-        raise Exception(f"Failed to extract URLs and subsequent files from categorizer ETF links: {e}")
+                if open_page(page=open_browser.page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
+                    file_name, data = get_holdings(page=open_browser.page, trigger_download=etf.trigger_download)
+                    if file_name and data:
+                        download.file_name = file_name
+                        download.data = data
+
+                open_browser.context.close()
+                open_browser.browser.close()
+
+                return download
+
+        except Exception as e:
+            last_error = e
+            if attempt < SCRAPE_MAX_RETRIES - 1:
+                log.record_notice(f"scrape_categorizer attempt {attempt + 1}/{SCRAPE_MAX_RETRIES} failed, retrying in {(attempt + 1) * SCRAPE_RETRY_DELAY_SECONDS}s... Error: {e}")
+                time.sleep((attempt + 1) * SCRAPE_RETRY_DELAY_SECONDS)
+
+    raise Exception(f"Failed to extract URLs and subsequent files from categorizer ETF links after {SCRAPE_MAX_RETRIES} attempts: {last_error}")
 

@@ -64,31 +64,6 @@ def fetch_by_symbols(symbols: list[str]):
     except Error as e:
         raise Exception(f"Error fetching the Ticker list page from the DB: {e}")
 
-def upsert_tickers_style_and_cap(symbols: list[str], cap_type: str, style_type: str):
-    if not symbols:
-        return
-
-    try:
-        with db_pool_instance_bt.get_connection() as conn:
-            with conn.cursor() as cur:
-                query = """
-                    INSERT INTO ticker (symbol, cap_type, style_type, source, type_from)
-                    SELECT unnest(%s::text[]), %s, %s, 'cat_etf', 'cat_etf'
-                    ON CONFLICT (symbol)
-                    DO UPDATE
-                    SET
-                        cap_type = EXCLUDED.cap_type,
-                        style_type = EXCLUDED.style_type,
-                        type_from = 'cat_etf'
-                    WHERE ticker.cap_type IS DISTINCT FROM EXCLUDED.cap_type
-                       OR ticker.style_type IS DISTINCT FROM EXCLUDED.style_type;
-                """
-
-                cur.execute(query, (symbols, cap_type, style_type))
-
-    except Error as e:
-        raise Exception(f"Error upserting Tickers: {e}")
-
 def update_info(item: Ticker):
     try:
         with db_pool_instance_bt.get_connection() as conn:
@@ -115,23 +90,32 @@ def update_invalid(symbol: str, reason: str):
     except Error as e:
         raise Exception(f"Error updating ticker invalid reason into the DB: {e}")
 
+
 def upsert(item: Ticker):
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
                 query = """
-                    INSERT INTO ticker (symbol, isin, cik, name, industry, sector)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO ticker (symbol, isin, cik, name, exchange, industry, sector, source, type_from)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (symbol)
                     DO UPDATE
-                    SET isin = EXCLUDED.isin, cik = EXCLUDED.cik, name = EXCLUDED.name, industry = EXCLUDED.industry, sector = EXCLUDED.sector;
+                    SET isin = EXCLUDED.isin, 
+                        cik = EXCLUDED.cik, 
+                        name = EXCLUDED.name, 
+                        exchange = EXCLUDED.exchange, 
+                        industry = EXCLUDED.industry, 
+                        sector = EXCLUDED.sector,
+                        source = EXCLUDED.source,
+                        type_from = EXCLUDED.type_from;
                 """
-                cur.execute(query, (item.symbol, item.isin, item.cik, item.name, item.industry, item.sector))
+                cur.execute(query, (item.symbol, item.isin, item.cik, item.name, item.exchange, item.industry, item.sector, item.source, item.type_from))
     
     except Error as e:
         raise Exception(f"Error upserting ticker into the DB: {e}")
 
-def mark_style(classifier: StyleClassifier) -> None:
+
+def mark_style(classifier: StyleClassifier) -> int:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             # 1. Update from ETF categorization
@@ -140,7 +124,7 @@ def mark_style(classifier: StyleClassifier) -> None:
                     UPDATE public.ticker t
                     SET
                         style_type = c.style_type,
-                        type_from = 'ETF'
+                        type_from = 'CAT_ETF'
                     FROM public.categorize_ticker c
                     WHERE t.symbol = c.symbol
                     AND c.style_type IS NOT NULL;
@@ -176,7 +160,7 @@ def mark_style(classifier: StyleClassifier) -> None:
 
             conn.commit()
 
-        return
+        return len(missing_symbols)
     except Error as e:
         raise Exception(f"Error marking the categories for the tickers in the DB: {e}")
     
