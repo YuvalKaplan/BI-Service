@@ -14,6 +14,7 @@ from modules.bt.object.provider_etf_holding import fetch_tickers_for_etfs
 from modules.bt.object import ticker, ticker_value, ticker_dividend_history
 
 REMOVE_ETFS_AND_FUNDS = r'\b(ETF|fund)\b'
+REMOVE_TREASURY_SECURITIES = {"XTSLA", "AGPXX", "BOXX", "CMQXX", "DTRXX", "FGXXX", "FTIXX", "GVMXX", "JIMXX", "JTSXX", "MGMXX", "PGLXX", "SALXX"}
 
 def parse_date(d):
     if isinstance(d, str):
@@ -89,11 +90,20 @@ def process_symbol(s: str, start_date: date, end_date: date) -> tuple[bool, str,
             sector=sd['sector'], 
             source='provider_etf'
         )
-        if t.name is None or re.search(REMOVE_ETFS_AND_FUNDS, t.name, flags=re.IGNORECASE):
-            ticker.update_invalid(s, 'Fund or ETF')
-            return False, s, 'Fund or ETF'
 
         ticker.upsert(t)
+
+        if t.name is None:
+            ticker.update_invalid(s, 'Missing details')
+            return False, s, 'Missing details'
+        
+        if t.symbol.upper() in REMOVE_TREASURY_SECURITIES:
+            ticker.update_invalid(s, 'Treasury Security')
+            return False, s, 'Treasury Security'
+        
+        if re.search(REMOVE_ETFS_AND_FUNDS, t.name, flags=re.IGNORECASE):
+            ticker.update_invalid(s, 'Fund or ETF')
+            return False, s, 'Fund or ETF'
 
         shd = results['dividends']
         if isinstance(shd, str):

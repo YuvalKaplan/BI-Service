@@ -10,6 +10,8 @@ from modules.object.provider_etf_holding import fetch_valid_tickers_in_holdings
 from modules.object import ticker, ticker_value
 
 REMOVE_ETFS_AND_FUNDS = r'\b(ETF|fund)\b'
+REMOVE_TREASURY_SECURITIES = {"XTSLA", "AGPXX", "BOXX", "CMQXX", "DTRXX", "FGXXX", "FTIXX", "GVMXX", "JIMXX", "JTSXX", "MGMXX", "PGLXX", "SALXX"}
+
 BATCH_SIZE = 100
 VALUE_DATE_CUT_OFF_HOUR = 17
 
@@ -47,18 +49,29 @@ def run() -> tuple[int, int]:
                         sector=sd['sector'],
                         source='provider_etf'
                     )
-                    if t.name is None or re.search(REMOVE_ETFS_AND_FUNDS, t.name, flags=re.IGNORECASE):
+                    ticker.upsert(t)
+                    if t.name is None:
+                        ticker.update_invalid(s, 'Missing details')
+                        missing_symbols.append(s)
+                        continue
+
+                    if t.symbol.upper() in REMOVE_TREASURY_SECURITIES:
+                        ticker.update_invalid(s, 'Treasury Security')
+                        missing_symbols.append(s)
+                        continue
+                    
+                    if re.search(REMOVE_ETFS_AND_FUNDS, t.name, flags=re.IGNORECASE):
                         ticker.update_invalid(s, 'Fund or ETF')
                         missing_symbols.append(s)
-                    else:    
-                        ticker.upsert(t)
-                        tv = ticker_value.TickerValue(
-                            symbol=s, 
-                            value_date=today, 
-                            stock_price=float(sd['price']), 
-                            market_cap=float(sd['marketCap'])
-                        )
-                        ticker_value.upsert(tv)
+                        continue
+                        
+                    tv = ticker_value.TickerValue(
+                        symbol=s, 
+                        value_date=today, 
+                        stock_price=float(sd['price']), 
+                        market_cap=float(sd['marketCap'])
+                    )
+                    ticker_value.upsert(tv)
 
             log.record_status(f"Batch {group_count} of {num_groups} completed.")
             group_count += 1

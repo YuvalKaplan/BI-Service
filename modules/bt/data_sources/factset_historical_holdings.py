@@ -60,7 +60,7 @@ def generate_dates(start_date: date, end_date: date, step_days: int = 4):
     return pd.date_range(start=start_date, end=end_date, freq=f"{step_days}D").date
 
 
-def map_df_to_db_items(df: pd.DataFrame, provider_etf_id: int, trade_date: date):
+def map_df_to_db_items(df: pd.DataFrame, provider_etf_id: int, holding_date: date):
     if df.empty:
         return []
 
@@ -79,7 +79,7 @@ def map_df_to_db_items(df: pd.DataFrame, provider_etf_id: int, trade_date: date)
         items.append(
             ProviderEtfHoldingFactSet(
                 provider_etf_id=provider_etf_id,
-                trade_date=trade_date,
+                holding_date=holding_date,
                 ticker=ticker,
                 shares=shares,
                 market_value=row.get("adj_market_value"),

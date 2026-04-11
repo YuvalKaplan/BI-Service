@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict u2xn4d6JSnO6J1feUjxEALRjBF5iasKZolFKUJRjaTaMYiNOE6r4Oe83TYD9jET
+\restrict 9stkKcboB9lVQxEmetJv1KZXtlCFKFFbqIFZlHxWzzsvBc89LLOhv1pqkBTWEM0
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 18.0
 
--- Started on 2026-04-09 22:08:07
+-- Started on 2026-04-11 20:05:34
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -621,7 +621,7 @@ CREATE TABLE public.provider_etf_holding (
     id integer NOT NULL,
     created_at timestamp without time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
     provider_etf_id integer NOT NULL,
-    trade_date timestamp without time zone NOT NULL,
+    holding_date timestamp without time zone NOT NULL,
     ticker text,
     shares double precision,
     market_value double precision,
@@ -908,10 +908,10 @@ CREATE INDEX idx_categorize_etf_holding_trade_date ON public.categorize_etf_hold
 
 --
 -- TOC entry 4837 (class 1259 OID 192308)
--- Name: idx_provider_etf_holding_trade_date; Type: INDEX; Schema: public; Owner: admin
+-- Name: idx_provider_etf_holding_holding_date; Type: INDEX; Schema: public; Owner: admin
 --
 
-CREATE INDEX idx_provider_etf_holding_trade_date ON public.provider_etf_holding USING btree (trade_date) WITH (fillfactor='100', deduplicate_items='true');
+CREATE INDEX idx_provider_etf_holding_holding_date ON public.provider_etf_holding USING btree (holding_date) WITH (fillfactor='100', deduplicate_items='true');
 
 
 --
@@ -996,19 +996,19 @@ ALTER TABLE ONLY public.provider_etf
 
 
 --
--- TOC entry 4865 (class 2606 OID 239159)
+-- TOC entry 4865 (class 2606 OID 251169)
 -- Name: ticker_value fk_ticker_symbol; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
 ALTER TABLE ONLY public.ticker_value
-    ADD CONSTRAINT fk_ticker_symbol FOREIGN KEY (symbol) REFERENCES public.ticker(symbol);
+    ADD CONSTRAINT fk_ticker_symbol FOREIGN KEY (symbol) REFERENCES public.ticker(symbol) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
--- Completed on 2026-04-09 22:08:07
+-- Completed on 2026-04-11 20:05:35
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict u2xn4d6JSnO6J1feUjxEALRjBF5iasKZolFKUJRjaTaMYiNOE6r4Oe83TYD9jET
+\unrestrict 9stkKcboB9lVQxEmetJv1KZXtlCFKFFbqIFZlHxWzzsvBc89LLOhv1pqkBTWEM0
 

@@ -9,7 +9,7 @@ import pandas as pd
 @dataclass
 class ProviderEtfHoldingFactSet:
     provider_etf_id: int
-    trade_date: date
+    holding_date: date
     ticker: str
     shares: float
     market_value: Optional[float] = None
@@ -24,7 +24,7 @@ def insert_holding_bulk(items: List[ProviderEtfHoldingFactSet]):
         return
     
     fund_id = items[0].provider_etf_id
-    trade_date = items[0].trade_date
+    holding_date = items[0].holding_date
 
     try:
         with db_pool_instance_bt.get_connection() as conn:
@@ -33,15 +33,15 @@ def insert_holding_bulk(items: List[ProviderEtfHoldingFactSet]):
                 delete_sql = """
                     DELETE FROM provider_etf_holding_factset
                     WHERE provider_etf_id = %s
-                      AND trade_date = %s;
+                      AND holding_date = %s;
                 """
-                cur.execute(delete_sql, (fund_id, trade_date))
+                cur.execute(delete_sql, (fund_id, holding_date))
 
                 insert_sql = """
                     INSERT INTO provider_etf_holding_factset (
                         created_at,
                         provider_etf_id,
-                        trade_date,
+                        holding_date,
                         ticker,
                         shares,
                         market_value,
@@ -51,7 +51,7 @@ def insert_holding_bulk(items: List[ProviderEtfHoldingFactSet]):
                 """
 
                 insert_values = [
-                    (i.created_at, i.provider_etf_id, i.trade_date, i.ticker, i.shares, i.market_value, i.weight)
+                    (i.created_at, i.provider_etf_id, i.holding_date, i.ticker, i.shares, i.market_value, i.weight)
                     for i in items
                 ]
 

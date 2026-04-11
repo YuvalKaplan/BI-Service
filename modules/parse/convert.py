@@ -224,11 +224,11 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
     df = df.dropna(how="all")
 
     if good_date:
-        df.loc[:, "trade_date"] = good_date
+        df.loc[:, "holding_date"] = good_date
     else:
-        df["trade_date"] = pd.to_datetime(df["trade_date"], format=mapping.date.format, errors="coerce")
+        df["holding_date"] = pd.to_datetime(df["holding_date"], format=mapping.date.format, errors="coerce")
     
-    required_cols = ["trade_date", "ticker", "weight"]
+    required_cols = ["holding_date", "ticker", "weight"]
     df = df.dropna(subset=required_cols)
 
     df["market_value"] = clean_numeric_column(df, "market_value")
@@ -246,7 +246,7 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
     # Apply filters
     df = df[
         df['ticker'].str.fullmatch(r'[A-Z]+', na=False) &   # only A–Z
-        ~df['ticker'].isin(['USD', 'CAD']) &                # exclude currencies
+        ~df['ticker'].isin(['USD', 'CAD', 'EUR']) &         # exclude currencies
         ~df['ticker'].isin(mapping.remove_tickers)          # exclude custom list
     ]
 
@@ -260,12 +260,12 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
         df["weight"] = df["weight"] / 100
         df["weight"] = df["weight"].round(DECIMAL_PRECISION)
 
-    # Sum up holdings that have the same ticker; take latest trade_date if rows differ
+    # Sum up holdings that have the same ticker; take latest holding_date if rows differ
     df = df.groupby('ticker', as_index=False).agg({
         'market_value': 'sum',
         'shares': 'sum',
         'weight': 'sum',
-        'trade_date': 'max'
+        'holding_date': 'max'
     })
 
     return df    
@@ -284,9 +284,9 @@ def get_tickers(full_rows: list[list[str]], mapping: Mapping) -> list[str]:
 
     # Apply filters
     df = df[
-        df[ticker_col_name].str.fullmatch(r'[A-Z]+', na=False) &   # only A–Z
-        ~df[ticker_col_name].isin(['USD', 'CAD', 'TICKER']) &      # exclude currencies
-        ~df[ticker_col_name].isin(mapping.remove_tickers)          # exclude custom list
+        df[ticker_col_name].str.fullmatch(r'[A-Z]+', na=False) &        # only A–Z
+        ~df[ticker_col_name].isin(['USD', 'CAD', 'EUR', 'TICKER']) &    # exclude currencies
+        ~df[ticker_col_name].isin(mapping.remove_tickers)               # exclude custom list
     ]
     distinct_tickers = df[ticker_col_name].unique().tolist()    
     return distinct_tickers

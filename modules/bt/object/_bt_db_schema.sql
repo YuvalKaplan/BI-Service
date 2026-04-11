@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict 6Wk1oJxaABekRqE3EIN3kZ30zZHywbdqhkiRkeOme1Yw8NyehckaYKJXU6KE0Nu
+\restrict 2AXA0yBiFgiN8zjZdbEel0fgHpLJFcxfwHZ5Od5G3xQoKbCqTBYiuEza9x90cxf
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 18.0
 
--- Started on 2026-04-09 22:05:57
+-- Started on 2026-04-11 20:06:36
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -803,7 +803,7 @@ CREATE TABLE public.provider_etf_holding (
     id integer NOT NULL,
     created_at timestamp without time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
     provider_etf_id integer NOT NULL,
-    trade_date timestamp without time zone NOT NULL,
+    holding_date timestamp without time zone NOT NULL,
     ticker text,
     shares double precision,
     market_value double precision,
@@ -822,7 +822,7 @@ CREATE TABLE public.provider_etf_holding_factset (
     id integer NOT NULL,
     created_at timestamp without time zone NOT NULL,
     provider_etf_id integer NOT NULL,
-    trade_date timestamp without time zone NOT NULL,
+    holding_date timestamp without time zone NOT NULL,
     ticker text,
     shares double precision,
     market_value double precision,
@@ -871,7 +871,7 @@ CREATE TABLE public.provider_etf_holding_morningstar (
     id integer NOT NULL,
     created_at timestamp without time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
     provider_etf_id integer NOT NULL,
-    trade_date timestamp without time zone NOT NULL,
+    holding_date timestamp without time zone NOT NULL,
     ticker text,
     shares double precision,
     market_value double precision,
@@ -905,7 +905,7 @@ CREATE TABLE public.provider_etf_holding_our_data (
     id integer NOT NULL,
     created_at timestamp without time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
     provider_etf_id integer NOT NULL,
-    trade_date timestamp without time zone NOT NULL,
+    holding_date timestamp without time zone NOT NULL,
     ticker text,
     shares double precision,
     market_value double precision,
@@ -1352,34 +1352,34 @@ CREATE INDEX idx_categorize_etf_holding_trade_date ON public.categorize_etf_hold
 
 --
 -- TOC entry 4939 (class 1259 OID 250514)
--- Name: idx_provider_etf_holding_factset_trade_date; Type: INDEX; Schema: public; Owner: admin
+-- Name: idx_provider_etf_holding_factset_holding_date; Type: INDEX; Schema: public; Owner: admin
 --
 
-CREATE INDEX idx_provider_etf_holding_factset_trade_date ON public.provider_etf_holding_factset USING btree (trade_date) WITH (fillfactor='100', deduplicate_items='true');
-
-
---
--- TOC entry 4943 (class 1259 OID 250530)
--- Name: idx_provider_etf_holding_morningstar_trade_date; Type: INDEX; Schema: public; Owner: admin
---
-
-CREATE INDEX idx_provider_etf_holding_morningstar_trade_date ON public.provider_etf_holding_morningstar USING btree (trade_date) WITH (fillfactor='100', deduplicate_items='true');
-
-
---
--- TOC entry 4947 (class 1259 OID 251030)
--- Name: idx_provider_etf_holding_our_data_trade_date; Type: INDEX; Schema: public; Owner: admin
---
-
-CREATE INDEX idx_provider_etf_holding_our_data_trade_date ON public.provider_etf_holding_our_data USING btree (trade_date) WITH (fillfactor='100', deduplicate_items='true');
+CREATE INDEX idx_provider_etf_holding_factset_holding_date ON public.provider_etf_holding_factset USING btree (holding_date) WITH (fillfactor='100', deduplicate_items='true');
 
 
 --
 -- TOC entry 4889 (class 1259 OID 249713)
--- Name: idx_provider_etf_holding_trade_date; Type: INDEX; Schema: public; Owner: admin
+-- Name: idx_provider_etf_holding_holding_date; Type: INDEX; Schema: public; Owner: admin
 --
 
-CREATE INDEX idx_provider_etf_holding_trade_date ON public.provider_etf_holding USING btree (trade_date) WITH (fillfactor='100', deduplicate_items='true');
+CREATE INDEX idx_provider_etf_holding_holding_date ON public.provider_etf_holding USING btree (holding_date) WITH (fillfactor='100', deduplicate_items='true');
+
+
+--
+-- TOC entry 4943 (class 1259 OID 250530)
+-- Name: idx_provider_etf_holding_morningstar_holding_date; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX idx_provider_etf_holding_morningstar_holding_date ON public.provider_etf_holding_morningstar USING btree (holding_date) WITH (fillfactor='100', deduplicate_items='true');
+
+
+--
+-- TOC entry 4947 (class 1259 OID 251030)
+-- Name: idx_provider_etf_holding_our_data_holding_date; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX idx_provider_etf_holding_our_data_holding_date ON public.provider_etf_holding_our_data USING btree (holding_date) WITH (fillfactor='100', deduplicate_items='true');
 
 
 --
@@ -1572,12 +1572,12 @@ ALTER TABLE ONLY public.provider_etf
 
 
 --
--- TOC entry 4952 (class 2606 OID 249727)
+-- TOC entry 4952 (class 2606 OID 251174)
 -- Name: ticker_value fk_ticker_symbol; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
 ALTER TABLE ONLY public.ticker_value
-    ADD CONSTRAINT fk_ticker_symbol FOREIGN KEY (symbol) REFERENCES public.ticker(symbol);
+    ADD CONSTRAINT fk_ticker_symbol FOREIGN KEY (symbol) REFERENCES public.ticker(symbol) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
@@ -1598,11 +1598,11 @@ ALTER TABLE ONLY public.ticker_split_history
     ADD CONSTRAINT ticker_split_history_symbol_fkey FOREIGN KEY (symbol) REFERENCES public.ticker(symbol);
 
 
--- Completed on 2026-04-09 22:05:57
+-- Completed on 2026-04-11 20:06:36
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 6Wk1oJxaABekRqE3EIN3kZ30zZHywbdqhkiRkeOme1Yw8NyehckaYKJXU6KE0Nu
+\unrestrict 2AXA0yBiFgiN8zjZdbEel0fgHpLJFcxfwHZ5Od5G3xQoKbCqTBYiuEza9x90cxf
 

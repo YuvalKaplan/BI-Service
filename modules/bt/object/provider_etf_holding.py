@@ -9,7 +9,7 @@ import pandas as pd
 @dataclass
 class ProviderEtfHolding:
     provider_etf_id: int
-    trade_date: date
+    holding_date: date
     ticker: str
     shares: float
     market_value: float
@@ -22,13 +22,13 @@ def fetch_holding_dates_available_past_period(provider_etf_id: int, end_date: da
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
                 query = """
-                    SELECT DISTINCT (peh.trade_date::date)
+                    SELECT DISTINCT (peh.holding_date::date)
                     FROM provider_etf_holding AS peh
                     INNER JOIN ticker AS t ON peh.ticker = t.symbol
                     WHERE t.invalid IS null
                       AND peh.provider_etf_id = %s 
-                      AND (trade_date > %s - (%s * INTERVAL '1 day')) AND (trade_date <= %s)
-                    ORDER BY peh.trade_date::date;
+                      AND (holding_date > %s - (%s * INTERVAL '1 day')) AND (holding_date <= %s)
+                    ORDER BY peh.holding_date::date;
                 """
                 cur.execute(query, (provider_etf_id, end_date, look_back_days, end_date,))
                 return [row[0] for row in cur.fetchall()]
@@ -65,7 +65,7 @@ def fetch_tickers_for_etfs(provider_etf_ids: List[int]) -> List[str]:
         raise Exception(f"Error retrieving ticker list for a list of provider ETFs data: {e}")
 
 
-def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, trade_date: date):
+def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, holding_date: date):
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(ProviderEtfHolding)) as cur:
@@ -75,9 +75,9 @@ def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, trade_date: da
                     INNER JOIN ticker AS t ON peh.ticker = t.symbol
                     WHERE t.invalid IS null
                       AND provider_etf_id = %s
-                      AND trade_date = %s;
+                      AND holding_date = %s;
                 """
-                cur.execute(query_str, (provider_etf_id, trade_date))
+                cur.execute(query_str, (provider_etf_id, holding_date))
                 items = cur.fetchall()
         return items
     except Error as e:
@@ -89,7 +89,7 @@ def insert_holding_bulk(items: List[ProviderEtfHolding]):
         return
     
     fund_id = items[0].provider_etf_id
-    trade_date = items[0].trade_date
+    holding_date = items[0].holding_date
 
     try:
         with db_pool_instance_bt.get_connection() as conn:
@@ -98,14 +98,14 @@ def insert_holding_bulk(items: List[ProviderEtfHolding]):
                 delete_sql = """
                     DELETE FROM provider_etf_holding
                     WHERE provider_etf_id = %s
-                      AND trade_date = %s;
+                      AND holding_date = %s;
                 """
-                cur.execute(delete_sql, (fund_id, trade_date))
+                cur.execute(delete_sql, (fund_id, holding_date))
 
                 insert_sql = """
                     INSERT INTO provider_etf_holding (
                         provider_etf_id,
-                        trade_date,
+                        holding_date,
                         ticker,
                         shares,
                         market_value,
@@ -115,7 +115,7 @@ def insert_holding_bulk(items: List[ProviderEtfHolding]):
                 """
 
                 insert_values = [
-                    (i.provider_etf_id, i.trade_date, i.ticker, i.shares, i.market_value, i.weight)
+                    (i.provider_etf_id, i.holding_date, i.ticker, i.shares, i.market_value, i.weight)
                     for i in items
                 ]
 

@@ -19,20 +19,20 @@ def process_etf_excel_to_db(file_path: str):
         # Load sheet and unpivot (melt) columns into rows
         df = pd.read_excel(excel_file, sheet_name=etf_ticker)
         
-        # 'Ticker' and 'Name' stay as columns; all date columns become rows in 'trade_date'
+        # 'Ticker' and 'Name' stay as columns; all date columns become rows in 'holding_date'
         df_long = df.melt(
             id_vars=['Ticker', 'Name'], 
-            var_name='trade_date', 
+            var_name='holding_date', 
             value_name='shares'
         )
 
-        # Convert trade_date to actual date objects and filter out invalid rows
-        df_long['trade_date'] = pd.to_datetime(df_long['trade_date'], errors='coerce')
-        df_long = df_long.dropna(subset=['trade_date', 'shares', 'Ticker'])
+        # Convert holding_date to actual date objects and filter out invalid rows
+        df_long['holding_date'] = pd.to_datetime(df_long['holding_date'], errors='coerce')
+        df_long = df_long.dropna(subset=['holding_date', 'shares', 'Ticker'])
         df_long = df_long[df_long['shares'] > 0]
 
         # Iterate through unique dates to avoid "No overloads for to_datetime"
-        unique_dates = df_long['trade_date'].unique()
+        unique_dates = df_long['holding_date'].unique()
 
         for dt_val  in unique_dates:
             ts = cast(pd.Timestamp, dt_val )
@@ -42,12 +42,12 @@ def process_etf_excel_to_db(file_path: str):
             current_date = ts.date()
 
             # Filter the dataframe for this specific date
-            day_group = df_long[df_long['trade_date'] == dt_val]
+            day_group = df_long[df_long['holding_date'] == dt_val]
 
             holdings_to_insert = [
                 ProviderEtfHolding(
                     provider_etf_id=provider_etf_id,
-                    trade_date=current_date,
+                    holding_date=current_date,
                     ticker=str(row['Ticker']).strip().upper(),
                     shares=float(row['shares']),
                     market_value=0.0,
