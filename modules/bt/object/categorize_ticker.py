@@ -14,8 +14,25 @@ class CategorizeTicker:
     cap_type: str | None
     sector: str
     market_cap: int
+    esg_qualified: bool | None
     factors: Dict[str, Any]
     last_update: Optional[datetime] = None
+
+def _row_to_categorize_ticker(r: dict) -> CategorizeTicker:
+    factors = r["factors"]
+    if isinstance(factors, str):
+        factors = json.loads(factors)
+    return CategorizeTicker(
+        symbol=r["symbol"],
+        style_type=r["style_type"],
+        cap_type=r["cap_type"],
+        sector=r["sector"],
+        market_cap=r["market_cap"],
+        esg_qualified=r.get("esg_qualified"),
+        factors=factors,
+        last_update=r.get("last_update")
+    )
+
 
 def sync_categorize_ticker():
     try:
@@ -62,33 +79,52 @@ def bulk_update(updates: list[dict]):
         raise Exception(f"Error bulk updating categorize ticker: {e}")
 
 
-def fetch_all() -> List[CategorizeTicker]:
+def update_esg_qualified(symbols: list[str]):
+    if not symbols:
+        return
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE categorize_ticker
+                    SET esg_qualified = TRUE
+                    WHERE symbol = ANY(%s::text[]);
+                """, (symbols,))
+            conn.commit()
+    except Error as e:
+        raise Exception(f"Error updating esg_qualified in categorize_ticker: {e}")
+
+
+def fetch_all_for_style_classification() -> List[CategorizeTicker]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute("""
-                    SELECT symbol, style_type, cap_type, sector, market_cap, factors, last_update
+                    SELECT symbol, style_type, cap_type, sector, market_cap, esg_qualified, factors, last_update
                     FROM categorize_ticker
+                    WHERE style_type IS NOT NULL
+                      AND factors IS NOT NULL
+                      AND factors != '{}'::jsonb
                 """)
-                rows = cur.fetchall()
-                result = []
-                for r in rows:
-                    factors = r["factors"]
-                    if isinstance(factors, str):
-                        factors = json.loads(factors)
-                    result.append(CategorizeTicker(
-                        symbol=r["symbol"],
-                        style_type=r["style_type"],
-                        cap_type=r["cap_type"],
-                        sector=r["sector"],
-                        market_cap=r["market_cap"],
-                        factors=factors,
-                        last_update=r.get("last_update")
-                    ))
-                return result
+                return [_row_to_categorize_ticker(r) for r in cur.fetchall()]
 
     except Error as e:
         raise Exception(f"Error loading categorize ticker: {e}")
+
+
+def fetch_all_for_esg() -> List[CategorizeTicker]:
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("""
+                    SELECT symbol, style_type, cap_type, sector, market_cap, esg_qualified, factors, last_update
+                    FROM categorize_ticker
+                    WHERE esg_qualified = TRUE
+                """)
+                return [_row_to_categorize_ticker(r) for r in cur.fetchall()]
+
+    except Error as e:
+        raise Exception(f"Error loading ESG categorize tickers: {e}")
 
 
 def fetch_last_update() -> datetime | None:

@@ -20,13 +20,15 @@ class Ticker:
     name: str | None
     industry: str | None
     sector: str | None
+    esg_qualified: bool | None
     invalid: str | None
 
-    def __init__(self, symbol: str, created_at: datetime | None = None, 
-                 source: str | None = None, style_type: str | None = None, cap_type: str | None = None, type_from: str | None = None, 
-                 isin: str | None = None, cik: str | None = None, exchange: str | None = None, 
-                 name: str | None = None, industry: str | None = None, sector: str | None = None, invalid: str | None = None):
-        self.symbol = symbol 
+    def __init__(self, symbol: str, created_at: datetime | None = None,
+                 source: str | None = None, style_type: str | None = None, cap_type: str | None = None, type_from: str | None = None,
+                 isin: str | None = None, cik: str | None = None, exchange: str | None = None,
+                 name: str | None = None, industry: str | None = None, sector: str | None = None,
+                 esg_qualified: bool | None = None, invalid: str | None = None):
+        self.symbol = symbol
         self.created_at = created_at
         self.source = source
         self.style_type = style_type
@@ -38,6 +40,7 @@ class Ticker:
         self.name = name
         self.industry = industry
         self.sector = sector
+        self.esg_qualified = esg_qualified
         self.invalid = invalid
 
 def fetch_by_symbol(symbol: str):
@@ -73,6 +76,20 @@ def update_info(item: Ticker):
 
     except Error as e:
         raise Exception(f"Error updating the Ticker item into the DB: {e}")
+
+def update_esg_qualified(symbols: list[str]):
+    if not symbols:
+        return
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE ticker
+                    SET esg_qualified = TRUE
+                    WHERE symbol = ANY(%s::text[]);
+                """, (symbols,))
+    except Error as e:
+        raise Exception(f"Error updating esg_qualified in the DB: {e}")
 
 def update_invalid(symbol: str, reason: str):
     try:

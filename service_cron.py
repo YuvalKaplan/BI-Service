@@ -49,13 +49,23 @@ if __name__ == '__main__':
             message_actions += f"Stocks missing data: {missing_data}\n"
             message_actions += BREAKER_LINE
 
+        if start_time.day == 15: # Monthly ETF scrape and factor cache refresh
+            try:
+                total_etfs = categorize_tickers.download_data()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on monthly categorize ETF update with error:\n{e}\n\n")
+                raise e
+
+            message_actions += f"Monthly ETFs processed: {total_etfs}\n"
+            message_actions += BREAKER_LINE
+
         if 1 <= weekday <= 3: # Tuesday through Thursday
             try:
-                total_symbols = categorize_tickers.run()
+                total_symbols = categorize_tickers.run_classification()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on categorize tickers with error:\n{e}\n\n")
                 raise e
-            
+
             message_actions += f"Categorized tickers: {total_symbols}\n"
             message_actions += BREAKER_LINE
 

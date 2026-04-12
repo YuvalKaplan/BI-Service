@@ -9,6 +9,7 @@ class CategorizeEtf:
     id: int | None
     created_at: datetime | None
     name: str | None
+    usage: str | None
     cap_type: str | None
     style_type: str | None
     url: str | None
@@ -27,12 +28,11 @@ class CategorizeEtfDownload:
     data: bytes | None = None
 
 
-def fetch_all():
+def fetch_all(usage: str):
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(CategorizeEtf)) as cur:
-                query_str = "SELECT * FROM categorize_etf ORDER BY created_at;"
-                cur.execute(query_str)
+                cur.execute("SELECT * FROM categorize_etf WHERE usage = %s ORDER BY created_at;", (usage,))
                 items = cur.fetchall()
         return items
     except Error as e:

@@ -43,10 +43,14 @@ def run(start_date: date, end_date: date):
         if last_update_date is None or (date.today() - last_update_date) > timedelta(days=90):
             raise Exception("Table categorize_ticker data is stale or empty — sync it from the live DB before running the back test (tables: categorize_etf_holding and categorize_ticker).")
 
-        categorized_tickers = [classification.to_categorize_ticker_item(t) for t in categorize_ticker.fetch_all()]
+        categorized_tickers = [classification.to_categorize_ticker_item(t) for t in categorize_ticker.fetch_all_for_style_classification()]
         classifier = classification.get_classifier(categorized_tickers)
         ticker.mark_style(classifier)
-        
+
+        esg_tickers = categorize_ticker.fetch_all_for_esg()
+        if esg_tickers:
+            ticker.update_esg_qualified([t.symbol for t in esg_tickers])
+
         # ticker.mark_split_invalid(symbols, start_date - timedelta(days=5), end_date + timedelta(days=5))
 
     # Identify the lateset best ideas per ETF.

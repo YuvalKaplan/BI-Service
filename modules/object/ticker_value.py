@@ -112,3 +112,36 @@ def upsert(item: TickerValue):
     except Error as e:
         raise Exception(f"Error inserting the Batch item into the DB: {e}")
 
+def upsert_bulk(items: List[TickerValue]):
+    if not items:
+        return
+
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+
+                insert_sql = """
+                    INSERT INTO ticker_value (
+                        symbol,
+                        value_date,
+                        stock_price,
+                        market_cap
+                    )
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (symbol, value_date)
+                    DO UPDATE SET
+                        stock_price = EXCLUDED.stock_price,
+                        market_cap = EXCLUDED.market_cap;
+                """
+
+                insert_values = [
+                    (i.symbol, i.value_date, i.stock_price, i.market_cap)
+                    for i in items
+                ]
+
+                cur.executemany(insert_sql, insert_values)
+
+            conn.commit()
+
+    except Error as e:
+        raise Exception(f"Error inserting ticker values in DB: {e}")
