@@ -208,3 +208,14 @@ def mark_split_invalid(symbols: list[str], start_date: date, end_date: date):
         raise Exception(f"Error marking the categories for the tickers in the DB: {e}")
 
 
+def sanitize():
+    """Mark any ticker table rows with non-standard symbols as invalid.
+
+    Delegates entirely to the sanitize_tickers() SQL function.
+    """
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT sanitize_tickers();')
+    except Error as e:
+        raise Exception(f"Error sanitizing tickers: {e}")

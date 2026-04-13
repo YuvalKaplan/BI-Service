@@ -14,7 +14,6 @@ from modules.bt.object.provider_etf_holding import fetch_tickers_for_etfs
 from modules.bt.object import ticker, ticker_value, ticker_dividend_history
 
 REMOVE_ETFS_AND_FUNDS = r'\b(ETF|fund)\b'
-REMOVE_TREASURY_SECURITIES = {"XTSLA", "AGPXX", "BOXX", "CMQXX", "DTRXX", "FGXXX", "FTIXX", "GVMXX", "JIMXX", "JTSXX", "MGMXX", "PGLXX", "SALXX"}
 
 def parse_date(d):
     if isinstance(d, str):
@@ -30,6 +29,35 @@ def process_symbol(s: str, start_date: date, end_date: date) -> tuple[bool, str,
         if t is not None and t.invalid:
             return False, s, "Invalid ticker"
 
+        # Phase 1: fetch profile and validate before downloading anything else
+        sd = get_stock_profile(s)
+        if isinstance(sd, str):
+            ticker.update_invalid(s, sd)
+            return False, s, sd
+
+        t = ticker.Ticker(
+            symbol=s,
+            isin=sd['isin'],
+            cik=sd['cik'],
+            exchange=sd['exchange'],
+            name=sd['companyName'],
+            industry=sd['industry'],
+            sector=sd['sector'],
+            source='provider_etf'
+        )
+
+        ticker.upsert(t)
+
+        if t.name is None:
+            ticker.update_invalid(s, 'Missing details')
+            return False, s, 'Missing details'
+
+        if re.search(REMOVE_ETFS_AND_FUNDS, t.name, flags=re.IGNORECASE):
+            ticker.update_invalid(s, 'Fund or ETF')
+            return False, s, 'Fund or ETF'
+
+        # Phase 2: fetch historical data in parallel now that the ticker is valid
+        
         # Check if sufficient data already exists
         available_dates = ticker_value.fetch_tickers_availability_dates(s, start_date, end_date)
         if available_dates:
@@ -48,72 +76,14 @@ def process_symbol(s: str, start_date: date, end_date: date) -> tuple[bool, str,
             if coverage >= 0.85:
                 return True, s, None  # Sufficient data already exists
 
-        # Parallel fetch for profile, dividends, splits, prices, and market cap
-        def fetch_profile():
-            return get_stock_profile(s)
-
-        def fetch_dividends():
-            return get_stock_historic_dividend(s)
-
-        def fetch_splits():
-            return get_stock_historic_splits(s)
-
-        def fetch_prices():
-            return get_stock_historic_prices(s, start_date, end_date)
-
-        def fetch_market_cap():
-            return get_stock_historic_market_cap(s, start_date, end_date)
-
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {
-                'profile': executor.submit(fetch_profile),
-                'dividends': executor.submit(fetch_dividends),
-                'splits': executor.submit(fetch_splits),
-                'prices': executor.submit(fetch_prices),
-                'market_cap': executor.submit(fetch_market_cap)
+                'prices':    executor.submit(get_stock_historic_prices, s, start_date, end_date),
+                'market_cap': executor.submit(get_stock_historic_market_cap, s, start_date, end_date),
+                'dividends': executor.submit(get_stock_historic_dividend, s),
+                'splits':    executor.submit(get_stock_historic_splits, s),
             }
-
             results = {name: future.result() for name, future in futures.items()}
-
-        sd = results['profile']
-        if isinstance(sd, str):
-            ticker.update_invalid(s, sd)
-            return False, s, sd
-
-        t = ticker.Ticker(
-            symbol=s, 
-            isin=sd['isin'], 
-            cik=sd['cik'], 
-            exchange=sd['exchange'], 
-            name=sd['companyName'], 
-            industry=sd['industry'], 
-            sector=sd['sector'], 
-            source='provider_etf'
-        )
-
-        ticker.upsert(t)
-
-        if t.name is None:
-            ticker.update_invalid(s, 'Missing details')
-            return False, s, 'Missing details'
-        
-        if t.symbol.upper() in REMOVE_TREASURY_SECURITIES:
-            ticker.update_invalid(s, 'Treasury Security')
-            return False, s, 'Treasury Security'
-        
-        if re.search(REMOVE_ETFS_AND_FUNDS, t.name, flags=re.IGNORECASE):
-            ticker.update_invalid(s, 'Fund or ETF')
-            return False, s, 'Fund or ETF'
-
-        shd = results['dividends']
-        if isinstance(shd, str):
-            ticker.update_invalid(s, shd)
-            return False, s, shd
-
-        shs = results['splits']
-        if isinstance(shs, str):
-            ticker.update_invalid(s, shs)
-            return False, s, shs
 
         shp = results['prices']
         if isinstance(shp, str):
@@ -124,6 +94,16 @@ def process_symbol(s: str, start_date: date, end_date: date) -> tuple[bool, str,
         if isinstance(shmc, str):
             ticker.update_invalid(s, shmc)
             return False, s, shmc
+        
+        shd = results['dividends']
+        if isinstance(shd, str):
+            ticker.update_invalid(s, shd)
+            return False, s, shd
+
+        shs = results['splits']
+        if isinstance(shs, str):
+            ticker.update_invalid(s, shs)
+            return False, s, shs
 
         # Process dividends
         dividends = [

@@ -56,7 +56,7 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on monthly categorize ETF update with error:\n{e}\n\n")
                 raise e
 
-            message_actions += f"Monthly ETFs processed: {total_etfs}\n"
+            message_actions += f"Categorization ETFs processed: {total_etfs}\n"
             message_actions += BREAKER_LINE
 
         if 1 <= weekday <= 3: # Tuesday through Thursday
@@ -66,7 +66,7 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on categorize tickers with error:\n{e}\n\n")
                 raise e
 
-            message_actions += f"Categorized tickers: {total_symbols}\n"
+            message_actions += f"Categorized tickers completed.\n"
             message_actions += BREAKER_LINE
 
             try:

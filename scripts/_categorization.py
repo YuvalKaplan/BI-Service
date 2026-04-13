@@ -9,8 +9,8 @@ if __name__ == '__main__':
         total_etfs = categorize_tickers.download_data()
         print(f"ETFs processed: {total_etfs}")
 
-        total_classified = categorize_tickers.run_classification()
-        print(f"Tickers classified: {total_classified}")
+        categorize_tickers.run_classification()
+        print(f"Tickers classified")
 
     except Exception as e:
         print(f"Error in categorization: {e}")

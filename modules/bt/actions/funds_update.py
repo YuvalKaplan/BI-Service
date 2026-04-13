@@ -11,19 +11,14 @@ def run(today: date) -> List[FundChangesResult]:
         funds = [to_fund_protocol(f) for f in fund.fetch_all()]
         log.record_status(f"Running Fund Update - will process {len(funds)} funds.")
 
-        today = date.today()
         yesterday = today - timedelta(days=1)
 
-        previous_holdings_by_fund = {
-            f.id: fund_holding.fetch_funds_holdings(f.id, yesterday)
-            for f in funds
-        }
         all_results: List[FundChangesResult] = []
         for f in funds:
             results = model_fund.generate(
                 today=today,
                 fund=f,
-                previous_holdings_by_fund=previous_holdings_by_fund,
+                previous_holdings=fund_holding.fetch_funds_holdings(f.id, yesterday),
                 best_ideas_module=best_idea,
             )
 

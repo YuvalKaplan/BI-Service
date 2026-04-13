@@ -22,6 +22,37 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
+-- Name: sanitize_tickers(); Type: FUNCTION; Schema: public; Owner: admin
+--
+
+CREATE OR REPLACE FUNCTION public.sanitize_tickers()
+RETURNS void
+LANGUAGE sql
+AS $$
+    WITH candidates AS (
+        SELECT symbol,
+               CASE
+                   WHEN symbol !~ '^[A-Z]{1,5}$'  THEN 'Invalid ticker format'
+                   WHEN name ~* '\m(ETF|fund)\M'   THEN 'Fund or ETF'
+                   WHEN symbol = ANY(ARRAY[
+                       'XTSLA','AGPXX','BOXX','CMQXX','DTRXX','FGXXX',
+                       'FTIXX','GVMXX','JIMXX','JTSXX','MGMXX','PGLXX','SALXX'
+                   ])                              THEN 'Treasury Security'
+               END AS reason
+        FROM public.ticker
+        WHERE invalid IS NULL
+    )
+    UPDATE public.ticker t
+    SET invalid = c.reason
+    FROM candidates c
+    WHERE t.symbol = c.symbol
+      AND c.reason IS NOT NULL;
+$$;
+
+ALTER FUNCTION public.sanitize_tickers() OWNER TO admin;
+
+
+--
 -- TOC entry 255 (class 1255 OID 251080)
 -- Name: get_best_ideas_by_ranking(integer, text, text, date, integer[]); Type: FUNCTION; Schema: public; Owner: admin
 --

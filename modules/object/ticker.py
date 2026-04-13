@@ -116,6 +116,19 @@ def update_invalid(symbol: str, reason: str):
         raise Exception(f"Error updating the Ticker invalid reason into the DB: {e}")
 
 
+def sanitize():
+    """Mark any ticker table rows with non-standard symbols as invalid.
+
+    Delegates entirely to the sanitize_tickers() SQL function.
+    """
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT sanitize_tickers();')
+    except Error as e:
+        raise Exception(f"Error sanitizing tickers: {e}")
+
+
 def mark_style(classifier: StyleClassifier) -> int:
     try:
         with db_pool_instance.get_connection() as conn:

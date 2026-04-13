@@ -8,9 +8,9 @@ from modules.calc import classification
 
 
 def download_data():
-    """Scrape ETF holdings and refresh the factor cache. Run once a month on the 15th."""
+    """Scrape ETF holdings and refresh the factor cache."""
     try:
-        batch_run_id = batch_run.insert(batch_run.BatchRun('categorize_tickers_monthly', 'auto'))
+        batch_run_id = batch_run.insert(batch_run.BatchRun('categorize_download', 'auto'))
 
         # --- Style (Growth/Value) ETFs ---
         style_etfs = categorize_etf.fetch_all('style')
@@ -57,18 +57,19 @@ def download_data():
         raise e
 
 
-def run_classification() -> int:
-    """Run style classification against the ticker table. Run Tuesday through Thursday."""
+def run_classification():
+    """Run style classification against the ticker table."""
     try:
-        batch_run_id = batch_run.insert(batch_run.BatchRun('categorize_tickers_classify', 'auto'))
+        batch_run_id = batch_run.insert(batch_run.BatchRun('classify_tickers', 'auto'))
 
-        all_categorized = categorize_ticker.fetch_all_for_style_classification()
-        if not all_categorized:
-            raise Exception("Categorize_ticker data is empty - cannot use classification model.")
+        # all_categorized = categorize_ticker.fetch_all_for_style_classification()
+        # if not all_categorized:
+        #     raise Exception("Categorize_ticker data is empty - cannot use classification model.")
 
-        categorized_tickers = [classification.to_categorize_ticker_item(t) for t in all_categorized]
-        classifier = classification.get_classifier(categorized_tickers)
-        num_classified = ticker.mark_style(classifier)
+        # categorized_tickers = [classification.to_categorize_ticker_item(t) for t in all_categorized]
+        # classifier = classification.get_classifier(categorized_tickers)
+        # num_classified = ticker.mark_style(classifier)
+        # log.record_status(f"Categorized {num_classified} tickers.\n")
 
         esg_tickers = categorize_ticker.fetch_all_for_esg()
         if esg_tickers:
@@ -76,8 +77,6 @@ def run_classification() -> int:
             log.record_status(f"Updated {len(esg_tickers)} tickers as ESG qualified.")
 
         batch_run.update_completed_at(batch_run_id)
-        log.record_status(f"Categorized {num_classified} tickers.\n")
-        return num_classified
 
     except Exception as e:
         log.record_error(f"Error in categorize tickers classification run: {e}")

@@ -55,9 +55,11 @@ def fetch_tickers_for_etfs(provider_etf_ids: List[int]) -> List[str]:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
                 query = """
-                    SELECT DISTINCT peh.ticker 
+                    SELECT DISTINCT peh.ticker
                     FROM public.provider_etf_holding AS peh
-                    WHERE peh.provider_etf_id = ANY(%s);
+                    JOIN public.ticker t ON t.symbol = peh.ticker
+                    WHERE peh.provider_etf_id = ANY(%s)
+                      AND t.invalid IS NULL;
                 """
                 cur.execute(query, (provider_etf_ids,))
                 return [row[0] for row in cur.fetchall()]

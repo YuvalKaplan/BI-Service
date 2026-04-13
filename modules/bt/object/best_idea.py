@@ -65,11 +65,11 @@ class BestIdeaRanked:
     source_etf_id: int
     all_provider_ids: List[int]
 
-def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: str, as_of_date: date, provider_etf_ids: list[int]) -> List[BestIdeaRanked]:
+def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: str, as_of_date: date, provider_etf_ids: list[int], exchanges: list[str] = [], esg_only: bool = False) -> List[BestIdeaRanked]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(BestIdeaRanked)) as cur:
-                cur.execute('SELECT * FROM get_best_ideas_by_ranking(%s, %s, %s, %s, %s);', (ranking_level, style_type, cap_type, as_of_date, provider_etf_ids))
+                cur.execute('SELECT * FROM get_best_ideas_by_ranking(%s, %s, %s, %s, %s, %s, %s);', (ranking_level, style_type, cap_type, as_of_date, provider_etf_ids, exchanges, esg_only))
                 items = cur.fetchall()
         return items
     except Error as e:
@@ -86,91 +86,93 @@ def reset():
 """
 The following is the SQL Function for get_best_ideas_by_ranking:
 CREATE OR REPLACE FUNCTION public.get_best_ideas_by_ranking(
-	p_ranking_level integer,
-	p_style_type text,
-	p_cap_type text,
-	p_as_of_date date,
-	p_provider_etf_ids integer[])
-    RETURNS TABLE(symbol text, ranking integer, appearances bigint, max_delta double precision, source_etf_id integer, all_provider_ids integer[]) 
-    LANGUAGE 'sql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-    ROWS 1000
+    p_ranking_level     integer,
+    p_style_type        text,
+    p_cap_type          text,
+    p_as_of_date        date,
+    p_provider_etf_ids  integer[],
+    p_exchanges         text[],          -- NEW: empty array = no filter
+    p_esg_only          boolean          -- NEW: false = no filter
+)
+RETURNS TABLE(symbol text, ranking integer, appearances bigint, max_delta double precision, source_etf_id integer, all_provider_ids integer[])
+LANGUAGE sql
+AS $$
 
-AS $BODY$
+    WITH constants AS (
+        SELECT INTERVAL '10 days' AS lookback
+    ),
 
-	WITH constants AS (
-	    SELECT INTERVAL '10 days' AS lookback
-	),
-	
-	-- 1. Pre-filter the "Universe" of allowed symbols based on Style (and calculate cap level)
-	eligible_symbols AS (
-	    SELECT DISTINCT ON (t.symbol) 
-	        t.symbol,
-	        (CASE WHEN tv.market_cap >= 10000000000 THEN 'large' ELSE 'mid_small' END) as calc_cap
-	    FROM public.ticker t
-	    JOIN public.ticker_value tv ON t.symbol = tv.symbol, 
-	    constants
-	    WHERE tv.value_date <= p_as_of_date
-	      AND tv.value_date >= p_as_of_date - lookback
-	      -- Style Filter applied here
-	      AND (p_style_type = 'blend' OR t.style_type = p_style_type)
-	    ORDER BY t.symbol, tv.value_date DESC
-	),
-	
-	-- 2. Further restrict by the Cap Filter
-	filtered_universe AS (
-	    SELECT symbol 
-	    FROM eligible_symbols
-	    WHERE (p_cap_type = 'all_cap' OR calc_cap = p_cap_type)
-	),
-	
-	-- 3. Get the latest date
-	symbol_latest_date AS (
-	    SELECT 
-	        be.symbol, 
-	        MAX(be.value_date) as max_date
-	    FROM public.best_idea be
-	    JOIN filtered_universe fu ON be.symbol = fu.symbol,
-	    constants
-	    WHERE be.value_date <= p_as_of_date
-	      AND be.value_date >= p_as_of_date - lookback
-	      AND (cardinality(p_provider_etf_ids) = 0 OR be.provider_etf_id = ANY(p_provider_etf_ids))
-	    GROUP BY be.symbol
-	),
+    -- 1. Pre-filter the "Universe" of allowed symbols based on Style (and calculate cap level)
+    eligible_symbols AS (
+        SELECT DISTINCT ON (t.symbol)
+            t.symbol,
+            (CASE WHEN tv.market_cap >= 10000000000 THEN 'large' ELSE 'mid_small' END) AS calc_cap
+        FROM public.ticker t
+        JOIN public.ticker_value tv ON t.symbol = tv.symbol,
+        constants
+        WHERE tv.value_date <= p_as_of_date
+          AND tv.value_date >= p_as_of_date - lookback
+          -- Style filter
+          AND (p_style_type = 'blend' OR t.style_type = p_style_type)
+          -- Exchange filter
+          AND (cardinality(p_exchanges) = 0 OR t.exchange = ANY(p_exchanges))
+          -- ESG filter
+          AND (NOT p_esg_only OR t.esg_qualified = TRUE)
+        ORDER BY t.symbol, tv.value_date DESC
+    ),
 
-	-- 4. Get the best rank the max date
-	symbol_targets AS (
-	    SELECT DISTINCT ON (be.symbol)
-	        be.symbol,
-	        be.value_date AS max_date,
-	        be.ranking AS best_ranking
-	    FROM public.best_idea be
-	    JOIN symbol_latest_date sld ON be.symbol = sld.symbol 
-	                               AND be.value_date = sld.max_date
-	    WHERE be.ranking <= p_ranking_level
-	      AND (cardinality(p_provider_etf_ids) = 0 OR be.provider_etf_id = ANY(p_provider_etf_ids))
-	    ORDER BY be.symbol, be.ranking ASC -- Takes the best rank available on the latest date
-	)
-	
-	-- 5. Final aggregation using the pre-filtered targets
-	SELECT
-	    be.symbol::TEXT,
-	    st.best_ranking AS ranking,
-	    COUNT(DISTINCT be.provider_etf_id) AS appearances,
-	    MAX(be.delta) AS max_delta,
-	    (array_agg(be.provider_etf_id ORDER BY be.delta DESC))[1] AS source_etf_id,
-	    array_agg(DISTINCT be.provider_etf_id) AS all_provider_ids
-	
-	FROM public.best_idea be
-	JOIN symbol_targets st ON be.symbol = st.symbol 
-	                       AND be.value_date = st.max_date 
-	                       AND be.ranking = st.best_ranking
-	GROUP BY be.symbol, st.best_ranking
-	ORDER BY st.best_ranking, appearances DESC, max_delta DESC
-	;
+    -- 2. Further restrict by the Cap Filter
+    filtered_universe AS (
+        SELECT symbol
+        FROM eligible_symbols
+        WHERE (p_cap_type = 'all_cap' OR calc_cap = p_cap_type)
+    ),
 
-$BODY$;
+    -- 3. Get the latest date
+    symbol_latest_date AS (
+        SELECT
+            be.symbol,
+            MAX(be.value_date) AS max_date
+        FROM public.best_idea be
+        JOIN filtered_universe fu ON be.symbol = fu.symbol,
+        constants
+        WHERE be.value_date <= p_as_of_date
+          AND be.value_date >= p_as_of_date - lookback
+          AND (cardinality(p_provider_etf_ids) = 0 OR be.provider_etf_id = ANY(p_provider_etf_ids))
+        GROUP BY be.symbol
+    ),
+
+    -- 4. Get the best rank on the max date
+    symbol_targets AS (
+        SELECT DISTINCT ON (be.symbol)
+            be.symbol,
+            be.value_date AS max_date,
+            be.ranking AS best_ranking
+        FROM public.best_idea be
+        JOIN symbol_latest_date sld ON be.symbol = sld.symbol
+                                   AND be.value_date = sld.max_date
+        WHERE be.ranking <= p_ranking_level
+          AND (cardinality(p_provider_etf_ids) = 0 OR be.provider_etf_id = ANY(p_provider_etf_ids))
+        ORDER BY be.symbol, be.ranking ASC
+    )
+
+    -- 5. Final aggregation using the pre-filtered targets
+    SELECT
+        be.symbol::TEXT,
+        st.best_ranking AS ranking,
+        COUNT(DISTINCT be.provider_etf_id) AS appearances,
+        MAX(be.delta) AS max_delta,
+        (array_agg(be.provider_etf_id ORDER BY be.delta DESC))[1] AS source_etf_id,
+        array_agg(DISTINCT be.provider_etf_id) AS all_provider_ids
+    FROM public.best_idea be
+    JOIN symbol_targets st ON be.symbol = st.symbol
+                           AND be.value_date = st.max_date
+                           AND be.ranking = st.best_ranking
+    GROUP BY be.symbol, st.best_ranking
+    ORDER BY st.best_ranking, appearances DESC, max_delta DESC
+    ;
+
+$$;
 
 ALTER FUNCTION public.get_best_ideas_by_ranking(integer, text, text, date, integer[])
     OWNER TO admin;

@@ -22,6 +22,8 @@ class Strategy(BaseModel):
     thematic: Optional[str] = None
     benchmarks: Optional[list[str]] = None
     provider_etfs: Optional[list[int]] = None
+    exchanges: Optional[list[str]] = None
+    esg_only: bool = False
 
 def getStrategyFromJson(data: dict) -> Strategy:
     return Strategy.model_validate(data)
@@ -115,7 +117,7 @@ def results_to_string(results: FundChangesResult, ticker_module) -> str:
 def generate(
     today: date,
     fund: FundProtocol,
-    previous_holdings_by_fund: dict[int, List[FundHolding]],
+    previous_holdings: List[FundHolding],
     best_ideas_module,
 ) -> FundChangesResult:
     """
@@ -125,16 +127,17 @@ def generate(
 
     Parameters
     ----------
-    today                    : the date being processed
-    funds                    : list of FundProtocol objects
-    previous_holdings_by_fund: {fund_id: [FundHolding]} fetched by the caller
-    best_ideas_module        : module exposing fetch_best_ideas_by_ranking(...)
+    today             : the date being processed
+    fund              : the fund to process
+    previous_holdings : prior holdings for this fund
+    best_ideas_module : module exposing fetch_best_ideas_by_ranking(...)
     """
     results: FundChangesResult
 
     
     strategy = getStrategyFromJson(fund.strategy)
     provider_etfs = strategy.provider_etfs or []
+    exchanges = strategy.exchanges or []
 
     if (
         strategy.style.name == "blend"
@@ -147,6 +150,8 @@ def generate(
             cap_type=strategy.cap.name,
             as_of_date=today,
             provider_etf_ids=provider_etfs,
+            exchanges=exchanges,
+            esg_only=strategy.esg_only,
         )
         fetched_value = best_ideas_module.fetch_best_ideas_by_ranking(
             ranking_level=FETCH_RANKING_LEVEL,
@@ -154,6 +159,8 @@ def generate(
             cap_type=strategy.cap.name,
             as_of_date=today,
             provider_etf_ids=provider_etfs,
+            exchanges=exchanges,
+            esg_only=strategy.esg_only,
         )
 
         if USE_RANKING_HIGH != 1:
@@ -175,6 +182,8 @@ def generate(
             cap_type=strategy.cap.name,
             as_of_date=today,
             provider_etf_ids=provider_etfs,
+            exchanges=exchanges,
+            esg_only=strategy.esg_only,
         )
 
         if USE_RANKING_HIGH != 1:
@@ -183,7 +192,6 @@ def generate(
         in_range = [i for i in fetched if i.ranking <= USE_RANKING_LOW]
         ideal_holdings = in_range[:strategy.holdings]
 
-    previous_holdings = previous_holdings_by_fund.get(fund.id, [])
     holdings_changed: List[FundHoldingChange] = []
     todays_holdings: List[FundHolding] = []
 

@@ -1,6 +1,7 @@
 from datetime import date, timedelta
-from modules.bt.object import fund, best_idea, ticker, provider_etf_holding, categorize_etf_holding, categorize_ticker
-from modules.bt.object import account
+import log
+from modules.bt.object import fund, best_idea, ticker, provider_etf_holding, categorize_ticker
+from modules.bt.object import account, performance
 from modules.bt.actions import stocks_download, best_ideas_generator, funds_update, account_update
 from modules.calc.model_fund import getStrategyFromJson
 from modules.calc import classification
@@ -23,25 +24,26 @@ def distinct_provider_etfs(accounts) -> list[int]:
     return list(distinct_etfs)
 
 def run(start_date: date, end_date: date):
-
     accounts = account.fetch_all()
     etf_ids = distinct_provider_etfs(accounts)
-    symbols = provider_etf_holding.fetch_tickers_for_etfs(etf_ids)
-
-    do_data_download = True
-    do_best_ideas = True
+    
+    do_data_download = False
+    do_best_ideas = False
     do_target_fund = True
     do_accounts = True
 
     # Stock data gathering
-    if do_data_download == True:
+    if do_data_download:
+        ticker.sanitize()
+        symbols = provider_etf_holding.fetch_tickers_for_etfs(etf_ids)
+
         # Download all stock information (prices, market cap and dividends)
         stocks_download.run(symbols, start_date - timedelta(days=15), end_date + timedelta(days=15))
 
         last_update = categorize_ticker.fetch_last_update()
         last_update_date = last_update.date() if last_update else None
         if last_update_date is None or (date.today() - last_update_date) > timedelta(days=90):
-            raise Exception("Table categorize_ticker data is stale or empty — sync it from the live DB before running the back test (tables: categorize_etf_holding and categorize_ticker).")
+            raise Exception("Table categorize_ticker data is stale or empty — sync it from the live DB before running the back test.")
 
         categorized_tickers = [classification.to_categorize_ticker_item(t) for t in categorize_ticker.fetch_all_for_style_classification()]
         classifier = classification.get_classifier(categorized_tickers)
@@ -94,4 +96,23 @@ def run(start_date: date, end_date: date):
             for current_account in accounts:
                 account_update.daily_actions(current_account, current_sim_date)
             current_sim_date += timedelta(days=1)
+
+    # Results
+    alpha_rows = performance.fetch_alpha_annual()
+    header = f"{'Year':<8}{'Account':<6}{'Benchmark':<12}{'Strategy':>10}{'Benchmark':>12}{'Alpha':>10}"
+    log.record_status(header)
+    log.record_status("-" * len(header))
+    for row in alpha_rows:
+        log.record_status(
+            f"{int(row.performance_year):<8}{row.account_id:<6}{row.benchmark_symbol:<12}"
+            f"{float(row.annual_strategy_return):>10.2%}{float(row.annual_benchmark_return):>12.2%}"
+            f"{float(row.annual_alpha):>10.2%}"
+        )
+
+    for current_account in accounts:
+        if current_account.id is not None:
+            f = fund.fetch_fund(current_account.strategy_fund_id)
+            fund_name = f.name if f else str(current_account.strategy_fund_id)
+            file_name = f"{current_account.name} - {fund_name}"
+            performance.export_daily_returns_csv(current_account.id, file_name)
 
