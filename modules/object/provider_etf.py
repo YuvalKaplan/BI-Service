@@ -14,6 +14,7 @@ class ProviderEtf:
     disabled: bool | None
     disabled_reason: str | None
     name: str | None
+    description: str | None
     isin: str | None
     ticker: str | None
     cap_type: str | None
