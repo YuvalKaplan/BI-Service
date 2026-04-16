@@ -18,7 +18,7 @@ def fetch_all():
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Fund)) as cur:
-                query_str = "SELECT * FROM fund;"
+                query_str = "SELECT * FROM fund WHERE active = true;"
                 cur.execute(query_str)
                 items = cur.fetchall()
         return items
