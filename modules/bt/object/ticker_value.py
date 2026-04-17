@@ -114,6 +114,25 @@ def fetch_tickers_by_symbols_on_date(symbols: List[str], value_date: date) -> Li
     except Error as e:
         raise Exception(f"Error retrieving latest TickerValue data: {e}")
     
+def fetch_latest_market_caps_within_window(symbols: List[str], as_of_date: date, days: int) -> List['TickerValue']:
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(TickerValue)) as cur:
+                query = """
+                    SELECT DISTINCT ON (symbol) symbol, value_date, stock_price, market_cap
+                    FROM ticker_value
+                    WHERE symbol = ANY(%s)
+                      AND value_date <= %s
+                      AND value_date >= %s - (%s * INTERVAL '1 day')
+                      AND market_cap IS NOT NULL
+                    ORDER BY symbol, value_date DESC;
+                """
+                cur.execute(query, (symbols, as_of_date, as_of_date, days))
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching latest market caps within window: {e}")
+
+
 def upsert(item: TickerValue):
     try:
         with db_pool_instance_bt.get_connection() as conn:

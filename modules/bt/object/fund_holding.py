@@ -47,13 +47,14 @@ def insert_fund_holding(items: List[FundHolding]):
                         holding_date,
                         ranking,
                         source_etf_id,
-                        max_delta
+                        max_delta,
+                        weight
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s);
+                    VALUES (%s, %s, %s, %s, %s, %s, %s);
                 """
 
                 insert_values = [
-                    (i.fund_id, i.symbol, i.holding_date, i.ranking, i.source_etf_id, i.max_delta)
+                    (i.fund_id, i.symbol, i.holding_date, i.ranking, i.source_etf_id, i.max_delta, i.weight)
                     for i in items
                 ]
 

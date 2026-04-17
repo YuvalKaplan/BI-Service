@@ -513,7 +513,8 @@ CREATE TABLE public.fund_holding (
     holding_date date NOT NULL,
     ranking integer NOT NULL,
     source_etf_id integer,
-    max_delta double precision
+    max_delta double precision,
+    weight double precision
 );
 
 

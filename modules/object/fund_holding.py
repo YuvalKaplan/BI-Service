@@ -42,9 +42,9 @@ def insert_fund_holding(items: List[FundHolding]):
 
                 cur.executemany("""
                     INSERT INTO fund_holding (
-                        fund_id, symbol, holding_date, ranking, source_etf_id, max_delta
-                    ) VALUES (%s, %s, %s, %s, %s, %s);
-                """, [(i.fund_id, i.symbol, i.holding_date, i.ranking, i.source_etf_id, i.max_delta) for i in items])
+                        fund_id, symbol, holding_date, ranking, source_etf_id, max_delta, weight
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s);
+                """, [(i.fund_id, i.symbol, i.holding_date, i.ranking, i.source_etf_id, i.max_delta, i.weight) for i in items])
 
             conn.commit()
 

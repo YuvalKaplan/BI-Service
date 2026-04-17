@@ -1,6 +1,6 @@
 import pandas as pd
 from decimal import Decimal, ROUND_DOWN, ROUND_UP
-from typing import List, Tuple
+from typing import List
 from decimal import Decimal
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -48,20 +48,16 @@ class TradeCandidate:
     priority: float = 0.0
 
 def identify_position_change_needs(
-    account_id: int, 
-    fund_id: int, 
-    eval_date: date,
+    account_id: int,
+    target_fund_holdings: list,
     account_holdings: List[ah.AccountHolding]
-) -> Tuple[List[str], List[TradeCandidate]]:
+) -> List[TradeCandidate]:
     """
     Compares current account holdings vs fund targets.
-    Returns: (target_map, list_of_candidates)
+    Returns the list of trade candidates (ENTER / EXIT).
     """
     try:
-        # Fetch targets from your fund_holding module
-        base_fund_holding = fund_holding.fetch_funds_holdings(fund_id=fund_id, eval_date=eval_date)
-        target_symbols = [h.symbol for h in base_fund_holding]
-        targets_holdings = {h.symbol: h for h in base_fund_holding}
+        targets_holdings = {h.symbol: h for h in target_fund_holdings}
 
         # Fetch current snapshot
         current_holdings = {h.symbol: h for h in account_holdings}
@@ -80,12 +76,12 @@ def identify_position_change_needs(
                 ))
             elif actual and not target:
                 candidates.append(TradeCandidate(
-                    symbol=symbol, action="EXIT", ranking=0, 
+                    symbol=symbol, action="EXIT", ranking=0,
                     current_qty=Decimal(str(actual.quantity))
                 ))
             elif actual and target:
                 # Optional: Logic for drift rebalance can be added here
-                pass 
+                pass
 
         # Sort ENTER candidates by ranking (ascending) then by max_delta (descending)
         enter_candidates = [c for c in candidates if c.action == "ENTER"]
@@ -98,11 +94,11 @@ def identify_position_change_needs(
         other_candidates = [c for c in candidates if c.action != "ENTER"]
         candidates = enter_candidates + other_candidates
 
-        return target_symbols, candidates
+        return candidates
 
     except Exception as e:
         print(f"Error comparing holdings: {e}")
-        return [], []
+        return []
 
 def calculate_commission(quantity: Decimal) -> Decimal:
     FEE_PER_SHARE = Decimal('0.005') # e.g., half a cent per share
@@ -188,10 +184,10 @@ def execute_trade(
 
 def execute_minimal_rebalance(
     account_id: int,
-    num_strategy_holdings: int,
     candidates: List[TradeCandidate],
     eval_date: date,
-    account_holdings: List[ah.AccountHolding]
+    account_holdings: List[ah.AccountHolding],
+    symbol_weights: dict[str, float],
 ) -> List[at.AccountTrade]:
 
     if not candidates:
@@ -240,7 +236,6 @@ def execute_minimal_rebalance(
 
     cash_val = float(acl.get_cash_balance(account_id, eval_date))
     tpv = cash_val + df['current_val'].sum()
-    target_val_per_stock = tpv / num_strategy_holdings if num_strategy_holdings > 0 else 0.0
 
     # --- TARGET LOGIC ---
     candidate_map = {c.symbol: c.action for c in candidates}
@@ -248,18 +243,11 @@ def execute_minimal_rebalance(
     buy_symbols = [c.symbol for c in candidates if c.action == "ENTER"]
     enter_priority_map = {c.symbol: c.priority for c in candidates if c.action == "ENTER"}
 
-    # Use the keys from your synced quantities dictionary where qty > 0
-    held_symbols = {sym for sym, qty in quantities.items() if qty > 0}
-
     def get_target(sym):
         action = candidate_map.get(sym)
         if action == 'EXIT':
             return 0.0
-        elif action == 'ENTER':
-            return target_val_per_stock
-        elif sym in held_symbols:
-            return target_val_per_stock
-        return 0.0
+        return tpv * symbol_weights.get(sym, 0.0)
 
     df['target_val'] = df['symbol'].map(get_target)
     df['delta'] = df['current_val'] - df['target_val']
@@ -303,12 +291,9 @@ def execute_minimal_rebalance(
     if buy_symbols:
         for _, row in df[df['symbol'].isin(buy_symbols)].iterrows():
 
-            if target_val_per_stock <= Decimal('50.00'):
-                break
-
             price = to_price(row['price'])
             target_val = Decimal(str(row['target_val']))
-            if target_val <= Decimal('0'):
+            if target_val <= Decimal('50.00'):
                 continue
 
             # Use target value from get_target
@@ -347,8 +332,6 @@ def execute_minimal_rebalance(
     df['current_val'] = df['qty_held'] * df['price']
 
     tpv = float(local_cash) + df['current_val'].sum()
-
-    target_val_per_stock = tpv / num_strategy_holdings if num_strategy_holdings > 0 else 0.0
 
     df['target_val'] = df['symbol'].map(get_target)
 
@@ -554,7 +537,7 @@ def create_daily_snapshot(
         on='symbol', 
         how='outer'
     )
-    df = df.infer_objects(copy=False)
+    df = df.infer_objects()
     num_cols = ['quantity', 'cost_basis', 'qty_delta', 'cost_delta', 'qty_sold']
     for col in num_cols:
         if col in df.columns:
@@ -689,23 +672,30 @@ def daily_actions(account: account.Account, sim_date: date):
     if account.id is None:
         raise Exception('Account ID not specified')
     
-    f = fund.fetch_fund(account.strategy_fund_id)
-    if f is None:
-        raise Exception("Missing strategy for fund")
-
-    strategy = getStrategyFromJson(f.strategy)
-
     # Update Cash: Apply dividends 
     process_daily_dividends(account_id=account.id, eval_date=sim_date)   
 
     if sim_date.weekday() < 5: # Monday -> Friday
         account_holdings = get_account_holdings(account_id=account.id, eval_date=sim_date)
 
-        # Check for changes in target fund_holdings
-        fund_symbols, candidates = identify_position_change_needs(account_id=account.id, fund_id=account.strategy_fund_id, eval_date=sim_date, account_holdings=account_holdings)
-        
+        # Fetch target fund holdings once; derive both candidates and weights from them
+        target_fund_holdings = fund_holding.fetch_funds_holdings(fund_id=account.strategy_fund_id, eval_date=sim_date)
+        symbol_weights = {h.symbol: h.weight for h in target_fund_holdings if h.weight is not None}
+
+        candidates = identify_position_change_needs(
+            account_id=account.id,
+            target_fund_holdings=target_fund_holdings,
+            account_holdings=account_holdings,
+        )
+
         # Execute the changes and rebalance
-        today_trades = execute_minimal_rebalance(account_id=account.id, num_strategy_holdings=strategy.holdings, candidates=candidates, eval_date=sim_date, account_holdings=account_holdings)
+        today_trades = execute_minimal_rebalance(
+            account_id=account.id,
+            candidates=candidates,
+            eval_date=sim_date,
+            account_holdings=account_holdings,
+            symbol_weights=symbol_weights,
+        )
 
         # Create Today's Snapshot
         daily_return, snapshots = create_daily_snapshot(account_id=account.id, eval_date=sim_date, previous_holdings=account_holdings, today_trades=today_trades)

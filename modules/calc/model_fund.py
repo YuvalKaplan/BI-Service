@@ -16,6 +16,7 @@ class Style(BaseModel):
     growth: Optional[int] = None
 
 class Strategy(BaseModel):
+    allocation: str
     holdings: int
     cap: Cap
     style: Style
@@ -50,6 +51,7 @@ class FundHolding:
     ranking: int
     source_etf_id: int
     max_delta: float | None
+    weight: float | None = None
 
 
 @dataclass
@@ -245,3 +247,24 @@ def generate(
                     break
 
     return FundChangesResult(fund=fund, holdings=todays_holdings, changes=holdings_changed)
+
+
+def apply_equal_weights(holdings: List[FundHolding]) -> None:
+    n = len(holdings)
+    if n == 0:
+        return
+    w = 1.0 / n
+    for h in holdings:
+        h.weight = w
+
+
+def apply_market_cap_weights(
+    holdings: List[FundHolding],
+    market_cap_map: dict[str, float],
+) -> None:
+    total = sum(market_cap_map.get(h.symbol, 0.0) for h in holdings)
+    if total == 0:
+        return
+    for h in holdings:
+        mc = market_cap_map.get(h.symbol)
+        h.weight = (mc / total) if mc else None
