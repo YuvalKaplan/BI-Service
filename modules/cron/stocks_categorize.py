@@ -13,7 +13,7 @@ def download_data():
 
         # --- Style (Growth/Value) ETFs → categorize_etf_holding ---
         style_etfs = categorize_etf.fetch_all('style')
-        log.record_status(f"Monthly update: processing {len(style_etfs)} style ETFs.")
+        log.record_status(f"Style (Growth/Value) update: processing {len(style_etfs)} style ETFs.")
 
         for etf in style_etfs:
             d = scrape_categorizer(etf)
@@ -34,7 +34,7 @@ def download_data():
 
         # --- ESG ETFs → ticker table ---
         esg_etfs = categorize_etf.fetch_all('esg')
-        log.record_status(f"Monthly update: processing {len(esg_etfs)} ESG ETFs.")
+        log.record_status(f"ESG update: processing {len(esg_etfs)} ESG ETFs.")
         esg_symbols: set[str] = set()
         for etf in esg_etfs:
             d = scrape_categorizer(etf)
@@ -49,9 +49,9 @@ def download_data():
             log.record_status(f"Marked {len(esg_symbols)} tickers as ESG qualified.")
 
         batch_run.update_completed_at(batch_run_id)
-        log.record_status(f"Finished monthly categorize ETF update.\n")
+        log.record_status(f"Finished categorize ETF update.\n")
         return len(style_etfs) + len(esg_etfs)
 
     except Exception as e:
-        log.record_error(f"Error in monthly categorize ETF update: {e}")
+        log.record_error(f"Error in categorize ETF update: {e}")
         raise e

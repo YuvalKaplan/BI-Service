@@ -250,8 +250,9 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
         ~df['ticker'].isin(mapping.remove_tickers)          # exclude custom list
     ]
 
-    # drop rows where the shares is empty or 0 (used for cash holdings)
+    # drop rows where the shares, market_value or weight is empty or 0 (used for cash holdings)
     df = df[df["shares"].notna() & (df["shares"] > 0)]
+    df = df[df["market_value"].notna() & (df["market_value"] > 0)]
     df = df[df["weight"].notna() & (df["weight"] > 0)]
 
     # We are using a weighting that sums up to 1 (not 100%)

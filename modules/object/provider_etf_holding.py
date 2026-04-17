@@ -17,24 +17,6 @@ class ProviderEtfHolding:
     market_value: float
     weight: float
 
-def fetch_holding_dates_available_past_period(provider_etf_id: int, look_back_days: int) -> list[date]:
-    try:
-        with db_pool_instance.get_connection() as conn:
-            with conn.cursor() as cur:
-                query = """
-                    SELECT DISTINCT (peh.holding_date::date)
-                    FROM provider_etf_holding AS peh
-                    INNER JOIN ticker AS t ON peh.ticker = t.symbol
-                    WHERE t.invalid IS null
-                      AND peh.provider_etf_id = %s 
-                      AND peh.holding_date > NOW() - (%s * INTERVAL '1 days')
-                    ORDER BY peh.holding_date::date;
-                """
-                cur.execute(query, (provider_etf_id, look_back_days))
-                return [row[0] for row in cur.fetchall()]
-    except Error as e:
-        raise Exception(f"Error retrieving the list of holding dates available in the past week: {e}")
-    
 def fetch_valid_tickers_in_holdings() -> List[str]:
     try:
         with db_pool_instance.get_connection() as conn:
@@ -68,6 +50,29 @@ def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, holding_date: 
         return items
     except Error as e:
         raise Exception(f"Error fetching the Provider ETFs Holdings for provider ETF ID from the DB: {e}")
+
+
+def fetch_latest_holdings_for_etf(provider_etf_id: int, look_back_days: int):
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(ProviderEtfHolding)) as cur:
+                query_str = """
+                    SELECT peh.*
+                    FROM provider_etf_holding AS peh
+                    INNER JOIN ticker AS t ON peh.ticker = t.symbol
+                    WHERE t.invalid IS NULL
+                      AND peh.provider_etf_id = %s
+                      AND peh.holding_date = (
+                          SELECT MAX(holding_date)
+                          FROM provider_etf_holding
+                          WHERE provider_etf_id = %s
+                            AND holding_date > NOW() - (%s * INTERVAL '1 day')
+                      );
+                """
+                cur.execute(query_str, (provider_etf_id, provider_etf_id, look_back_days))
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching latest holdings for provider ETF {provider_etf_id}: {e}")
 
 
 def insert_all_holdings(etf_id: int, df: pd.DataFrame):

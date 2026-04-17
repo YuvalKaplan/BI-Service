@@ -1,17 +1,58 @@
 import log
+import pandas as pd
 from modules.object import batch_run, batch_run_log
 from modules.object import provider, provider_etf
-from modules.calc.best_ideas import find_best_ideas, to_holding_item, to_ticker_value_item, find_latest_common_date, filter_stale_holdings, TickerValueItem
-from modules.object.provider_etf_holding import fetch_holding_dates_available_past_period, fetch_valid_holdings_by_provider_etf_id
-from modules.object.ticker_value import fetch_ticker_dates_available_past_period, fetch_latest_price_date_for_ticker, fetch_tickers_by_symbols_on_date
+from modules.object.provider_etf_holding import fetch_latest_holdings_for_etf
+from modules.object.ticker_value import fetch_latest_market_caps_within_window
 from modules.object import best_idea
-from modules.object import ticker
-from modules.core.api_stocks import get_fx_rate
 
 DAYS_NO_PRICING = 7
 MIN_HOLDINGS_WITH_PRICES_PCT = 0.9
 LOOK_BACK_FOR_COMMON_DATE = 14
 MAX_BEST_IDEAS_PER_FUND = 10
+HOLDING_DELTA_LIMIT_DROP_OFF = 0.25
+
+
+def _find_best_ideas(holdings, market_cap_values, limit: int | None = None) -> pd.DataFrame:
+    df_holdings = pd.DataFrame(
+        {"symbol": h.ticker, "market_value": h.market_value}
+        for h in holdings
+        if h.ticker and h.market_value and h.market_value > 0
+    )
+
+    df_values = pd.DataFrame(
+        {"symbol": v.symbol, "market_cap": v.market_cap}
+        for v in market_cap_values
+        if v.symbol and v.market_cap
+    )
+
+    df = df_holdings.merge(df_values, on="symbol", how="inner")
+
+    if df.empty:
+        raise ValueError("No overlapping symbols between holdings and market caps")
+
+    total_etf_value = df["market_value"].sum()
+    df["etf_weight"] = df["market_value"] / total_etf_value
+
+    total_market_cap = df["market_cap"].sum()
+    df["benchmark_weight"] = df["market_cap"] / total_market_cap
+
+    df["delta"] = df["etf_weight"] - df["benchmark_weight"]
+
+    best_ideas = df[df["delta"] > 0].sort_values("delta", ascending=False)
+
+    dropped = best_ideas[best_ideas["delta"] > HOLDING_DELTA_LIMIT_DROP_OFF]
+    if not dropped.empty:
+        log.record_status(f"Dropping {len(dropped)} best-idea(s) above delta limit {HOLDING_DELTA_LIMIT_DROP_OFF}: {dropped['symbol'].tolist()}")
+    best_ideas = best_ideas[best_ideas["delta"] <= HOLDING_DELTA_LIMIT_DROP_OFF]
+
+    if limit is not None:
+        if limit <= 0:
+            raise ValueError("limit must be a positive integer")
+        best_ideas = best_ideas.head(limit)
+
+    return best_ideas.reset_index(drop=True)
+
 
 def record_problem(batch_run_id: int, provider: provider.Provider, etf: provider_etf.ProviderEtf, error: str, message: str | None, problem_etfs: list[str]):
     item_info = f"[Provider: '{provider.name}' ({provider.id}), ETF: '{etf.name}' ({etf.id})]"
@@ -40,92 +81,36 @@ def run() -> tuple[int, int, list[str]]:
 
             for pe in pe_list:
                 try:
-                    # 1. Find the latest date where both holdings and ticker values are available for this ETF
-                    available_holding_dates = fetch_holding_dates_available_past_period(pe.id, LOOK_BACK_FOR_COMMON_DATE)
-                    if not available_holding_dates:
+                    # 1. Fetch holdings for the latest holding date within the look-back window
+                    raw_holdings = fetch_latest_holdings_for_etf(pe.id, LOOK_BACK_FOR_COMMON_DATE)
+                    if not raw_holdings:
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"No holdings have been downloaded for the past {LOOK_BACK_FOR_COMMON_DATE} days", message=None, problem_etfs=problem_etfs)
                         continue
 
-                    available_ticker_dates = fetch_ticker_dates_available_past_period(pe.id, LOOK_BACK_FOR_COMMON_DATE)
-                    if not available_ticker_dates:
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"No ticker values are available for the past {LOOK_BACK_FOR_COMMON_DATE} days", message=None, problem_etfs=problem_etfs)
-                        continue
+                    holding_date = raw_holdings[0].holding_date
 
-                    latest_common_date = find_latest_common_date(available_holding_dates, available_ticker_dates)
-                    if latest_common_date is None:
-                        message = f"Latest holdings date: {max(available_holding_dates).strftime('%b %d, %Y')}, Latest ticker value date: {max(available_ticker_dates).strftime('%b %d, %Y')}"
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Data sources out of sync", message=message, problem_etfs=problem_etfs)
-                        continue
+                    # 2. Fetch latest market caps within 7 days of the holding date
+                    symbols = [h.ticker for h in raw_holdings if h.ticker]
+                    market_cap_values = fetch_latest_market_caps_within_window(symbols, holding_date, DAYS_NO_PRICING)
 
-                    # 2. Get holdings and remove stale tickers (no recent price)
-                    raw_holdings = fetch_valid_holdings_by_provider_etf_id(pe.id, latest_common_date)
-                    holding_items = [to_holding_item(h) for h in raw_holdings]
+                    # 3. Identify and report stale tickers (no market cap within window)
+                    priced_symbols = {v.symbol for v in market_cap_values}
+                    for h in raw_holdings:
+                        if h.ticker and h.ticker not in priced_symbols:
+                            record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="STALE HOLDING", message=f"{h.ticker} has no market cap for over {DAYS_NO_PRICING} days", problem_etfs=problem_etfs)
 
-                    last_price_dates = {
-                        h.ticker: fetch_latest_price_date_for_ticker(h.ticker, latest_common_date)
-                        for h in holding_items if h.ticker
-                    }
-                    valid_holdings, stale_tickers = filter_stale_holdings(holding_items, last_price_dates, latest_common_date, DAYS_NO_PRICING)
-
-                    for stale_ticker in stale_tickers:
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="STALE HOLDING", message=f"{stale_ticker} has no prices for over {DAYS_NO_PRICING} days", problem_etfs=problem_etfs)
-
-                    if not valid_holdings:
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="No holdings with recent prices", message=None, problem_etfs=problem_etfs)
-                        continue
-
-                    # 3. Fetch prices and check coverage
-                    ticker_symbols = [h.ticker for h in valid_holdings if h.ticker]
-                    values = fetch_tickers_by_symbols_on_date(ticker_symbols, latest_common_date)
-                    value_items = [to_ticker_value_item(v) for v in values]
-
-                    coverage_ratio = len(value_items) / len(valid_holdings)
+                    # 4. Coverage check
+                    coverage_ratio = len(market_cap_values) / len(raw_holdings)
                     if coverage_ratio < MIN_HOLDINGS_WITH_PRICES_PCT:
-                        missing_count = len(valid_holdings) - len(value_items)
-                        msg = f"Coverage {coverage_ratio:.1%}. Missing {missing_count} prices for date {latest_common_date.strftime('%Y-%m-%d')}"
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Insufficient pricing coverage", message=msg, problem_etfs=problem_etfs)
+                        missing_count = len(raw_holdings) - len(market_cap_values)
+                        msg = f"Coverage {coverage_ratio:.1%}. Missing {missing_count} market caps for holding date {holding_date.strftime('%Y-%m-%d')}"
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Insufficient market cap coverage", message=msg, problem_etfs=problem_etfs)
                         continue
 
-                    # 4. Convert all prices / market caps to USD using spot FX rates
-                    tickers_map = {t.symbol: t for t in ticker.fetch_by_symbols([v.symbol for v in value_items if v.symbol])}
-                    non_usd_currencies = {
-                        t.currency for t in tickers_map.values()
-                        if t.currency and t.currency != 'USD'
-                    }
-                    fx_rates: dict[str, float] = {}
-                    fx_error = False
-                    for ccy in non_usd_currencies:
-                        rate = get_fx_rate(ccy, 'USD')
-                        if isinstance(rate, str):
-                            record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"Cannot get FX rate for {ccy}: {rate}", message=None, problem_etfs=problem_etfs)
-                            fx_error = True
-                            break
-                        fx_rates[ccy] = rate
-                    if fx_error:
-                        continue
-
-                    def _to_usd(v: TickerValueItem) -> TickerValueItem:
-                        if not v.symbol:
-                            return v
-                        t = tickers_map.get(v.symbol)
-                        if t and t.currency and t.currency != 'USD':
-                            rate = fx_rates.get(t.currency, 1.0)
-                            return TickerValueItem(
-                                symbol=v.symbol,
-                                stock_price=v.stock_price * rate if v.stock_price is not None else None,
-                                market_cap=v.market_cap * rate if v.market_cap is not None else None,
-                            )
-                        return v
-
-                    value_items = [_to_usd(v) for v in value_items]
-
-                    # 5. Align holdings to priced symbols before computing best ideas
-                    priced_symbols = {v.symbol for v in value_items}
-                    final_holdings = [h for h in valid_holdings if h.ticker in priced_symbols]
-
-                    # 6. Generate and insert
-                    best_ideas_df = find_best_ideas(final_holdings, value_items, MAX_BEST_IDEAS_PER_FUND)
-                    rows = best_idea.df_to_rows(best_ideas_df, provider_etf_id=pe.id, value_date=latest_common_date)
+                    # 5. Generate and insert
+                    final_holdings = [h for h in raw_holdings if h.ticker in priced_symbols]
+                    best_ideas_df = _find_best_ideas(final_holdings, market_cap_values, MAX_BEST_IDEAS_PER_FUND)
+                    rows = best_idea.df_to_rows(best_ideas_df, provider_etf_id=pe.id, value_date=holding_date)
                     best_idea.insert_bulk(rows)
                     generated_etfs += 1
 
