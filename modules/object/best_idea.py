@@ -26,7 +26,7 @@ def df_to_rows(
         rows.append((provider_etf_id, row["symbol"], value_date, float(row["etf_weight"]), float(row["benchmark_weight"]), float(row["delta"]), rank))
     return rows
 
-def insert_bulk(rows: list[tuple]):
+def insert_bulk(rows: list[tuple]) -> None:
     if not rows:
         return
 

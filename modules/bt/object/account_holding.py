@@ -19,7 +19,7 @@ class AccountHolding:
     weight_percentage: Decimal = Decimal(0)
     id: Optional[int] = None
 
-def fetch_current_account_snapshot(account_id: int, eval_date: date):
+def fetch_current_account_snapshot(account_id: int, eval_date: date) -> List[AccountHolding]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(AccountHolding)) as cur:
@@ -89,7 +89,7 @@ def fetch_latest_common_date_for_ticker(account_id: int, symbol: str, as_of_date
         print(f"Error fetching common date for {symbol}: {e}")
         return None
 
-def record_account_holdings(holdings: List[AccountHolding]):
+def record_account_holdings(holdings: List[AccountHolding]) -> None:
     if not holdings:
         return
 

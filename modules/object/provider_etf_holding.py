@@ -33,7 +33,7 @@ def fetch_valid_tickers_in_holdings() -> List[str]:
     except Error as e:
         raise Exception(f"Error retrieving TickerMarketCap data: {e}")
 
-def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, holding_date: date):
+def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, holding_date: date) -> List[ProviderEtfHolding]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(ProviderEtfHolding)) as cur:
@@ -52,7 +52,7 @@ def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, holding_date: 
         raise Exception(f"Error fetching the Provider ETFs Holdings for provider ETF ID from the DB: {e}")
 
 
-def fetch_latest_holdings_for_etf(provider_etf_id: int, look_back_days: int):
+def fetch_latest_holdings_for_etf(provider_etf_id: int, look_back_days: int) -> List[ProviderEtfHolding]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(ProviderEtfHolding)) as cur:
@@ -75,7 +75,7 @@ def fetch_latest_holdings_for_etf(provider_etf_id: int, look_back_days: int):
         raise Exception(f"Error fetching latest holdings for provider ETF {provider_etf_id}: {e}")
 
 
-def insert_all_holdings(etf_id: int, df: pd.DataFrame):
+def insert_all_holdings(etf_id: int, df: pd.DataFrame) -> None:
     try:
         df = df.drop(columns=["id"], errors="ignore")
         df["provider_etf_id"] = etf_id

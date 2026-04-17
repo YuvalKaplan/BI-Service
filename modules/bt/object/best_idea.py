@@ -26,7 +26,7 @@ def df_to_rows(
         rows.append((provider_etf_id, row["symbol"], value_date, float(row["etf_weight"]), float(row["benchmark_weight"]), float(row["delta"]), rank))
     return rows
 
-def insert_bulk(rows: list[tuple]):
+def insert_bulk(rows: list[tuple]) -> None:
     if not rows:
         return
 
@@ -75,7 +75,7 @@ def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: s
     except Error as e:
         raise Exception(f"Error fetching the BestIdeaResult from the DB: {e}")
 
-def reset():
+def reset() -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:

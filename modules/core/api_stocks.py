@@ -47,7 +47,7 @@ def throttle_api_calls() -> None:
 API_RETRIES = 3
 API_RETRY_DELAY = 2.0  # seconds; doubles on each subsequent attempt
 
-def get_jsonparsed_data(url) -> dict:
+def get_jsonparsed_data(url: str) -> dict:
     last_exc: Exception | None = None
     for attempt in range(API_RETRIES):
         try:
@@ -178,7 +178,7 @@ def get_fx_rate(from_currency: str, to_currency: str = 'USD') -> float | str:
 # ------------------------------------------------------------------
 # Fetch company list and factors forr use in classification universe
 # ------------------------------------------------------------------
-def fetch_company_factors(symbol) -> tuple[Dict, Dict]:
+def fetch_company_factors(symbol: str) -> tuple[Dict, Dict]:
     apikey = os.getenv('SECRET_MARKET_DATA_API_KEY')
 
     def _fetch(endpoint: str):

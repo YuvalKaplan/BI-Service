@@ -36,7 +36,7 @@ def fetch_alpha_annual() -> list[AlphaAnnual]:
         raise Exception(f"Error fetching annual alpha from DB: {e}")
 
 
-def export_daily_returns_csv(account_id: int, file_name: str):
+def export_daily_returns_csv(account_id: int, file_name: str) -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(DailyReturn)) as cur:

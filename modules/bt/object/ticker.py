@@ -43,7 +43,7 @@ class Ticker:
         self.esg_qualified = esg_qualified
         self.invalid = invalid
 
-def fetch_by_symbol(symbol: str):
+def fetch_by_symbol(symbol: str) -> Ticker | None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Ticker)) as cur:
@@ -53,7 +53,7 @@ def fetch_by_symbol(symbol: str):
     except Error as e:
         raise Exception(f"Error fetching the Ticker from the DB: {e}")
 
-def fetch_by_symbols(symbols: list[str]):
+def fetch_by_symbols(symbols: list[str]) -> list[Ticker]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Ticker)) as cur:
@@ -67,7 +67,7 @@ def fetch_by_symbols(symbols: list[str]):
     except Error as e:
         raise Exception(f"Error fetching the Ticker list page from the DB: {e}")
 
-def update_info(item: Ticker):
+def update_info(item: Ticker) -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
@@ -77,7 +77,7 @@ def update_info(item: Ticker):
     except Error as e:
         raise Exception(f"Error updating the Ticker item into the DB: {e}")
 
-def update_esg_qualified(symbols: list[str]):
+def update_esg_qualified(symbols: list[str]) -> None:
     if not symbols:
         return
     try:
@@ -91,7 +91,7 @@ def update_esg_qualified(symbols: list[str]):
     except Error as e:
         raise Exception(f"Error updating esg_qualified in the DB: {e}")
 
-def update_invalid(symbol: str, reason: str):
+def update_invalid(symbol: str, reason: str) -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
@@ -108,7 +108,7 @@ def update_invalid(symbol: str, reason: str):
         raise Exception(f"Error updating ticker invalid reason into the DB: {e}")
 
 
-def upsert(item: Ticker):
+def upsert(item: Ticker) -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
@@ -183,7 +183,7 @@ def mark_style(classifier: StyleClassifier) -> int:
     
 
               
-def mark_split_invalid(symbols: list[str], start_date: date, end_date: date):
+def mark_split_invalid(symbols: list[str], start_date: date, end_date: date) -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             # First remove priod invalid over split (could have been different period)
@@ -208,7 +208,7 @@ def mark_split_invalid(symbols: list[str], start_date: date, end_date: date):
         raise Exception(f"Error marking the categories for the tickers in the DB: {e}")
 
 
-def sanitize():
+def sanitize() -> None:
     """Mark any ticker table rows with non-standard symbols as invalid.
 
     Delegates entirely to the sanitize_tickers() SQL function.

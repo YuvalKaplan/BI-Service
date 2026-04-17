@@ -8,7 +8,7 @@ from modules.object.provider_etf_holding import insert_all_holdings
 from modules.parse.url import scrape_provider
 from modules.parse.convert import load, map_data
 
-def process_provider(provider: Provider):
+def process_provider(provider: Provider) -> None:
     if provider.id is None or provider.url_start is None:
         raise Exception("Missing data in DB for provider scraping.")
         

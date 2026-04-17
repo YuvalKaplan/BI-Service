@@ -13,7 +13,7 @@ class TickerDividendHistory:
     amount_per_share: Decimal
     id: Optional[int] = None
 
-def fetch_dividends_for_holdings(account_id: int, eval_date: date):
+def fetch_dividends_for_holdings(account_id: int, eval_date: date) -> list[dict]:
     """
     Finds dividends for symbols held in the account as of the most recent snapshot.
     """
@@ -35,7 +35,7 @@ def fetch_dividends_for_holdings(account_id: int, eval_date: date):
     except Error as e:
             raise Exception(f"Error getting dividends of holdings: {e}")
     
-def insert_dividends_bulk(items: List[TickerDividendHistory]):
+def insert_dividends_bulk(items: List[TickerDividendHistory]) -> None:
     if not items:
         return
     

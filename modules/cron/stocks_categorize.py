@@ -6,7 +6,7 @@ from modules.parse.url import scrape_categorizer
 from modules.parse.convert import load, get_tickers
 
 
-def download_data():
+def download_data() -> int:
     """Scrape categorization ETF holdings and update the ticker table [style (value/growth) and ESG]."""
     try:
         batch_run_id = batch_run.insert(batch_run.BatchRun('categorize_download', 'auto'))

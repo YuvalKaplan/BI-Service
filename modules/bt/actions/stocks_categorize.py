@@ -7,7 +7,7 @@ from modules.parse.convert import load, get_tickers
 from modules.bt.calc import classification
 
 
-def download_data():
+def download_data() -> None:
     """Scrape categorization ETF holdings and populate the BT categorize_ticker table with style and factors."""
     log.record_status("BT: Starting categorize ETF download.")
 

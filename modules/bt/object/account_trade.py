@@ -18,7 +18,7 @@ class AccountTrade:
     commission: Decimal = Decimal('0.00')
     id: Optional[int] = None
 
-def record_trade(trade: AccountTrade):
+def record_trade(trade: AccountTrade) -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:

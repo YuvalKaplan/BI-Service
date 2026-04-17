@@ -14,7 +14,7 @@ class Fund:
     active: bool
 
 
-def fetch_all():
+def fetch_all() -> list[Fund]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Fund)) as cur:

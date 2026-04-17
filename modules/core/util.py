@@ -1,6 +1,7 @@
 import hashlib
 from datetime import datetime, timezone
 from io import BytesIO
+from typing import Any
 import httpx
 import random
 import string
@@ -27,17 +28,17 @@ def get_consistent_hash(input: str | tuple | list, algorithm='sha256') -> str:
         hash_object.update(repr(tuple(input)).encode('utf-8'))
         return hash_object.hexdigest()
     
-def get_file_hash(input: bytes):
+def get_file_hash(input: bytes) -> str:
     """ Note: This is also used as the Checksum for the CDN upload """
     hash_object = hashlib.new('sha256')
     hash_object.update(input)
     return hash_object.hexdigest()
 
-def get_base_path(client_id):
+def get_base_path(client_id: str) -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H-%M-%S")
-    return f'./downloads/extracted/{client_id}/{timestamp}/' 
+    return f'./downloads/extracted/{client_id}/{timestamp}/'
 
-def download_file_from_url(url):
+def download_file_from_url(url: str) -> BytesIO | None:
     """Downloads a file from a URL and returns it as a BytesIO object."""
     try:
         return BytesIO(httpx.get(url).content)
@@ -69,7 +70,7 @@ def clean_text(s: str) -> str:
         return s
     return CONTROL_CHAR_RE.sub('', s)
 
-def clean_dict(obj):
+def clean_dict(obj: Any) -> Any:
     """Recursively clean strings inside dicts/lists/tuples."""
     if isinstance(obj, dict):
         return {k: clean_dict(v) for k, v in obj.items()}

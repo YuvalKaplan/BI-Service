@@ -40,14 +40,14 @@ class EtfDownload:
     data: bytes | None
     date_from_page: date | None = None
 
-def fetch_by_id(id: int):
+def fetch_by_id(id: int) -> ProviderEtf | None:
     with db_pool_instance.get_connection() as conn:
         with conn.cursor(row_factory=class_row(ProviderEtf)) as cur:
             cur.execute('SELECT * FROM provider_etf WHERE id = %s;', (id,))
             item = cur.fetchone()
     return item
 
-def fetch_by_provider_id(provider_id: int):
+def fetch_by_provider_id(provider_id: int) -> list[ProviderEtf]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(ProviderEtf)) as cur:
@@ -64,7 +64,7 @@ def fetch_by_provider_id(provider_id: int):
         raise Exception(f"Error fetching the Provider ETFs for provider ID from the DB: {e}")
 
 
-def update_last_download(id: int):
+def update_last_download(id: int) -> None:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:

@@ -1,4 +1,6 @@
 import os
+from contextlib import AbstractContextManager
+from psycopg import Connection
 from psycopg_pool import ConnectionPool
 from dotenv import load_dotenv
 
@@ -15,7 +17,7 @@ class DatabasePoolSingleton:
             cls._instances[db_name] = instance
         return cls._instances[db_name]
 
-    def _init_pool(self, db_name):
+    def _init_pool(self, db_name: str) -> None:
         self.db_name = db_name
         self._pool = None
         # Shared credentials from environment
@@ -24,7 +26,7 @@ class DatabasePoolSingleton:
         self.user = os.getenv('SECRET_DATABASE_USER')
         self.password = os.getenv('SECRET_DATABASE_PASSWORD')
 
-    def get_pool(self):
+    def get_pool(self) -> ConnectionPool:
         if self._pool is None:
             conninfo = (
                 f"host={self.host} port={self.port} "
@@ -36,13 +38,13 @@ class DatabasePoolSingleton:
             self._pool = ConnectionPool(conninfo, min_size=1, max_size=10)
         return self._pool
 
-    def get_connection(self):
+    def get_connection(self) -> AbstractContextManager[Connection]:
         return self.get_pool().connection()
-    
-    def get_max_connections(self):
+
+    def get_max_connections(self) -> int:
         return self.get_pool().max_size
-    
-    def close_all_connections(self):
+
+    def close_all_connections(self) -> None:
         if self._pool:
             self._pool.close()
             self._pool = None

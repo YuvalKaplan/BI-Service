@@ -8,7 +8,7 @@ from modules.calc.model_fund import FundHoldingChange  # noqa: F401
 def normalize_ids(ids: list[int] | None) -> list[int] | None:
     return ids if ids else None
 
-def insert_fund_changes(items: List[FundHoldingChange]):
+def insert_fund_changes(items: List[FundHoldingChange]) -> None:
     if not items:
         return
     

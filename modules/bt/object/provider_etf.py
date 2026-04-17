@@ -43,7 +43,7 @@ def fetch_by_ticker(ticker: str) -> ProviderEtf:
             raise Exception(f"Provider ETF not found for ID {id}")
     return item
 
-def fetch_by_provider_id(provider_id: int):
+def fetch_by_provider_id(provider_id: int) -> list[ProviderEtf]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(ProviderEtf)) as cur:

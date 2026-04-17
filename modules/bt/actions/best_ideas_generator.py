@@ -84,7 +84,7 @@ def filter_stale_holdings(
     return valid, stale
 
 
-def record_problem(etf_id: int, error: str, message: str | None, problem_etfs: list[str]):
+def record_problem(etf_id: int, error: str, message: str | None, problem_etfs: list[str]) -> None:
     p = provider.fetch_by_etf_id(etf_id)
     etf = provider_etf.fetch_by_id(etf_id)
     item_info = f"[Provider: '{p.name}' ({p.id}), ETF: '{etf.name}' ({etf_id})]"

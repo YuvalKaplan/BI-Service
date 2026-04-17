@@ -46,7 +46,7 @@ def fetch_split_factors_on_date(symbols: list[str], event_date: date) -> dict[st
         print(f"Error fetching split factors on {event_date}: {e}")
         return {}
     
-def insert_split_bulk(items: List[TickerSplitHistory]):
+def insert_split_bulk(items: List[TickerSplitHistory]) -> None:
     if not items:
         return
     

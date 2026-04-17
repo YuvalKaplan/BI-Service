@@ -28,7 +28,7 @@ def get_cash_balance(account_id: int, eval_date: date) -> Decimal:
     except Error as e:
         raise Exception(f"Error getting cash balance: {e}")
 
-def record_cash_transaction(entry: AccountCashLedger):
+def record_cash_transaction(entry: AccountCashLedger) -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:

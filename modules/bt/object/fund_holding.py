@@ -5,7 +5,7 @@ from psycopg.rows import class_row
 from modules.core.db import db_pool_instance_bt
 from modules.calc.model_fund import FundHolding  # noqa: F401
 
-def fetch_funds_holdings(fund_id: int, eval_date: date):
+def fetch_funds_holdings(fund_id: int, eval_date: date) -> List[FundHolding]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(FundHolding)) as cur:
@@ -22,7 +22,7 @@ def fetch_funds_holdings(fund_id: int, eval_date: date):
         raise Exception(f"Error fetching the Fund Holdings from the DB: {e}")
 
 
-def insert_fund_holding(items: List[FundHolding]):
+def insert_fund_holding(items: List[FundHolding]) -> None:
     if not items:
         return
     

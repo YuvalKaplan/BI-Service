@@ -20,7 +20,7 @@ class Provider:
 def getMappingFromJson(data: dict) -> Mapping:
     return Mapping.model_validate(data)
 
-def fetch_by_id(id: int):
+def fetch_by_id(id: int) -> Provider | None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Provider)) as cur:
@@ -30,7 +30,7 @@ def fetch_by_id(id: int):
     except Error as e:
         raise Exception(f"Error fetching the Provider from the DB: {e}")
 
-def fetch_by_ids(ids: list[int]):
+def fetch_by_ids(ids: list[int]) -> list[Provider]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Provider)) as cur:
@@ -63,7 +63,7 @@ def fetch_by_etf_id(etf_id: int) -> Provider:
     except Error as e:
         raise Exception(f"Error fetching the Provider for associated provider ETF ID from the DB: {e}")
 
-def update_domain(item: Provider):
+def update_domain(item: Provider) -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:
@@ -75,7 +75,7 @@ def update_domain(item: Provider):
     except Error as e:
         raise Exception(f"Error updating the Provider item into the DB: {e}")
 
-def fetch_active_providers():
+def fetch_active_providers() -> list[Provider]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Provider)) as cur:

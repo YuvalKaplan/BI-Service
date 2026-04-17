@@ -13,7 +13,7 @@ class Fund:
     active: bool
 
 
-def fetch_all():
+def fetch_all() -> list[Fund]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Fund)) as cur:
@@ -24,7 +24,7 @@ def fetch_all():
     except Error as e:
         raise Exception(f"Error fetching the Fund list from the DB: {e}")
 
-def fetch_fund(fund_id: int):
+def fetch_fund(fund_id: int) -> Fund | None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Fund)) as cur:
@@ -37,7 +37,7 @@ def fetch_fund(fund_id: int):
     except Error as e:
         raise Exception(f"Error fetching the Fund from the DB: {e}")
 
-def reset_funds():
+def reset_funds() -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:

@@ -9,7 +9,7 @@ development = ENV_TYPE != 'production'
 TTL_TOKEN = 60 * 24 * 7
 DOMAIN = 'insightful.investments'
 
-def send_admin(subject: str, message: str):
+def send_admin(subject: str, message: str) -> None:
     try:
         mg_client = mailgun_client_instance.get_client();
         mgData = {

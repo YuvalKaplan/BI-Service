@@ -15,7 +15,7 @@ from modules.bt.object import ticker, ticker_value, ticker_dividend_history
 
 REMOVE_ETFS_AND_FUNDS = r'\b(ETF|fund)\b'
 
-def parse_date(d):
+def parse_date(d: str | date) -> date:
     if isinstance(d, str):
         return date.fromisoformat(d)
     elif isinstance(d, date):

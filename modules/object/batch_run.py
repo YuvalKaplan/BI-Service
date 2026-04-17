@@ -19,7 +19,7 @@ class BatchRun:
         self.activation = activation
         self.completed_at = completed_at
 
-def fetch_by_type(process: str, activation: str):
+def fetch_by_type(process: str, activation: str) -> list[BatchRun]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(BatchRun)) as cur:
@@ -45,7 +45,7 @@ def insert(item: BatchRun) -> int:
     except Error as e:
         raise Exception(f"Error inserting the Batch item into the DB: {e}")
     
-def update_completed_at(id: int):
+def update_completed_at(id: int) -> None:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:

@@ -23,7 +23,7 @@ def ticker_values_to_df(values: list[TickerValue]) -> pd.DataFrame:
     )
 
 
-def fetch_latest_market_caps_within_window(symbols: List[str], as_of_date: date, days: int) -> List['TickerValue']:
+def fetch_latest_market_caps_within_window(symbols: List[str], as_of_date: date, days: int) -> List[TickerValue]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(TickerValue)) as cur:
@@ -42,7 +42,7 @@ def fetch_latest_market_caps_within_window(symbols: List[str], as_of_date: date,
         raise Exception(f"Error fetching latest market caps within window: {e}")
 
 
-def upsert(item: TickerValue):
+def upsert(item: TickerValue) -> None:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
@@ -62,7 +62,7 @@ def upsert(item: TickerValue):
     except Error as e:
         raise Exception(f"Error inserting the Batch item into the DB: {e}")
 
-def upsert_bulk(items: List[TickerValue]):
+def upsert_bulk(items: List[TickerValue]) -> None:
     if not items:
         return
 

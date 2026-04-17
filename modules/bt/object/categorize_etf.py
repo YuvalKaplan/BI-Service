@@ -29,7 +29,7 @@ class CategorizeEtfDownload:
     data: bytes | None = None
 
 
-def fetch_all(usage: str):
+def fetch_all(usage: str) -> list[CategorizeEtf]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(CategorizeEtf)) as cur:
@@ -40,7 +40,7 @@ def fetch_all(usage: str):
         raise Exception(f"Error fetching the Categorize ETFs from the BT DB: {e}")
 
 
-def update_last_download(id: int):
+def update_last_download(id: int) -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:

@@ -43,7 +43,7 @@ def fetch_symbols() -> list[str]:
         raise Exception(f"Error loading categorize ticker symbols: {e}")
 
 
-def upsert_bulk(items: list[CategorizeTicker]):
+def upsert_bulk(items: list[CategorizeTicker]) -> None:
     if not items:
         return
     try:
@@ -65,7 +65,7 @@ def upsert_bulk(items: list[CategorizeTicker]):
         raise Exception(f"Error upserting categorize ticker rows: {e}")
 
 
-def bulk_update_factors(updates: list[dict]):
+def bulk_update_factors(updates: list[dict]) -> None:
     if not updates:
         return
     try:
@@ -80,7 +80,7 @@ def bulk_update_factors(updates: list[dict]):
         raise Exception(f"Error bulk updating categorize ticker factors: {e}")
 
 
-def update_esg_qualified(symbols: list[str]):
+def update_esg_qualified(symbols: list[str]) -> None:
     if not symbols:
         return
     try:

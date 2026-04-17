@@ -19,7 +19,7 @@ class ProviderEtfHoldingFactSet:
 
 
 
-def insert_holding_bulk(items: List[ProviderEtfHoldingFactSet]):
+def insert_holding_bulk(items: List[ProviderEtfHoldingFactSet]) -> None:
     if not items:
         return
     

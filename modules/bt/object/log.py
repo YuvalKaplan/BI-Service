@@ -12,14 +12,14 @@ class Log:
     code: str | None
     msg: str
 
-    def __init__(self, type, code, msg):
+    def __init__(self, type: str, code: str | int | None, msg: str):
         self.created_at = datetime.now(timezone.utc)
         self.process = 'Service'
         self.log_type = type
         self.code = code
         self.msg = msg
 
-def insert(item: Log):
+def insert(item: Log) -> int | None:
     try:
         print(item.msg)
         with db_pool_instance_bt.get_connection() as conn:

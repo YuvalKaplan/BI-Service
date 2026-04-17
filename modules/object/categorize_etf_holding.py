@@ -15,7 +15,7 @@ class CategorizeEtfHolding:
     created_at: Optional[datetime]
 
 
-def insert_holding(categorize_etf_id, holding_date: date, tickers: List[str]):
+def insert_holding(categorize_etf_id: int, holding_date: date, tickers: List[str]) -> None:
     if not tickers:
         return
     

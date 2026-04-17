@@ -5,14 +5,14 @@ from decimal import Decimal
 from dataclasses import dataclass
 from datetime import date, timedelta
 from modules.bt.object import fund, fund_holding
-from modules.calc.model_fund import getStrategyFromJson
+from modules.calc.model_fund import getStrategyFromJson, FundHolding
 from modules.bt.object import account, account_holding as ah, account_cash_ledger as acl, account_trade as at, account_performance as ap, account_benchmark_comparison as abc
 from modules.bt.object import benchmark_value as bv
 from modules.bt.object import interest_config, ticker_value, ticker_dividend_history
 
 DRIFT_THRESHOLD = 0.05   # 5%
 
-def process_daily_interest(account_id: int, eval_date: date):
+def process_daily_interest(account_id: int, eval_date: date) -> None:
     balance = acl.get_cash_balance(account_id, eval_date + timedelta(days=1))
     if balance > 0:
         rate_cfg = interest_config.get_latest_interest_rate(eval_date)
@@ -26,7 +26,7 @@ def process_daily_interest(account_id: int, eval_date: date):
                 description=f"Interest on {balance:,.2f}"
             ))
 
-def process_daily_dividends(account_id: int, eval_date: date):
+def process_daily_dividends(account_id: int, eval_date: date) -> None:
     divs = ticker_dividend_history.fetch_dividends_for_holdings(account_id, eval_date)
     for d in divs:
         total = (d['quantity'] * d['amount_per_share']).quantize(Decimal('0.01'))
@@ -49,7 +49,7 @@ class TradeCandidate:
 
 def identify_position_change_needs(
     account_id: int,
-    target_fund_holdings: list,
+    target_fund_holdings: List[FundHolding],
     account_holdings: List[ah.AccountHolding]
 ) -> List[TradeCandidate]:
     """
@@ -107,7 +107,7 @@ def calculate_commission(quantity: Decimal) -> Decimal:
     fee = quantity * FEE_PER_SHARE
     return max(fee, MIN_COMMISSION).quantize(Decimal('0.01'))
 
-def to_price(value) -> Decimal:
+def to_price(value: Decimal) -> Decimal:
     return Decimal(str(value)).quantize(Decimal('0.01'))
 
 def execute_trade(

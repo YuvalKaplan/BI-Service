@@ -13,7 +13,7 @@ class Account:
     strategy_fund_id: int
     id: Optional[int] = None
 
-def fetch_all():
+def fetch_all() -> list[Account]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Account)) as cur:
@@ -24,20 +24,20 @@ def fetch_all():
     except Error as e:
         raise Exception(f"Error fetching the Account list from the DB: {e}")
 
-def fetch_fund(account_id: int):
+def fetch_fund(account_id: int) -> Account | None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Account)) as cur:
                 cur.execute("""
-                    SELECT * FROM account 
-                    WHERE id = %s 
+                    SELECT * FROM account
+                    WHERE id = %s
                 """, (account_id,))
                 items = cur.fetchone()
         return items
     except Error as e:
         raise Exception(f"Error fetching the Account details from the DB: {e}")
 
-def reset_accounts():
+def reset_accounts() -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:

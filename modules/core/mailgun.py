@@ -1,9 +1,10 @@
 import os
+from typing import Any
 
 class MailgunClientSingleton:
     _mg_client = None
 
-    def get_client(self):
+    def get_client(self) -> Any:
         if self._mg_client  is None:
             # Initialize the client only once
             mailgunEndpoint = os.getenv('SECRET_MAILGUN_ENDPOINT')

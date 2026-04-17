@@ -13,7 +13,7 @@ MAX_BEST_IDEAS_PER_FUND = 10
 HOLDING_DELTA_LIMIT_DROP_OFF = 0.25
 
 
-def _find_best_ideas(holdings, market_cap_values, limit: int | None = None) -> pd.DataFrame:
+def _find_best_ideas(holdings: list, market_cap_values: list, limit: int | None = None) -> pd.DataFrame:
     df_holdings = pd.DataFrame(
         {"symbol": h.ticker, "market_value": h.market_value}
         for h in holdings
@@ -54,7 +54,7 @@ def _find_best_ideas(holdings, market_cap_values, limit: int | None = None) -> p
     return best_ideas.reset_index(drop=True)
 
 
-def record_problem(batch_run_id: int, provider: provider.Provider, etf: provider_etf.ProviderEtf, error: str, message: str | None, problem_etfs: list[str]):
+def record_problem(batch_run_id: int, provider: provider.Provider, etf: provider_etf.ProviderEtf, error: str, message: str | None, problem_etfs: list[str]) -> None:
     item_info = f"[Provider: '{provider.name}' ({provider.id}), ETF: '{etf.name}' ({etf.id})]"
     record = f"{item_info}\t{error}\t{message or ''}"
     log.record_status(record)

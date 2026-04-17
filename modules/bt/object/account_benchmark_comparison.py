@@ -29,7 +29,7 @@ def fetch_previous_comparison_values(account_id: int, symbol: str, prev_date: da
     except Error as e:
         raise Exception(f"Error fetching previous comparison values: {e}")
 
-def record_benchmark_comparison(entry: AccountBenchmarkComparison):
+def record_benchmark_comparison(entry: AccountBenchmarkComparison) -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor() as cur:

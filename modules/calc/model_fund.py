@@ -1,6 +1,7 @@
 import log
+import types
 from datetime import date
-from typing import List, Optional
+from typing import Any, List, Optional
 from dataclasses import dataclass
 from pydantic import BaseModel
 
@@ -38,7 +39,7 @@ class FundProtocol:
     name: str
     strategy: dict
 
-def to_fund_protocol(f) -> FundProtocol:
+def to_fund_protocol(f: Any) -> FundProtocol:
     """Convert any Fund dataclass (live or BT) to a FundProtocol."""
     return FundProtocol(id=f.id, name=f.name, strategy=f.strategy)
 
@@ -85,7 +86,7 @@ FETCH_RANKING_LEVEL = USE_RANKING_LOW + RANKING_GAP_DROP_FROM_ENTRY
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def results_to_string(results: FundChangesResult, ticker_module) -> str:
+def results_to_string(results: FundChangesResult, ticker_module: types.ModuleType) -> str:
     aggregator = ""
     all_symbols: set[str] = {ch.symbol for ch in results.changes}
     tickers = ticker_module.fetch_by_symbols(list(all_symbols))
@@ -120,7 +121,7 @@ def generate(
     today: date,
     fund: FundProtocol,
     previous_holdings: List[FundHolding],
-    best_ideas_module,
+    best_ideas_module: types.ModuleType,
 ) -> FundChangesResult:
     """
     Pure computation: determine today's holdings and changes for each fund.

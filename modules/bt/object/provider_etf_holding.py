@@ -67,7 +67,7 @@ def fetch_tickers_for_etfs(provider_etf_ids: List[int]) -> List[str]:
         raise Exception(f"Error retrieving ticker list for a list of provider ETFs data: {e}")
 
 
-def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, holding_date: date):
+def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, holding_date: date) -> List[ProviderEtfHolding]:
     try:
         with db_pool_instance_bt.get_connection() as conn:
             with conn.cursor(row_factory=class_row(ProviderEtfHolding)) as cur:
@@ -86,7 +86,7 @@ def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, holding_date: 
         raise Exception(f"Error fetching the Provider ETFs Holdings for provider ETF ID from the DB: {e}")
 
 
-def insert_holding_bulk(items: List[ProviderEtfHolding]):
+def insert_holding_bulk(items: List[ProviderEtfHolding]) -> None:
     if not items:
         return
     

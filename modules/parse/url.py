@@ -74,7 +74,7 @@ def get_date_on_page(page: Page, mapping: Mapping) -> date | None:
         return None
 
 
-def dispatch(page: Page, event: dict):
+def dispatch(page: Page, event: dict) -> None:
         action_timout = 5000
         name: str = event.get("name", "")
         selector: str = event.get("selector", "")
@@ -195,7 +195,7 @@ def open_page(page: Page, url: str, wait_pre_events: str | None, wait_post_event
         return False
 
 
-def scrape_provider(cp: Provider):
+def scrape_provider(cp: Provider) -> List[EtfDownload]:
     last_error = None
     for attempt in range(SCRAPE_MAX_RETRIES):
         try:

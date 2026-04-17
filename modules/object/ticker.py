@@ -45,7 +45,7 @@ class Ticker:
         self.invalid = invalid
 
 
-def fetch_by_symbol(symbol: str):
+def fetch_by_symbol(symbol: str) -> Ticker | None:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Ticker)) as cur:
@@ -55,7 +55,7 @@ def fetch_by_symbol(symbol: str):
     except Error as e:
         raise Exception(f"Error fetching the Ticker from the DB: {e}")
 
-def fetch_by_symbols(symbols: list[str]):
+def fetch_by_symbols(symbols: list[str]) -> list[Ticker]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Ticker)) as cur:
@@ -69,7 +69,7 @@ def fetch_by_symbols(symbols: list[str]):
     except Error as e:
         raise Exception(f"Error fetching the Ticker list page from the DB: {e}")
 
-def upsert(item: Ticker):
+def upsert(item: Ticker) -> None:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
@@ -93,7 +93,7 @@ def upsert(item: Ticker):
     except Error as e:
         raise Exception(f"Error upserting ticker into the DB: {e}")
 
-def update_esg_qualified(symbols: list[str]):
+def update_esg_qualified(symbols: list[str]) -> None:
     if not symbols:
         return
     try:
@@ -107,7 +107,7 @@ def update_esg_qualified(symbols: list[str]):
     except Error as e:
         raise Exception(f"Error updating esg_qualified in the DB: {e}")
 
-def update_invalid(symbol: str, reason: str):
+def update_invalid(symbol: str, reason: str) -> None:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
@@ -118,7 +118,7 @@ def update_invalid(symbol: str, reason: str):
         raise Exception(f"Error updating the Ticker invalid reason into the DB: {e}")
 
 
-def sanitize():
+def sanitize() -> None:
     """Mark any ticker table rows with non-standard symbols as invalid.
 
     Delegates entirely to the sanitize_tickers() SQL function.
@@ -131,7 +131,7 @@ def sanitize():
         raise Exception(f"Error sanitizing tickers: {e}")
 
 
-def update_style_from_categorization_etfs():
+def update_style_from_categorization_etfs() -> None:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
@@ -151,7 +151,7 @@ def update_style_from_categorization_etfs():
     except Error as e:
         raise Exception(f"Error updating ticker style from categorization ETFs: {e}")
 
-def update_style_from_provider_etfs():
+def update_style_from_provider_etfs() -> None:
     """Fill style_type for unclassified tickers using the style_type set on provider_etf holdings.
     Only 'value' and 'growth' are applied — 'blend' is intentionally excluded."""
     try:
