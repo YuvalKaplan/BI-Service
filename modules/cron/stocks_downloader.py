@@ -40,13 +40,14 @@ def run() -> tuple[int, int]:
                     missing_symbols.append(s)
                 else:
                     t = ticker.Ticker(
-                        symbol=s, 
-                        isin=sd['isin'], 
-                        cik=sd['cik'], 
-                        exchange=sd['exchange'], 
-                        name=sd['companyName'], 
-                        industry=sd['industry'], 
+                        symbol=s,
+                        isin=sd['isin'],
+                        cik=sd['cik'],
+                        exchange=sd['exchange'],
+                        name=sd['companyName'],
+                        industry=sd['industry'],
                         sector=sd['sector'],
+                        currency=sd.get('currency'),
                         source='provider_etf'
                     )
                     ticker.upsert(t)

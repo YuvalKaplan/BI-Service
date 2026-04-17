@@ -2,7 +2,7 @@ from datetime import date, timedelta
 import log
 from modules.bt.object import fund, best_idea, ticker, provider_etf_holding, categorize_ticker
 from modules.bt.object import account, performance
-from modules.bt.actions import stocks_download, best_ideas_generator, funds_update, account_update
+from modules.bt.actions import stocks_categorize as bt_categorize_tickers, stocks_download, best_ideas_generator, funds_update, account_update
 from modules.calc.model_fund import getStrategyFromJson
 from modules.calc import classification
 
@@ -40,10 +40,7 @@ def run(start_date: date, end_date: date):
         # Download all stock information (prices, market cap and dividends)
         stocks_download.run(symbols, start_date - timedelta(days=15), end_date + timedelta(days=15))
 
-        last_update = categorize_ticker.fetch_last_update()
-        last_update_date = last_update.date() if last_update else None
-        if last_update_date is None or (date.today() - last_update_date) > timedelta(days=90):
-            raise Exception("Table categorize_ticker data is stale or empty — sync it from the live DB before running the back test.")
+        bt_categorize_tickers.download_data()
 
         categorized_tickers = [classification.to_categorize_ticker_item(t) for t in categorize_ticker.fetch_all_for_style_classification()]
         classifier = classification.get_classifier(categorized_tickers)

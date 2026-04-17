@@ -1,10 +1,12 @@
 import log
 from modules.object import batch_run, batch_run_log
 from modules.object import provider, provider_etf
-from modules.calc.best_ideas import find_best_ideas, to_holding_item, to_ticker_value_item, find_latest_common_date, filter_stale_holdings
+from modules.calc.best_ideas import find_best_ideas, to_holding_item, to_ticker_value_item, find_latest_common_date, filter_stale_holdings, TickerValueItem
 from modules.object.provider_etf_holding import fetch_holding_dates_available_past_period, fetch_valid_holdings_by_provider_etf_id
 from modules.object.ticker_value import fetch_ticker_dates_available_past_period, fetch_latest_price_date_for_ticker, fetch_tickers_by_symbols_on_date
 from modules.object import best_idea
+from modules.object import ticker
+from modules.core.api_stocks import get_fx_rate
 
 DAYS_NO_PRICING = 7
 MIN_HOLDINGS_WITH_PRICES_PCT = 0.9
@@ -84,11 +86,44 @@ def run() -> tuple[int, int, list[str]]:
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Insufficient pricing coverage", message=msg, problem_etfs=problem_etfs)
                         continue
 
-                    # 4. Align holdings to only priced symbols before computing best ideas
+                    # 4. Convert all prices / market caps to USD using spot FX rates
+                    tickers_map = {t.symbol: t for t in ticker.fetch_by_symbols([v.symbol for v in value_items if v.symbol])}
+                    non_usd_currencies = {
+                        t.currency for t in tickers_map.values()
+                        if t.currency and t.currency != 'USD'
+                    }
+                    fx_rates: dict[str, float] = {}
+                    fx_error = False
+                    for ccy in non_usd_currencies:
+                        rate = get_fx_rate(ccy, 'USD')
+                        if isinstance(rate, str):
+                            record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"Cannot get FX rate for {ccy}: {rate}", message=None, problem_etfs=problem_etfs)
+                            fx_error = True
+                            break
+                        fx_rates[ccy] = rate
+                    if fx_error:
+                        continue
+
+                    def _to_usd(v: TickerValueItem) -> TickerValueItem:
+                        if not v.symbol:
+                            return v
+                        t = tickers_map.get(v.symbol)
+                        if t and t.currency and t.currency != 'USD':
+                            rate = fx_rates.get(t.currency, 1.0)
+                            return TickerValueItem(
+                                symbol=v.symbol,
+                                stock_price=v.stock_price * rate if v.stock_price is not None else None,
+                                market_cap=v.market_cap * rate if v.market_cap is not None else None,
+                            )
+                        return v
+
+                    value_items = [_to_usd(v) for v in value_items]
+
+                    # 5. Align holdings to priced symbols before computing best ideas
                     priced_symbols = {v.symbol for v in value_items}
                     final_holdings = [h for h in valid_holdings if h.ticker in priced_symbols]
 
-                    # 5. Generate and insert
+                    # 6. Generate and insert
                     best_ideas_df = find_best_ideas(final_holdings, value_items, MAX_BEST_IDEAS_PER_FUND)
                     rows = best_idea.df_to_rows(best_ideas_df, provider_etf_id=pe.id, value_date=latest_common_date)
                     best_idea.insert_bulk(rows)

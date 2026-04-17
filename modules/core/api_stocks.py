@@ -152,6 +152,29 @@ def get_stock_historic_market_cap(symbol: str, start: date, end: date) -> list[d
         log.record_error(message)
         return message
 
+def get_fx_rate(from_currency: str, to_currency: str = 'USD') -> float | str:
+    """
+    Return the spot exchange rate from from_currency to to_currency.
+    Uses the FMP quote-short endpoint with a symbol like 'EURUSD'.
+    Returns a float (the rate) or a string error message.
+    """
+    if from_currency == to_currency:
+        return 1.0
+    symbol = f"{from_currency}{to_currency}"
+    try:
+        throttle_api_calls()
+        url = f"{FMP_API_URL}/quote-short?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        array = get_jsonparsed_data(url)
+        if not isinstance(array, list) or len(array) == 0:
+            message = f"Invalid FX rate response for '{symbol}': empty result"
+            log.record_notice(message)
+            return message
+        return float(array[0]["price"])
+    except Exception as e:
+        message = f"Failed to get FX rate for {symbol}. Response from service provider: {e}"
+        log.record_error(message)
+        return message
+
 # ------------------------------------------------------------------
 # Fetch company list and factors forr use in classification universe
 # ------------------------------------------------------------------

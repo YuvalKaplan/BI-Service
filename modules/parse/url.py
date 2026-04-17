@@ -4,14 +4,16 @@ import re
 import tempfile
 import time
 from datetime import date
-from typing import List
+from typing import List, Protocol
 from dataclasses import dataclass
 from playwright.sync_api import sync_playwright, Download, Browser, BrowserContext, Page
 from playwright_stealth import Stealth
-from modules.core.util import clean_date 
-from modules.object.provider import Provider, Mapping, getMappingFromJson 
+from modules.core.util import clean_date
+from modules.object.provider import Provider, Mapping, getMappingFromJson
 from modules.object.provider_etf import EtfDownload, fetch_by_provider_id
-from modules.object.categorize_etf import CategorizeEtf, CategorizeEtfDownload
+from modules.object.categorize_etf import CategorizeEtfDownload
+
+
 
 ENV_TYPE = os.environ.get("ENV_TYPE")
 
@@ -246,7 +248,19 @@ def scrape_provider(cp: Provider):
 
     raise Exception(f"Failed to extract URLs and subsequent files from webpage content and related links after {SCRAPE_MAX_RETRIES} attempts: {last_error}")
 
-def scrape_categorizer(etf: CategorizeEtf):
+
+class CategorizeEtfProtocol(Protocol):
+    id: int | None
+    url: str | None
+    name: str | None
+    file_format: str | None
+    mapping: dict | None
+    trigger_download: dict | None
+    wait_pre_events: str | None
+    wait_post_events: str | None
+    events: dict | None
+    
+def scrape_categorizer(etf: CategorizeEtfProtocol) -> CategorizeEtfDownload:
     last_error = None
     for attempt in range(SCRAPE_MAX_RETRIES):
         try:

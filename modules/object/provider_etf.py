@@ -17,6 +17,7 @@ class ProviderEtf:
     description: str | None
     isin: str | None
     ticker: str | None
+    region: str | None
     cap_type: str | None
     style_type: str | None
     benchmark: str | None

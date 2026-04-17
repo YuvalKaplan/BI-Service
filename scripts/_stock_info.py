@@ -2,7 +2,7 @@ import atexit
 import time
 import atexit
 from modules.object.exit import cleanup
-from modules.cron.stock_downloader import run
+from modules.cron.stocks_downloader import run
 
 atexit.register(cleanup)
 

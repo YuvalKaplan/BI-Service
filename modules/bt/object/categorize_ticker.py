@@ -33,6 +33,68 @@ def _row_to_categorize_ticker(r: dict) -> CategorizeTicker:
         last_update=r.get("last_update")
     )
 
+def fetch_symbols() -> list[str]:
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT DISTINCT symbol FROM categorize_ticker ORDER BY symbol")
+                return [row[0] for row in cur.fetchall()]
+    except Error as e:
+        raise Exception(f"Error loading categorize ticker symbols: {e}")
+
+
+def upsert_bulk(items: list[CategorizeTicker]):
+    if not items:
+        return
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany("""
+                    INSERT INTO categorize_ticker (symbol, style_type, cap_type, sector, market_cap, factors)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (symbol)
+                    DO UPDATE SET
+                        style_type = EXCLUDED.style_type,
+                        cap_type   = EXCLUDED.cap_type,
+                        sector     = EXCLUDED.sector,
+                        market_cap = EXCLUDED.market_cap,
+                        factors    = EXCLUDED.factors,
+                        last_update = now();
+                """, [(t.symbol, t.style_type, t.cap_type, t.sector, t.market_cap, json.dumps(t.factors)) for t in items])
+    except Error as e:
+        raise Exception(f"Error upserting categorize ticker rows: {e}")
+
+
+def bulk_update_factors(updates: list[dict]):
+    if not updates:
+        return
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany("""
+                    UPDATE categorize_ticker
+                    SET sector = %s, market_cap = %s, factors = %s, last_update = now()
+                    WHERE symbol = %s
+                """, [(u["sector"], u["market_cap"], json.dumps(u["factors"]), u["symbol"]) for u in updates])
+    except Error as e:
+        raise Exception(f"Error bulk updating categorize ticker factors: {e}")
+
+
+def update_esg_qualified(symbols: list[str]):
+    if not symbols:
+        return
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE categorize_ticker
+                    SET esg_qualified = TRUE
+                    WHERE symbol = ANY(%s::text[]);
+                """, (symbols,))
+    except Error as e:
+        raise Exception(f"Error updating esg_qualified in categorize_ticker: {e}")
+
+
 def fetch_all_for_style_classification() -> List[CategorizeTicker]:
     try:
         with db_pool_instance_bt.get_connection() as conn:

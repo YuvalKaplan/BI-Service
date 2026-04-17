@@ -625,6 +625,7 @@ CREATE TABLE public.provider_etf (
     name text,
     isin text,
     ticker text,
+    region text,
     cap_type text,
     style_type text,
     benchmark text,
@@ -725,6 +726,7 @@ CREATE TABLE public.ticker (
     name text,
     industry text,
     sector text,
+    currency character varying(8),
     invalid text
 );
 
