@@ -23,7 +23,10 @@ This can then be activated with:
 
 ### Modules
 #### Currently using modules:
-`dotenv psycopg psycopg-pool psycopg_binary tld bcrypt playwright playwright-stealth mailgun pydantic pandas scikit-learn openpyxl xlrd`
+`dotenv psycopg psycopg-pool psycopg_binary tld bcrypt playwright playwright-stealth mailgun pydantic pandas openpyxl xlrd`
+
+##### Only needed by classification (used in back testing only):
+`scikit-learn`
 
 ##### Factset required modules:
 Used only once for back testing data download.

@@ -4,7 +4,7 @@ from modules.bt.object import fund, best_idea, ticker, provider_etf_holding, cat
 from modules.bt.object import account, performance
 from modules.bt.actions import stocks_categorize as bt_categorize_tickers, stocks_download, best_ideas_generator, funds_update, account_update
 from modules.calc.model_fund import getStrategyFromJson
-from modules.calc import classification
+from modules.bt.calc import classification
 
 # Strategy frequency: 7 for weekly, 14 for bi-weekly
 STRATEGY_RUN_INTERVAL_DAYS = 7

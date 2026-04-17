@@ -4,7 +4,7 @@ from psycopg.rows import class_row
 from dataclasses import dataclass
 import log
 from modules.core.db import db_pool_instance_bt
-from modules.calc.classification import StyleClassifier
+from modules.bt.calc.classification import StyleClassifier
 
 @dataclass
 class Ticker:

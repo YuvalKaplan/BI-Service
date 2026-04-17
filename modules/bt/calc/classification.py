@@ -46,7 +46,6 @@ class CategorizeTickerItem:
     factors: Dict[str, Any]
 
 def to_categorize_ticker_item(t) -> CategorizeTickerItem:
-    """Convert any categorize_ticker dataclass (live or BT) to the shared CategorizeTickerItem used by the classifier."""
     return CategorizeTickerItem(
         symbol=t.symbol,
         style_type=t.style_type,

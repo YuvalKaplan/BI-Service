@@ -4,7 +4,7 @@ from modules.bt.object import categorize_etf, categorize_etf_holding, categorize
 from modules.bt.object.categorize_ticker import CategorizeTicker
 from modules.parse.url import scrape_categorizer
 from modules.parse.convert import load, get_tickers
-from modules.calc import classification
+from modules.bt.calc import classification
 
 
 def download_data():
