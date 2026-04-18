@@ -40,6 +40,15 @@ class EtfDownload:
     data: bytes | None
     date_from_page: date | None = None
 
+def fetch_regions_by_ids(ids: list[int]) -> dict[int, str | None]:
+    """Returns {etf_id: region} for the given IDs."""
+    if not ids:
+        return {}
+    with db_pool_instance.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT id, region FROM provider_etf WHERE id = ANY(%s);', (ids,))
+            return {row[0]: row[1] for row in cur.fetchall()}
+
 def fetch_by_id(id: int) -> ProviderEtf | None:
     with db_pool_instance.get_connection() as conn:
         with conn.cursor(row_factory=class_row(ProviderEtf)) as cur:

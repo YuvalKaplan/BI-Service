@@ -2,7 +2,7 @@ import log
 from datetime import date, timedelta
 from typing import List
 from modules.object import batch_run
-from modules.object import best_idea, fund, fund_holding, fund_holding_change, ticker, ticker_value
+from modules.object import best_idea, fund, fund_holding, fund_holding_change, provider_etf, ticker, ticker_value
 from modules.calc.model_fund import (
     FundChangesResult, results_to_string, to_fund_protocol, getStrategyFromJson,
     apply_equal_weights, apply_market_cap_weights,
@@ -26,11 +26,17 @@ def run() -> List[FundChangesResult]:
         for f in funds:
             strategy = getStrategyFromJson(f.strategy)
 
+            provider_etf_regions = None
+            region_split = strategy.region.split if strategy.region is not None else None
+            if region_split is not None and region_split.US is not None and region_split.International is not None and strategy.provider_etfs:
+                provider_etf_regions = provider_etf.fetch_regions_by_ids(strategy.provider_etfs)
+
             results = model_fund.generate(
                 today=today,
                 fund=f,
                 previous_holdings=fund_holding.fetch_funds_holdings(f.id, yesterday),
                 best_ideas_module=best_idea,
+                provider_etf_regions=provider_etf_regions,
             )
 
             if results.holdings:

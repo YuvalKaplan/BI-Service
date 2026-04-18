@@ -16,11 +16,20 @@ class Style(BaseModel):
     value: Optional[int] = None
     growth: Optional[int] = None
 
+class RegionSplit(BaseModel):
+    US: Optional[int] = None
+    International: Optional[int] = None
+
+class Region(BaseModel):
+    name: str
+    split: Optional[RegionSplit] = None
+
 class Strategy(BaseModel):
     allocation: str
     holdings: int
     cap: Cap
     style: Style
+    region: Optional[Region] = None
     thematic: Optional[str] = None
     benchmarks: Optional[list[str]] = None
     provider_etfs: Optional[list[int]] = None
@@ -117,11 +126,69 @@ def results_to_string(results: FundChangesResult, ticker_module: types.ModuleTyp
 
 # ── Core computation ─────────────────────────────────────────────────────────
 
+def _fetch_and_select(
+    n_holdings: int,
+    strategy: Strategy,
+    etf_ids: list[int],
+    today: date,
+    best_ideas_module: types.ModuleType,
+) -> tuple[list, list]:
+    """
+    Returns (ideal, fetched).
+    `ideal`   — top-ranked ideas capped at n_holdings, respecting style blend split.
+    `fetched` — all retrieved ideas (used by caller for ranking-drop detection).
+    """
+    exchanges = strategy.exchanges or []
+
+    if (
+        strategy.style.name == "blend"
+        and strategy.style.value is not None
+        and strategy.style.growth is not None
+    ):
+        fetched_growth = best_ideas_module.fetch_best_ideas_by_ranking(
+            ranking_level=FETCH_RANKING_LEVEL, style_type="growth",
+            cap_type=strategy.cap.name, as_of_date=today,
+            provider_etf_ids=etf_ids, exchanges=exchanges, esg_only=strategy.esg_only,
+        )
+        fetched_value = best_ideas_module.fetch_best_ideas_by_ranking(
+            ranking_level=FETCH_RANKING_LEVEL, style_type="value",
+            cap_type=strategy.cap.name, as_of_date=today,
+            provider_etf_ids=etf_ids, exchanges=exchanges, esg_only=strategy.esg_only,
+        )
+
+        if USE_RANKING_HIGH != 1:
+            fetched_growth = [i for i in fetched_growth if USE_RANKING_HIGH <= i.ranking]
+            fetched_value  = [i for i in fetched_value  if USE_RANKING_HIGH <= i.ranking]
+
+        fetched = fetched_growth + fetched_value
+        growth_in_range = [i for i in fetched_growth if i.ranking <= USE_RANKING_LOW]
+        value_in_range  = [i for i in fetched_value  if i.ranking <= USE_RANKING_LOW]
+
+        growth_count = min(len(growth_in_range), round(n_holdings * strategy.style.growth / 100))
+        value_count  = min(len(value_in_range),  n_holdings - growth_count)
+        ideal = growth_in_range[:growth_count] + value_in_range[:value_count]
+    else:
+        fetched = best_ideas_module.fetch_best_ideas_by_ranking(
+            ranking_level=FETCH_RANKING_LEVEL, style_type=strategy.style.name,
+            cap_type=strategy.cap.name, as_of_date=today,
+            provider_etf_ids=etf_ids, exchanges=exchanges, esg_only=strategy.esg_only,
+        )
+
+        if USE_RANKING_HIGH != 1:
+            fetched = [i for i in fetched if USE_RANKING_HIGH <= i.ranking]
+
+        in_range = [i for i in fetched if i.ranking <= USE_RANKING_LOW]
+        ideal = in_range[:n_holdings]
+
+    return ideal, fetched
+
+
 def generate(
     today: date,
     fund: FundProtocol,
     previous_holdings: List[FundHolding],
     best_ideas_module: types.ModuleType,
+    provider_etf_regions: dict[int, str] | None = None,
 ) -> FundChangesResult:
     """
     Pure computation: determine today's holdings and changes for each fund.
@@ -135,65 +202,33 @@ def generate(
     previous_holdings : prior holdings for this fund
     best_ideas_module : module exposing fetch_best_ideas_by_ranking(...)
     """
-    results: FundChangesResult
-
-    
     strategy = getStrategyFromJson(fund.strategy)
     provider_etfs = strategy.provider_etfs or []
-    exchanges = strategy.exchanges or []
+
+    region = strategy.region
+    region_split = region.split if region is not None else None
 
     if (
-        strategy.style.name == "blend"
-        and strategy.style.value is not None
-        and strategy.style.growth is not None
+        region_split is not None
+        and region_split.US is not None
+        and region_split.International is not None
+        and provider_etf_regions is not None
     ):
-        fetched_growth = best_ideas_module.fetch_best_ideas_by_ranking(
-            ranking_level=FETCH_RANKING_LEVEL,
-            style_type="growth",
-            cap_type=strategy.cap.name,
-            as_of_date=today,
-            provider_etf_ids=provider_etfs,
-            exchanges=exchanges,
-            esg_only=strategy.esg_only,
-        )
-        fetched_value = best_ideas_module.fetch_best_ideas_by_ranking(
-            ranking_level=FETCH_RANKING_LEVEL,
-            style_type="value",
-            cap_type=strategy.cap.name,
-            as_of_date=today,
-            provider_etf_ids=provider_etfs,
-            exchanges=exchanges,
-            esg_only=strategy.esg_only,
-        )
+        us_etf_ids   = [i for i in provider_etfs if provider_etf_regions.get(i) == "US"]
+        intl_etf_ids = [i for i in provider_etfs if provider_etf_regions.get(i) == "International"]
 
-        if USE_RANKING_HIGH != 1:
-            fetched_growth = [i for i in fetched_growth if USE_RANKING_HIGH <= i.ranking]
-            fetched_value = [i for i in fetched_value if USE_RANKING_HIGH <= i.ranking]
+        us_ideal,   us_fetched   = _fetch_and_select(strategy.holdings, strategy, us_etf_ids,   today, best_ideas_module)
+        intl_ideal, intl_fetched = _fetch_and_select(strategy.holdings, strategy, intl_etf_ids, today, best_ideas_module)
 
-        fetched = fetched_growth + fetched_value
+        us_n_target   = round(strategy.holdings * region_split.US / 100)
+        intl_n_target = strategy.holdings - us_n_target
+        us_n   = min(len(us_ideal),   us_n_target)
+        intl_n = min(len(intl_ideal), intl_n_target)
 
-        growth_in_range = [i for i in fetched_growth if i.ranking <= USE_RANKING_LOW]
-        value_in_range = [i for i in fetched_value if i.ranking <= USE_RANKING_LOW]
-
-        growth_count = min(len(growth_in_range), round(strategy.holdings * strategy.style.growth / 100))
-        value_count = min(len(value_in_range), strategy.holdings - growth_count)
-        ideal_holdings = growth_in_range[:growth_count] + value_in_range[:value_count]
+        ideal_holdings = us_ideal[:us_n] + intl_ideal[:intl_n]
+        fetched        = us_fetched + intl_fetched
     else:
-        fetched = best_ideas_module.fetch_best_ideas_by_ranking(
-            ranking_level=FETCH_RANKING_LEVEL,
-            style_type=strategy.style.name,
-            cap_type=strategy.cap.name,
-            as_of_date=today,
-            provider_etf_ids=provider_etfs,
-            exchanges=exchanges,
-            esg_only=strategy.esg_only,
-        )
-
-        if USE_RANKING_HIGH != 1:
-            fetched = [i for i in fetched if USE_RANKING_HIGH <= i.ranking]
-
-        in_range = [i for i in fetched if i.ranking <= USE_RANKING_LOW]
-        ideal_holdings = in_range[:strategy.holdings]
+        ideal_holdings, fetched = _fetch_and_select(strategy.holdings, strategy, provider_etfs, today, best_ideas_module)
 
     holdings_changed: List[FundHoldingChange] = []
     todays_holdings: List[FundHolding] = []
