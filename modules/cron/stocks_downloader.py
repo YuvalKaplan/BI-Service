@@ -5,7 +5,8 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from modules.object import batch_run
-from modules.core.api_stocks import get_stock_profile
+from modules.core.api_stocks import get_stock_profile, fetch_esg_data
+from modules.calc import esg
 from modules.object.provider_etf_holding import fetch_valid_tickers_in_holdings
 from modules.object import ticker, ticker_value
 
@@ -62,12 +63,16 @@ def run() -> tuple[int, int]:
                         continue
                         
                     tv = ticker_value.TickerValue(
-                        symbol=s, 
-                        value_date=today, 
-                        stock_price=float(sd['price']), 
+                        symbol=s,
+                        value_date=today,
+                        stock_price=float(sd['price']),
                         market_cap=float(sd['marketCap'])
                     )
                     ticker_value.upsert(tv)
+
+                    disclosure, rating = fetch_esg_data(s)
+                    esg_qualified, esg_factors = esg.qualify(disclosure, rating)
+                    ticker.update_esg_data(s, esg_qualified, esg_factors)
 
             log.record_status(f"Batch {group_count} of {num_groups} completed.")
             group_count += 1

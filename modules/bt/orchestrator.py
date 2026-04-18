@@ -46,10 +46,6 @@ def run(start_date: date, end_date: date):
         classifier = classification.get_classifier(categorized_tickers)
         ticker.mark_style(classifier)
 
-        esg_tickers = categorize_ticker.fetch_all_for_esg()
-        if esg_tickers:
-            ticker.update_esg_qualified([t.symbol for t in esg_tickers])
-
         # ticker.mark_split_invalid(symbols, start_date - timedelta(days=5), end_date + timedelta(days=5))
 
     # Identify the lateset best ideas per ETF.

@@ -1,3 +1,4 @@
+import json
 import log
 from datetime import datetime
 from psycopg.errors import Error
@@ -20,6 +21,7 @@ class Ticker:
     industry: str | None
     sector: str | None
     currency: str | None
+    esg_factors: dict | None
     esg_qualified: bool | None
     invalid: str | None
 
@@ -27,7 +29,8 @@ class Ticker:
                  source: str | None = None, style_type: str | None = None, cap_type: str | None = None, type_from: str | None = None,
                  isin: str | None = None, cik: str | None = None, exchange: str | None = None,
                  name: str | None = None, industry: str | None = None, sector: str | None = None,
-                 currency: str | None = None, esg_qualified: bool | None = None, invalid: str | None = None):
+                 currency: str | None = None, esg_factors: dict | None = None,
+                 esg_qualified: bool | None = None, invalid: str | None = None):
         self.symbol = symbol
         self.created_at = created_at
         self.source = source
@@ -41,6 +44,7 @@ class Ticker:
         self.industry = industry
         self.sector = sector
         self.currency = currency
+        self.esg_factors = esg_factors
         self.esg_qualified = esg_qualified
         self.invalid = invalid
 
@@ -106,6 +110,19 @@ def update_esg_qualified(symbols: list[str]) -> None:
                 """, (symbols,))
     except Error as e:
         raise Exception(f"Error updating esg_qualified in the DB: {e}")
+
+def update_esg_data(symbol: str, esg_qualified: bool, esg_factors: dict) -> None:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE ticker
+                    SET esg_qualified = %s,
+                        esg_factors   = %s
+                    WHERE symbol = %s;
+                """, (esg_qualified, json.dumps(esg_factors), symbol))
+    except Error as e:
+        raise Exception(f"Error updating esg data for {symbol}: {e}")
 
 def update_invalid(symbol: str, reason: str) -> None:
     try:

@@ -1016,6 +1016,7 @@ CREATE TABLE public.ticker (
     name text,
     industry text,
     sector text,
+    esg_factors jsonb,
     esg_qualified boolean,
     invalid text
 );

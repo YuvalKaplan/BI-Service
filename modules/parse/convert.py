@@ -234,7 +234,25 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
     df["market_value"] = clean_numeric_column(df, "market_value")
     df["weight"] = clean_numeric_column(df, "weight")
     df["shares"] = clean_numeric_column(df, "shares")
-    
+    if "price" in df.columns:
+        df["price"] = clean_numeric_column(df, "price")
+
+    # Fall back to shares × price when market_value is absent
+    if "price" in df.columns:
+        missing_mv = df["market_value"].isna() | (df["market_value"] <= 0)
+        valid_fallback = (
+            df["shares"].notna() & (df["shares"] > 0) &
+            df["price"].notna() & (df["price"] > 0)
+        )
+        df.loc[missing_mv & valid_fallback, "market_value"] = (
+            df.loc[missing_mv & valid_fallback, "shares"] *
+            df.loc[missing_mv & valid_fallback, "price"]
+        )
+
+    # Scale market_value if the source reports in thousands, millions, etc.
+    if mapping.market_value.shift:
+        df["market_value"] = df["market_value"] * (10 ** mapping.market_value.shift)
+
     # Normalize ticker
     df['ticker'] = (
         df['ticker']
@@ -260,6 +278,8 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
     if total_weight > 1:
         df["weight"] = df["weight"] / 100
         df["weight"] = df["weight"].round(DECIMAL_PRECISION)
+
+    df = df.drop(columns=["price"], errors="ignore")
 
     # Sum up holdings that have the same ticker; take latest holding_date if rows differ
     df = df.groupby('ticker', as_index=False).agg({

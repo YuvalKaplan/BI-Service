@@ -275,3 +275,34 @@ def fetch_company_factors(symbol: str) -> tuple[Dict, Dict]:
         log.record_error(message)
         raise e
 
+# ------------------------------------------------------------------
+# Fetch ESG disclosure and risk rating for a single symbol
+# ------------------------------------------------------------------
+def fetch_esg_data(symbol: str) -> tuple[Dict, Dict]:
+    apikey = os.getenv('SECRET_MARKET_DATA_API_KEY')
+
+    def _fetch(endpoint: str):
+        throttle_api_calls()
+        return get_jsonparsed_data(endpoint)
+
+    try:
+        endpoints = {
+            "disclosure": f"{FMP_API_URL}/esg-disclosure?symbol={symbol}&apikey={apikey}",
+            "rating":     f"{FMP_API_URL}/esg-rating?symbol={symbol}&apikey={apikey}",
+        }
+        results = {}
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {name: executor.submit(_fetch, url) for name, url in endpoints.items()}
+            for name, future in futures.items():
+                results[name] = future.result()
+
+        d = results["disclosure"]
+        r = results["rating"]
+        disclosure = d[0] if isinstance(d, list) and d else {}
+        rating     = r[0] if isinstance(r, list) and r else {}
+        return disclosure, rating
+
+    except Exception as e:
+        log.record_error(f"Failed to get ESG data for {symbol}: {e}")
+        return {}, {}
+

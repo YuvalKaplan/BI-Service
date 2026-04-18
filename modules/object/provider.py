@@ -38,6 +38,9 @@ class DateFormat(BaseModel):
     on_page: Optional[DateOnPage] = None
     single: Optional[DatePosition] = None
     
+class MarketValueConfig(BaseModel):
+    shift: int = 0
+
 class Mapping(BaseModel):
     sheet: Optional[str] = None
     product_column: Optional[str] = None
@@ -50,6 +53,7 @@ class Mapping(BaseModel):
     columns: Dict[str, Optional[str]]
     date: DateFormat
     remove_tickers: list[str] = []
+    market_value: MarketValueConfig = MarketValueConfig()
 
 def getMappingFromJson(data: dict) -> Mapping:
     return Mapping.model_validate(data)

@@ -717,6 +717,7 @@ CREATE TABLE public.ticker (
     industry text,
     sector text,
     currency character varying(8),
+    esg_factors jsonb,
     esg_qualified boolean,
     invalid text
 );

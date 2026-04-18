@@ -6,7 +6,8 @@ from decimal import Decimal
 from typing import List
 from datetime import date, timedelta
 from concurrent.futures import ThreadPoolExecutor
-from modules.core.api_stocks import get_stock_profile, get_stock_historic_prices, get_stock_historic_dividend, get_stock_historic_splits, get_stock_historic_market_cap
+from modules.core.api_stocks import get_stock_profile, get_stock_historic_prices, get_stock_historic_dividend, get_stock_historic_splits, get_stock_historic_market_cap, fetch_esg_data
+from modules.calc import esg
 
 from modules.bt.object import account, ticker_split_history
 from modules.bt.object import fund
@@ -55,6 +56,10 @@ def process_symbol(s: str, start_date: date, end_date: date) -> tuple[bool, str,
         if re.search(REMOVE_ETFS_AND_FUNDS, t.name, flags=re.IGNORECASE):
             ticker.update_invalid(s, 'Fund or ETF')
             return False, s, 'Fund or ETF'
+
+        disclosure, rating = fetch_esg_data(s)
+        esg_qualified, esg_factors = esg.qualify(disclosure, rating)
+        ticker.update_esg_data(s, esg_qualified, esg_factors)
 
         # Phase 2: fetch historical data in parallel now that the ticker is valid
         
