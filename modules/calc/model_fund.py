@@ -89,8 +89,6 @@ class FundChangesResult:
 
 USE_RANKING_HIGH = 1
 USE_RANKING_LOW = 1
-RANKING_GAP_DROP_FROM_ENTRY = 2
-FETCH_RANKING_LEVEL = USE_RANKING_LOW + RANKING_GAP_DROP_FROM_ENTRY
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -126,12 +124,13 @@ def results_to_string(results: FundChangesResult, ticker_module: types.ModuleTyp
 
 # ── Core computation ─────────────────────────────────────────────────────────
 
-def _fetch_and_select(
+def _fetch_and_select_by_style(
     n_holdings: int,
     strategy: Strategy,
     etf_ids: list[int],
     today: date,
     best_ideas_module: types.ModuleType,
+    fetch_ranking_level: int,
 ) -> tuple[list, list]:
     """
     Returns (ideal, fetched).
@@ -146,12 +145,12 @@ def _fetch_and_select(
         and strategy.style.growth is not None
     ):
         fetched_growth = best_ideas_module.fetch_best_ideas_by_ranking(
-            ranking_level=FETCH_RANKING_LEVEL, style_type="growth",
+            ranking_level=fetch_ranking_level, style_type="growth",
             cap_type=strategy.cap.name, as_of_date=today,
             provider_etf_ids=etf_ids, exchanges=exchanges, esg_only=strategy.esg_only,
         )
         fetched_value = best_ideas_module.fetch_best_ideas_by_ranking(
-            ranking_level=FETCH_RANKING_LEVEL, style_type="value",
+            ranking_level=fetch_ranking_level, style_type="value",
             cap_type=strategy.cap.name, as_of_date=today,
             provider_etf_ids=etf_ids, exchanges=exchanges, esg_only=strategy.esg_only,
         )
@@ -169,7 +168,7 @@ def _fetch_and_select(
         ideal = growth_in_range[:growth_count] + value_in_range[:value_count]
     else:
         fetched = best_ideas_module.fetch_best_ideas_by_ranking(
-            ranking_level=FETCH_RANKING_LEVEL, style_type=strategy.style.name,
+            ranking_level=fetch_ranking_level, style_type=strategy.style.name,
             cap_type=strategy.cap.name, as_of_date=today,
             provider_etf_ids=etf_ids, exchanges=exchanges, esg_only=strategy.esg_only,
         )
@@ -181,6 +180,46 @@ def _fetch_and_select(
         ideal = in_range[:n_holdings]
 
     return ideal, fetched
+
+
+def _fetch_and_select_by_region(
+    strategy: Strategy,
+    provider_etfs: list[int],
+    provider_etf_regions: dict[int, str] | None,
+    today: date,
+    best_ideas_module: types.ModuleType,
+    fetch_ranking_level: int,
+) -> tuple[list, list]:
+    """
+    Returns (ideal, fetched).
+    If the strategy has a region split and `provider_etf_regions` is provided, partitions
+    `provider_etfs` into US and International groups, fetches each independently, then
+    combines them according to the split percentages. Otherwise delegates directly to
+    `_fetch_and_select_by_style` using the full ETF list.
+    """
+    region = strategy.region
+    region_split = region.split if region is not None else None
+
+    if (
+        region_split is not None
+        and region_split.US is not None
+        and region_split.International is not None
+        and provider_etf_regions is not None
+    ):
+        us_etf_ids   = [i for i in provider_etfs if provider_etf_regions.get(i) == "US"]
+        intl_etf_ids = [i for i in provider_etfs if provider_etf_regions.get(i) == "International"]
+
+        us_ideal,   us_fetched   = _fetch_and_select_by_style(strategy.holdings, strategy, us_etf_ids,   today, best_ideas_module, fetch_ranking_level)
+        intl_ideal, intl_fetched = _fetch_and_select_by_style(strategy.holdings, strategy, intl_etf_ids, today, best_ideas_module, fetch_ranking_level)
+
+        us_n_target   = round(strategy.holdings * region_split.US / 100)
+        intl_n_target = strategy.holdings - us_n_target
+        us_n   = min(len(us_ideal),   us_n_target)
+        intl_n = min(len(intl_ideal), intl_n_target)
+
+        return us_ideal[:us_n] + intl_ideal[:intl_n], us_fetched + intl_fetched
+
+    return _fetch_and_select_by_style(strategy.holdings, strategy, provider_etfs, today, best_ideas_module, fetch_ranking_level)
 
 
 def generate(
@@ -204,31 +243,10 @@ def generate(
     """
     strategy = getStrategyFromJson(fund.strategy)
     provider_etfs = strategy.provider_etfs or []
+    ranking_gap_drop = 5 if strategy.allocation == "market_cap" else 2
+    fetch_ranking_level = USE_RANKING_LOW + ranking_gap_drop
 
-    region = strategy.region
-    region_split = region.split if region is not None else None
-
-    if (
-        region_split is not None
-        and region_split.US is not None
-        and region_split.International is not None
-        and provider_etf_regions is not None
-    ):
-        us_etf_ids   = [i for i in provider_etfs if provider_etf_regions.get(i) == "US"]
-        intl_etf_ids = [i for i in provider_etfs if provider_etf_regions.get(i) == "International"]
-
-        us_ideal,   us_fetched   = _fetch_and_select(strategy.holdings, strategy, us_etf_ids,   today, best_ideas_module)
-        intl_ideal, intl_fetched = _fetch_and_select(strategy.holdings, strategy, intl_etf_ids, today, best_ideas_module)
-
-        us_n_target   = round(strategy.holdings * region_split.US / 100)
-        intl_n_target = strategy.holdings - us_n_target
-        us_n   = min(len(us_ideal),   us_n_target)
-        intl_n = min(len(intl_ideal), intl_n_target)
-
-        ideal_holdings = us_ideal[:us_n] + intl_ideal[:intl_n]
-        fetched        = us_fetched + intl_fetched
-    else:
-        ideal_holdings, fetched = _fetch_and_select(strategy.holdings, strategy, provider_etfs, today, best_ideas_module)
+    ideal_holdings, fetched = _fetch_and_select_by_region(strategy, provider_etfs, provider_etf_regions, today, best_ideas_module, fetch_ranking_level)
 
     holdings_changed: List[FundHoldingChange] = []
     todays_holdings: List[FundHolding] = []
@@ -252,7 +270,7 @@ def generate(
                         direction="sell", reason="Not in best ideas top levels",
                     ))
                     continue
-                if found_in_fetched.ranking - ph.ranking >= RANKING_GAP_DROP_FROM_ENTRY:
+                if found_in_fetched.ranking - ph.ranking >= ranking_gap_drop:
                     holdings_changed.append(FundHoldingChange(
                         fund_id=fund.id, symbol=ph.symbol, change_date=today,
                         direction="sell", reason="Dropped below min ranking",
