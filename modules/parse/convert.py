@@ -127,6 +127,24 @@ def clean_numeric_column(df: pd.DataFrame, column: str, as_type: str = "float") 
     
     return col_numeric
 
+EXCLUDED_TICKERS = {'USD', 'CAD', 'EUR', 'TICKER'}
+
+def normalize_ticker_series(series: pd.Series) -> pd.Series:
+    return (
+        series
+        .astype(str)
+        .str.strip()
+        .str.split().str[0]
+        .str.split(r'[.\-_]').str[0]
+    )
+
+def filter_ticker_df(df: pd.DataFrame, col: str, remove_tickers: list[str]) -> pd.DataFrame:
+    return df[
+        df[col].str.fullmatch(r'[A-Z0-9]+', na=False) &
+        ~df[col].isin(EXCLUDED_TICKERS) &
+        ~df[col].isin(remove_tickers)
+    ]
+
 def convert_to_data_frame(full_rows: list[list[str]], mapping: Mapping) -> pd.DataFrame:
     skip = mapping.skip_rows
     if mapping.multi_row_header == 2:
@@ -237,36 +255,17 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
     if "price" in df.columns:
         df["price"] = clean_numeric_column(df, "price")
 
-    # Fall back to shares × price when market_value is absent
-    if "price" in df.columns:
-        missing_mv = df["market_value"].isna() | (df["market_value"] <= 0)
-        valid_fallback = (
-            df["shares"].notna() & (df["shares"] > 0) &
-            df["price"].notna() & (df["price"] > 0)
-        )
-        df.loc[missing_mv & valid_fallback, "market_value"] = (
-            df.loc[missing_mv & valid_fallback, "shares"] *
-            df.loc[missing_mv & valid_fallback, "price"]
-        )
+    # Fall back to shares × price only when no market_value column is mapped
+    has_market_value_mapping = mapping.columns.get("market_value") is not None
+    if not has_market_value_mapping and "price" in df.columns:
+        df["market_value"] = df["shares"] * df["price"]
 
     # Scale market_value if the source reports in thousands, millions, etc.
     if mapping.market_value.shift:
         df["market_value"] = df["market_value"] * (10 ** mapping.market_value.shift)
 
-    # Normalize ticker
-    df['ticker'] = (
-        df['ticker']
-        .astype(str)
-        .str.strip()
-        .str.split().str[0]   # take first token (e.g. "APL G001" → "APL")
-    )
-
-    # Apply filters
-    df = df[
-        df['ticker'].str.fullmatch(r'[A-Z]+', na=False) &   # only A–Z
-        ~df['ticker'].isin(['USD', 'CAD', 'EUR']) &         # exclude currencies
-        ~df['ticker'].isin(mapping.remove_tickers)          # exclude custom list
-    ]
+    df['ticker'] = normalize_ticker_series(df['ticker'])
+    df = filter_ticker_df(df, 'ticker', mapping.remove_tickers)
 
     # drop rows where the shares, market_value or weight is empty or 0 (used for cash holdings)
     df = df[df["shares"].notna() & (df["shares"] > 0)]
@@ -294,21 +293,11 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
 def get_tickers(full_rows: list[list[str]], mapping: Mapping) -> list[str]:
     df = convert_to_data_frame(full_rows=full_rows, mapping=mapping)
     ticker_col_name = mapping.columns['ticker']
-    
-    # Normalize ticker
-    df[ticker_col_name] = (
-        df[ticker_col_name]
-        .astype(str)
-        .str.strip()
-        .str.split().str[0]   # take first token (e.g. "APL G001" → "APL")
-    )
+    if not ticker_col_name:
+        raise Exception("No ticker column defined in mapping.")
 
-    # Apply filters
-    df = df[
-        df[ticker_col_name].str.fullmatch(r'[A-Z]+', na=False) &        # only A–Z
-        ~df[ticker_col_name].isin(['USD', 'CAD', 'EUR', 'TICKER']) &    # exclude currencies
-        ~df[ticker_col_name].isin(mapping.remove_tickers)               # exclude custom list
-    ]
+    df[ticker_col_name] = normalize_ticker_series(df[ticker_col_name])
+    df = filter_ticker_df(df, ticker_col_name, mapping.remove_tickers)
     distinct_tickers = df[ticker_col_name].unique().tolist()    
     return distinct_tickers
 

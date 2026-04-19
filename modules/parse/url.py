@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright, Download, Browser, BrowserConte
 from playwright_stealth import Stealth
 from modules.core.util import clean_date
 from modules.object.provider import Provider, Mapping, getMappingFromJson
-from modules.object.provider_etf import EtfDownload, fetch_by_provider_id
+from modules.object.provider_etf import EtfDownload, ProviderEtf, fetch_by_provider_id
 from modules.object.categorize_etf import CategorizeEtfDownload
 
 
@@ -75,7 +75,7 @@ def get_date_on_page(page: Page, mapping: Mapping) -> date | None:
 
 
 def dispatch(page: Page, event: dict) -> None:
-        action_timout = 5000
+        action_timout = 7000
         name: str = event.get("name", "")
         selector: str = event.get("selector", "")
 
@@ -120,7 +120,7 @@ def save_and_get_data(download: Download) -> bytes:
         os.remove(temp_path)
         return data
 
-def get_holdings(page: Page, trigger_download: dict) -> tuple[str | None, bytes | None]:
+def get_holdings(page: Page, trigger_download: dict) -> tuple[str | None, bytes | None, str | None]:
     try:
         page.wait_for_timeout(2000)
         page.locator(trigger_download['selector']).first.wait_for(
@@ -136,13 +136,12 @@ def get_holdings(page: Page, trigger_download: dict) -> tuple[str | None, bytes 
             dispatch(page, { 'name': 'click', 'selector': trigger_download['selector'] })
 
         download = download_info.value
-        return download.suggested_filename, save_and_get_data(download=download)
+        return download.suggested_filename, save_and_get_data(download=download), None
 
         # download.save_as(download.suggested_filename)
 
     except Exception as e:
-        log.record_notice(f"An unexpected error occurred when trying to get the holdings: {e}")
-        return None, None
+        return None, None, f"An unexpected error occurred when trying to get the holdings:\n {e}"
 
 
 def open_page(page: Page, url: str, wait_pre_events: str | None, wait_post_events: str | None, events: dict | None) -> bool:
@@ -196,57 +195,75 @@ def open_page(page: Page, url: str, wait_pre_events: str | None, wait_post_event
 
 
 def scrape_provider(cp: Provider) -> List[EtfDownload]:
+    if cp.id is None or cp.url_start is None:
+        raise Exception('Missing URL for provider.')
+
+    etf_list = fetch_by_provider_id(cp.id)
+    log.record_status(f"Scraping {len(etf_list)} ETFs from provider '{cp.name}'")
+
+    downloads: List[EtfDownload] = []
+    for etf in etf_list:
+        try:
+            download = scrape_provider_etf(cp, etf)
+            downloads.append(download)
+        except Exception as e:
+            log.record_error(f"Failed to scrape ETF '{etf.name}' - [{etf.id}] ('{cp.name}' - [{cp.id}]) after {SCRAPE_MAX_RETRIES} attempts: {e}")
+
+    return downloads
+
+
+def scrape_provider_etf(cp: Provider, etf: ProviderEtf) -> EtfDownload:
     last_error = None
     for attempt in range(SCRAPE_MAX_RETRIES):
         try:
-            downloads: List[EtfDownload] = []
-            open_browser: OpenBrowser = OpenBrowser(browser=None, context=None, page=None)
+            if cp.id is None or cp.url_start is None:
+                raise Exception('Missing URL for provider.')
+            trigger_download = etf.trigger_download or cp.trigger_download
+            if etf.id is None or etf.url is None or trigger_download is None:
+                raise Exception('Missing URL or trigger_download for provider ETF.')
 
             with Stealth().use_sync(sync_playwright()) as p:
-                open_browser.browser = p.chromium.launch(headless=True, args=CHROME_LAUNCH_ARGS)
-                open_browser.context = open_browser.browser.new_context(
+                browser = p.chromium.launch(headless=True, args=CHROME_LAUNCH_ARGS)
+                context = browser.new_context(
                     user_agent=REAL_USER_AGENT,
                     viewport={'width': 1920, 'height': 1080},
                     accept_downloads=True
                 )
-                open_browser.page = open_browser.context.new_page()
+                page = context.new_page()
 
-                if cp.id == None or cp.url_start == None:
-                    raise Exception('Missing URL for provider.')
+                if not open_page(page=page, url=cp.url_start, wait_pre_events=cp.wait_pre_events, wait_post_events=cp.wait_post_events, events=cp.events):
+                    raise Exception(f"Failed to open provider start URL: {cp.url_start}")
 
-                if cp.id and open_page(page=open_browser.page, url=cp.url_start, wait_pre_events=cp.wait_pre_events, wait_post_events=cp.wait_post_events, events=cp.events):
-                    etf_list = fetch_by_provider_id(cp.id)
-                    log.record_status(f"Scraping {len(etf_list)} ETFs from provider '{cp.name}'")
-                    for etf in etf_list:
-                        trigger_download = etf.trigger_download or cp.trigger_download
-                        if etf.id == None or etf.url == None or trigger_download == None:
-                            raise Exception('Missing URL or Trigger Method for provider etf.')
+                log.record_status(f"Opening ETF '{etf.name}' - [{etf.id}] ('{cp.name}' - [{cp.id}]) for scraping")
+                if not open_page(page=page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
+                    raise Exception(f"Failed to open ETF URL: {etf.url}")
 
-                        if open_page(page=open_browser.page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
-                            found_date_from_page = None
-                            mapping  = etf.mapping or cp.mapping
-                            if mapping:
-                                map = getMappingFromJson(mapping)
-                                if mapping and map.date.on_page:
-                                    found_date_from_page = get_date_on_page(page=open_browser.page, mapping=map)
-                                    if not found_date_from_page:
-                                        raise Exception('ETF holdings date from page could not be confirmed - skipping this ETF.')
-                            file_name, data = get_holdings(page=open_browser.page, trigger_download=trigger_download)
-                            if file_name and data:
-                                downloads.append(EtfDownload(provider=cp, etf=etf, file_name=file_name, data=data, date_from_page=found_date_from_page))
+                found_date_from_page = None
+                mapping = etf.mapping or cp.mapping
+                if mapping:
+                    map = getMappingFromJson(mapping)
+                    if map.date.on_page:
+                        found_date_from_page = get_date_on_page(page=page, mapping=map)
+                        if not found_date_from_page:
+                            raise Exception('ETF holdings date from page could not be confirmed.')
 
-                open_browser.context.close()
-                open_browser.browser.close()
+                file_name, data, error = get_holdings(page=page, trigger_download=trigger_download)
+                context.close()
+                browser.close()
 
-                return downloads
+                if error:
+                    log.record_error(f"Failed downloading from page for '{etf.name}' - [{etf.id}] ('{cp.name}' - [{cp.id}])\n {error}")
+                    raise Exception('No file downloaded.')
+
+            return EtfDownload(provider=cp, etf=etf, file_name=file_name, data=data, date_from_page=found_date_from_page)
 
         except Exception as e:
             last_error = e
             if attempt < SCRAPE_MAX_RETRIES - 1:
-                log.record_notice(f"scrape_provider attempt {attempt + 1}/{SCRAPE_MAX_RETRIES} failed, retrying in {(attempt + 1) * SCRAPE_RETRY_DELAY_SECONDS}s... Error: {e}")
+                log.record_notice(f"scrape_provider_etf attempt {attempt + 1}/{SCRAPE_MAX_RETRIES} failed, retrying in {(attempt + 1) * SCRAPE_RETRY_DELAY_SECONDS}s... Error: {e}")
                 time.sleep((attempt + 1) * SCRAPE_RETRY_DELAY_SECONDS)
 
-    raise Exception(f"Failed to extract URLs and subsequent files from webpage content and related links after {SCRAPE_MAX_RETRIES} attempts: {last_error}")
+    raise Exception(f"Failed to scrape provider ETF after {SCRAPE_MAX_RETRIES} attempts: {last_error}")
 
 
 class CategorizeEtfProtocol(Protocol):

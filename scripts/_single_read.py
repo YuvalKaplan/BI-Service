@@ -1,35 +1,43 @@
 import atexit
+import os
 from modules.object.exit import cleanup
 from modules.object import provider, provider_etf
-from modules.parse.convert import read_file, map_data
+from modules.object.provider import getMappingFromJson
+from modules.parse.convert import load, map_data
 
 atexit.register(cleanup)
 
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', '.downloads')
+
 if __name__ == '__main__':
     try:
-        provider_id = 2
-        filename = 'AdvisorShares_HDGE_Holdings_File.csv'
-        filename = "AdvisorShares_EATZ_Holdings_File.csv"
-        p = provider.fetch_by_id(provider_id)
-        if p and p.id:
-            etf_list = provider_etf.fetch_by_provider_id(p.id)
+        provider_etf_id = 306
+        filename = 'NBCE-04_16_2026.xlsx'
 
-            etf = etf_list[0]
-            if etf and etf.id:
-                file_format = etf.file_format or p.file_format
-                use_mapping  = etf.mapping or p.mapping
+        etf = provider_etf.fetch_by_id(provider_etf_id)
+        if not etf or not etf.provider_id:
+            raise Exception(f"No provider_etf found with id={provider_etf_id}")
 
-                if file_format == None or use_mapping == None:
-                    raise Exception('Missing file type or mapping information in database for data trasformation.')
+        p = provider.fetch_by_id(etf.provider_id)
+        if not p:
+            raise Exception(f"No provider found with id={etf.provider_id}")
 
-                mapping = provider.getMappingFromJson(use_mapping)
-                full_rows = read_file(file_name=filename, format=file_format, mapping=mapping)
-                df = map_data(full_rows=full_rows, file_name=filename, date_from_page=None, mapping=mapping)
-            
-                print(df.head())
-                print("... ------------ ...")
-                print(df.tail())
+        file_format = etf.file_format or p.file_format
+        use_mapping = etf.mapping or p.mapping
+        if not file_format or not use_mapping:
+            raise Exception('Missing file type or mapping information in database for data transformation.')
 
+        file_path = os.path.join(OUTPUT_DIR, filename)
+        with open(file_path, 'rb') as f:
+            raw_data = f.read()
+
+        mapping = getMappingFromJson(use_mapping)
+        full_rows = load(etf_name=etf.name, file_format=file_format, mapping=mapping, file_name=filename, raw_data=raw_data)
+        df = map_data(full_rows=full_rows, file_name=filename, date_from_page=None, mapping=mapping)
+
+        print(df.head())
+        print("... ------------ ...")
+        print(df.tail())
 
     except Exception as e:
         print(f"Error in converting single read: {e}")

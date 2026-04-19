@@ -99,7 +99,15 @@ def fetch_active_providers() -> list[Provider]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Provider)) as cur:
-                query_str = "SELECT * FROM provider WHERE NOT disabled ORDER BY name;"
+                query_str = """
+                    SELECT p.* FROM provider p
+                    WHERE NOT p.disabled
+                    AND EXISTS (
+                        SELECT 1 FROM provider_etf e
+                        WHERE e.provider_id = p.id AND NOT e.disabled
+                    )
+                    ORDER BY p.name;
+                """
                 cur.execute(query_str)
                 items = cur.fetchall()
         return items

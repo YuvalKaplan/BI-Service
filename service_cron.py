@@ -27,7 +27,7 @@ if __name__ == '__main__':
         weekday = start_time.weekday() # 0 = Monday, 4 = Friday, 6 = Sunday
         message_actions = ""
 
-        if 1 <= weekday <= 5: # Tuesday through Saturday
+        if 1 <= weekday <= 6: # Tuesday through Saturday
             try:
                 stats_downloader, total_downloaded, provider_ids, = etf_downloader.run(start_time)
             except Exception as e:
@@ -49,7 +49,6 @@ if __name__ == '__main__':
             message_actions += f"Stocks missing data: {missing_data}\n"
             message_actions += BREAKER_LINE
 
-        if 1 <= weekday <= 5: # Tuesday through Saturday
             try:
                 total_etfs = stocks_categorize.download_data()
             except Exception as e:
@@ -59,7 +58,7 @@ if __name__ == '__main__':
             message_actions += f"Categorization ETFs processed: {total_etfs}\n"
             message_actions += BREAKER_LINE
 
-        if 1 <= weekday <= 3: # Tuesday through Thursday
+        if 1 <= weekday <= 6: # Tuesday through Thursday
             try:
                 etfs_processed, generated_etfs, problems = best_ideas_generator.run()
             except Exception as e:
