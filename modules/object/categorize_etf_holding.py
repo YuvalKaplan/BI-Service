@@ -10,15 +10,15 @@ import pandas as pd
 class CategorizeEtfHolding:
     categorize_etf_id: int
     holding_date: date
-    ticker: str
+    ticker_id: int
     id: Optional[int]
     created_at: Optional[datetime]
 
 
-def insert_holding(categorize_etf_id: int, holding_date: date, tickers: List[str]) -> None:
-    if not tickers:
+def insert_holding(categorize_etf_id: int, holding_date: date, ticker_ids: List[int]) -> None:
+    if not ticker_ids:
         return
-    
+
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
@@ -34,14 +34,14 @@ def insert_holding(categorize_etf_id: int, holding_date: date, tickers: List[str
                     INSERT INTO categorize_etf_holding (
                         categorize_etf_id,
                         holding_date,
-                        ticker
+                        ticker_id
                     )
                     VALUES (%s, %s, %s);
                 """
 
                 insert_values = [
-                    (categorize_etf_id, holding_date, symbol)
-                    for symbol in tickers
+                    (categorize_etf_id, holding_date, tid)
+                    for tid in ticker_ids
                 ]
 
                 cur.executemany(insert_sql, insert_values)

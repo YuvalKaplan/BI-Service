@@ -30,7 +30,7 @@ def insert_fund_changes(items: List[FundHoldingChange]) -> None:
                 insert_sql = """
                     INSERT INTO fund_holding_change (
                         fund_id,
-                        symbol,
+                        ticker_id,
                         change_date,
                         direction,
                         ranking,
@@ -46,7 +46,7 @@ def insert_fund_changes(items: List[FundHoldingChange]) -> None:
                 insert_values = [
                     (
                         i.fund_id,
-                        i.symbol,
+                        i.ticker_id,
                         i.change_date,
                         i.direction,
                         i.ranking,

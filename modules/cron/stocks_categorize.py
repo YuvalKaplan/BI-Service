@@ -4,6 +4,7 @@ from modules.object import batch_run
 from modules.object import provider, categorize_etf, categorize_etf_holding, ticker
 from modules.parse.url import scrape_categorizer
 from modules.parse.convert import load, get_tickers
+from modules.object.ticker import fetch_by_symbols
 
 
 def download_data() -> int:
@@ -22,7 +23,9 @@ def download_data() -> int:
                 map = provider.getMappingFromJson(d.etf.mapping)
                 full_rows = load(etf_name=d.etf.name, file_format=d.etf.file_format, mapping=map, file_name=d.file_name, raw_data=d.data)
                 symbols = get_tickers(full_rows=full_rows, mapping=map)
-                categorize_etf_holding.insert_holding(etf.id, date.today(), symbols)
+                tickers = fetch_by_symbols(symbols)
+                ticker_ids = [t.id for t in tickers if t.id is not None and not t.invalid]
+                categorize_etf_holding.insert_holding(etf.id, date.today(), ticker_ids)
                 categorize_etf.update_last_download(etf.id)
 
         # --- Style (Growth/Value) -> ticker table ---

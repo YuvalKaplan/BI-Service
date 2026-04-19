@@ -14,6 +14,8 @@ def run(start_time: datetime) -> tuple[str, int, list[int] | None]:
         if batch_run_id is None:
             batch_run_id = batch_run.insert(batch_run.BatchRun('etf_downloader', 'auto'))
 
+        ticker.sanitize()
+
         to_scrape = provider.fetch_active_providers()
 
         log.record_status(f"Running ETF Downloader batch job ID {batch_run_id} - will proccess {len(to_scrape)} items.")

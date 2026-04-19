@@ -3,7 +3,7 @@ from typing import List
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from modules.core.db import db_pool_instance_bt
-from modules.calc.model_fund import FundHoldingChange  # noqa: F401
+from modules.bt.calc.model_fund import FundHoldingChange  # noqa: F401
 
 def normalize_ids(ids: list[int] | None) -> list[int] | None:
     return ids if ids else None

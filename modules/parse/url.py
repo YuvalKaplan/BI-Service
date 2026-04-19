@@ -4,7 +4,7 @@ import re
 import tempfile
 import time
 from datetime import date
-from typing import List, Protocol
+from typing import List
 from dataclasses import dataclass
 from playwright.sync_api import sync_playwright, Download, Browser, BrowserContext, Page
 from playwright_stealth import Stealth
@@ -12,6 +12,7 @@ from modules.core.util import clean_date
 from modules.object.provider import Provider, Mapping, getMappingFromJson
 from modules.object.provider_etf import EtfDownload, ProviderEtf, fetch_by_provider_id
 from modules.object.categorize_etf import CategorizeEtfDownload
+from modules.core.protocols import CategorizeEtfProtocol
 
 
 
@@ -202,81 +203,103 @@ def scrape_provider(cp: Provider) -> List[EtfDownload]:
     log.record_status(f"Scraping {len(etf_list)} ETFs from provider '{cp.name}'")
 
     downloads: List[EtfDownload] = []
-    for etf in etf_list:
-        try:
-            download = scrape_provider_etf(cp, etf)
-            downloads.append(download)
-        except Exception as e:
-            log.record_error(f"Failed to scrape ETF '{etf.name}' - [{etf.id}] ('{cp.name}' - [{cp.id}]) after {SCRAPE_MAX_RETRIES} attempts: {e}")
+
+    with Stealth().use_sync(sync_playwright()) as p:
+        browser = p.chromium.launch(headless=True, args=CHROME_LAUNCH_ARGS)
+        context = browser.new_context(
+            user_agent=REAL_USER_AGENT,
+            viewport={'width': 1920, 'height': 1080},
+            accept_downloads=True
+        )
+        page = context.new_page()
+
+        if not open_page(page=page, url=cp.url_start, wait_pre_events=cp.wait_pre_events, wait_post_events=cp.wait_post_events, events=cp.events):
+            raise Exception(f"Failed to open provider start URL: {cp.url_start}")
+
+        for etf in etf_list:
+            last_error = None
+            for attempt in range(SCRAPE_MAX_RETRIES):
+                try:
+                    trigger_download = etf.trigger_download or cp.trigger_download
+                    if etf.id is None or etf.url is None or trigger_download is None:
+                        raise Exception('Missing URL or trigger_download for provider ETF.')
+
+                    log.record_status(f"Opening ETF '{etf.name}' - [{etf.id}] ('{cp.name}' - [{cp.id}]) for scraping")
+                    if not open_page(page=page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
+                        raise Exception(f"Failed to open ETF URL: {etf.url}")
+
+                    found_date_from_page = None
+                    mapping = etf.mapping or cp.mapping
+                    if mapping:
+                        map = getMappingFromJson(mapping)
+                        if map.date.on_page:
+                            found_date_from_page = get_date_on_page(page=page, mapping=map)
+                            if not found_date_from_page:
+                                raise Exception('ETF holdings date from page could not be confirmed.')
+
+                    file_name, data, error = get_holdings(page=page, trigger_download=trigger_download)
+                    if error:
+                        raise Exception(error)
+
+                    downloads.append(EtfDownload(provider=cp, etf=etf, file_name=file_name, data=data, date_from_page=found_date_from_page))
+                    break
+
+                except Exception as e:
+                    last_error = e
+                    if attempt < SCRAPE_MAX_RETRIES - 1:
+                        log.record_notice(f"ETF '{etf.name}' - [{etf.id}] attempt {attempt + 1}/{SCRAPE_MAX_RETRIES} failed, retrying in {(attempt + 1) * SCRAPE_RETRY_DELAY_SECONDS}s... Error: {e}")
+                        time.sleep((attempt + 1) * SCRAPE_RETRY_DELAY_SECONDS)
+                    else:
+                        log.record_error(f"Failed to scrape ETF '{etf.name}' - [{etf.id}] ('{cp.name}' - [{cp.id}]) after {SCRAPE_MAX_RETRIES} attempts: {last_error}")
+
+        context.close()
+        browser.close()
 
     return downloads
 
 
 def scrape_provider_etf(cp: Provider, etf: ProviderEtf) -> EtfDownload:
-    last_error = None
-    for attempt in range(SCRAPE_MAX_RETRIES):
-        try:
-            if cp.id is None or cp.url_start is None:
-                raise Exception('Missing URL for provider.')
-            trigger_download = etf.trigger_download or cp.trigger_download
-            if etf.id is None or etf.url is None or trigger_download is None:
-                raise Exception('Missing URL or trigger_download for provider ETF.')
+    if cp.id is None or cp.url_start is None:
+        raise Exception('Missing URL for provider.')
+    trigger_download = etf.trigger_download or cp.trigger_download
+    if etf.id is None or etf.url is None or trigger_download is None:
+        raise Exception('Missing URL or trigger_download for provider ETF.')
 
-            with Stealth().use_sync(sync_playwright()) as p:
-                browser = p.chromium.launch(headless=True, args=CHROME_LAUNCH_ARGS)
-                context = browser.new_context(
-                    user_agent=REAL_USER_AGENT,
-                    viewport={'width': 1920, 'height': 1080},
-                    accept_downloads=True
-                )
-                page = context.new_page()
+    with Stealth().use_sync(sync_playwright()) as p:
+        browser = p.chromium.launch(headless=False, args=CHROME_LAUNCH_ARGS)
+        context = browser.new_context(
+            user_agent=REAL_USER_AGENT,
+            viewport={'width': 1920, 'height': 1080},
+            accept_downloads=True
+        )
+        page = context.new_page()
 
-                if not open_page(page=page, url=cp.url_start, wait_pre_events=cp.wait_pre_events, wait_post_events=cp.wait_post_events, events=cp.events):
-                    raise Exception(f"Failed to open provider start URL: {cp.url_start}")
+        if not open_page(page=page, url=cp.url_start, wait_pre_events=cp.wait_pre_events, wait_post_events=cp.wait_post_events, events=cp.events):
+            raise Exception(f"Failed to open provider start URL: {cp.url_start}")
 
-                log.record_status(f"Opening ETF '{etf.name}' - [{etf.id}] ('{cp.name}' - [{cp.id}]) for scraping")
-                if not open_page(page=page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
-                    raise Exception(f"Failed to open ETF URL: {etf.url}")
+        log.record_status(f"Opening ETF '{etf.name}' - [{etf.id}] ('{cp.name}' - [{cp.id}]) for scraping")
+        if not open_page(page=page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
+            raise Exception(f"Failed to open ETF URL: {etf.url}")
 
-                found_date_from_page = None
-                mapping = etf.mapping or cp.mapping
-                if mapping:
-                    map = getMappingFromJson(mapping)
-                    if map.date.on_page:
-                        found_date_from_page = get_date_on_page(page=page, mapping=map)
-                        if not found_date_from_page:
-                            raise Exception('ETF holdings date from page could not be confirmed.')
+        found_date_from_page = None
+        mapping = etf.mapping or cp.mapping
+        if mapping:
+            map = getMappingFromJson(mapping)
+            if map.date.on_page:
+                found_date_from_page = get_date_on_page(page=page, mapping=map)
+                if not found_date_from_page:
+                    raise Exception('ETF holdings date from page could not be confirmed.')
 
-                file_name, data, error = get_holdings(page=page, trigger_download=trigger_download)
-                context.close()
-                browser.close()
+        file_name, data, error = get_holdings(page=page, trigger_download=trigger_download)
+        context.close()
+        browser.close()
 
-                if error:
-                    log.record_error(f"Failed downloading from page for '{etf.name}' - [{etf.id}] ('{cp.name}' - [{cp.id}])\n {error}")
-                    raise Exception('No file downloaded.')
+    if error:
+        raise Exception(f"Failed to download holdings: {error}")
 
-            return EtfDownload(provider=cp, etf=etf, file_name=file_name, data=data, date_from_page=found_date_from_page)
-
-        except Exception as e:
-            last_error = e
-            if attempt < SCRAPE_MAX_RETRIES - 1:
-                log.record_notice(f"scrape_provider_etf attempt {attempt + 1}/{SCRAPE_MAX_RETRIES} failed, retrying in {(attempt + 1) * SCRAPE_RETRY_DELAY_SECONDS}s... Error: {e}")
-                time.sleep((attempt + 1) * SCRAPE_RETRY_DELAY_SECONDS)
-
-    raise Exception(f"Failed to scrape provider ETF after {SCRAPE_MAX_RETRIES} attempts: {last_error}")
+    return EtfDownload(provider=cp, etf=etf, file_name=file_name, data=data, date_from_page=found_date_from_page)
 
 
-class CategorizeEtfProtocol(Protocol):
-    id: int | None
-    url: str | None
-    name: str | None
-    file_format: str | None
-    mapping: dict | None
-    trigger_download: dict | None
-    wait_pre_events: str | None
-    wait_post_events: str | None
-    events: dict | None
-    
 def scrape_categorizer(etf: CategorizeEtfProtocol) -> CategorizeEtfDownload:
     last_error = None
     for attempt in range(SCRAPE_MAX_RETRIES):
@@ -297,10 +320,12 @@ def scrape_categorizer(etf: CategorizeEtfProtocol) -> CategorizeEtfDownload:
                     raise Exception('Missing URL or Trigger Method for categorizer etf.')
 
                 if open_page(page=open_browser.page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
-                    file_name, data = get_holdings(page=open_browser.page, trigger_download=etf.trigger_download)
+                    file_name, data, error = get_holdings(page=open_browser.page, trigger_download=etf.trigger_download)
                     if file_name and data:
                         download.file_name = file_name
                         download.data = data
+                    if error:
+                        raise Exception(error)
 
                 open_browser.context.close()
                 open_browser.browser.close()

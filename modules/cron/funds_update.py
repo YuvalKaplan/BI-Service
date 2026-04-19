@@ -41,9 +41,9 @@ def run() -> List[FundChangesResult]:
 
             if results.holdings:
                 if strategy.allocation == 'market_cap':
-                    symbols = [h.symbol for h in results.holdings]
-                    mc_values = ticker_value.fetch_latest_market_caps_within_window(symbols, today, MARKET_CAP_LOOKBACK_DAYS)
-                    mc_map = {tv.symbol: tv.market_cap for tv in mc_values if tv.market_cap}
+                    ticker_ids = [h.ticker_id for h in results.holdings]
+                    mc_values = ticker_value.fetch_latest_market_caps_within_window(ticker_ids, today, MARKET_CAP_LOOKBACK_DAYS)
+                    mc_map = {tv.ticker_id: tv.market_cap for tv in mc_values if tv.market_cap}
                     apply_market_cap_weights(results.holdings, mc_map)
                 else:
                     apply_equal_weights(results.holdings)

@@ -5,7 +5,7 @@ from decimal import Decimal
 from dataclasses import dataclass
 from datetime import date, timedelta
 from modules.bt.object import fund, fund_holding
-from modules.calc.model_fund import getStrategyFromJson, FundHolding
+from modules.bt.calc.model_fund import getStrategyFromJson, FundHolding
 from modules.bt.object import account, account_holding as ah, account_cash_ledger as acl, account_trade as at, account_performance as ap, account_benchmark_comparison as abc
 from modules.bt.object import benchmark_value as bv
 from modules.bt.object import interest_config, ticker_value, ticker_dividend_history

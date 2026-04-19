@@ -9,7 +9,7 @@ from modules.core.db import db_pool_instance
 @dataclass
 class BestIdea:
     provider_etf_id: str
-    symbol: str
+    ticker_id: int
     value_date: date
     etf_weight: float | None
     benchmark_weight: float | None
@@ -23,7 +23,7 @@ def df_to_rows(
 ) -> list[tuple]:
     rows = []
     for rank, (_, row) in enumerate(best_ideas.iterrows(), start=1):
-        rows.append((provider_etf_id, row["symbol"], value_date, float(row["etf_weight"]), float(row["benchmark_weight"]), float(row["delta"]), rank))
+        rows.append((provider_etf_id, int(row["ticker_id"]), value_date, float(row["etf_weight"]), float(row["benchmark_weight"]), float(row["delta"]), rank))
     return rows
 
 def insert_bulk(rows: list[tuple]) -> None:
@@ -32,9 +32,9 @@ def insert_bulk(rows: list[tuple]) -> None:
 
     query = """
         INSERT INTO best_idea
-            (provider_etf_id, symbol, value_date, etf_weight, benchmark_weight, delta, ranking)
+            (provider_etf_id, ticker_id, value_date, etf_weight, benchmark_weight, delta, ranking)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (provider_etf_id, symbol, value_date)
+        ON CONFLICT (provider_etf_id, ticker_id, value_date)
         DO UPDATE
         SET
             etf_weight = EXCLUDED.etf_weight,
@@ -58,7 +58,7 @@ def insert_bulk(rows: list[tuple]) -> None:
 
 @dataclass
 class BestIdeaRanked:
-    symbol: str
+    ticker_id: int
     ranking: int
     appearances: int
     max_delta: float

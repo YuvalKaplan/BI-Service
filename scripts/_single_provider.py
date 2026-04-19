@@ -1,18 +1,19 @@
 import atexit
 from modules.object.exit import cleanup
-from modules.object import provider, provider_etf_holding 
+from modules.object import provider, provider_etf_holding
 from modules.parse.url import scrape_provider
 from modules.parse.convert import load, map_data
 from modules.parse.download import process_provider
+from modules.object.ticker import upsert_ticker
 
 atexit.register(cleanup)
 
 if __name__ == '__main__':
     try:
-        provider_id = 74
+        provider_id = 16
         p = provider.fetch_by_id(provider_id)
         if p and p.url_start:
-            # process_provider(p)         
+            # process_provider(p)
             downloads = scrape_provider(p)
             for d in downloads:
                 try:
@@ -22,6 +23,17 @@ if __name__ == '__main__':
                         map = provider.getMappingFromJson(mapping)
                         full_rows = load(etf_name=d.etf.name, file_format=file_format, mapping=map, file_name=d.file_name, raw_data=d.data)
                         df = map_data(full_rows=full_rows, file_name=d.file_name, date_from_page=d.date_from_page, mapping=map)
+                        df['ticker_id'] = df.apply(
+                            lambda row: upsert_ticker(
+                                symbol=row.get('symbol'),
+                                isin=row.get('isin'),
+                                region=d.etf.region,
+                                name=row.get('name'),
+                                cusip=row.get('cusip'),
+                            ),
+                            axis=1
+                        )
+                        df = df[df['ticker_id'].notna()]
                         print(f"{d.etf.name}\t{d.file_name}")
                         print(df.head())
                         print("... ------------ ...")

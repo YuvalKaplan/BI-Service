@@ -15,21 +15,21 @@ HOLDING_DELTA_LIMIT_DROP_OFF = 0.25
 
 def _find_best_ideas(holdings: list, market_cap_values: list, limit: int | None = None) -> pd.DataFrame:
     df_holdings = pd.DataFrame(
-        {"symbol": h.ticker, "market_value": h.market_value}
+        {"ticker_id": h.ticker_id, "market_value": h.market_value}
         for h in holdings
-        if h.ticker and h.market_value and h.market_value > 0
+        if h.ticker_id and h.market_value and h.market_value > 0
     )
 
     df_values = pd.DataFrame(
-        {"symbol": v.symbol, "market_cap": v.market_cap}
+        {"ticker_id": v.ticker_id, "market_cap": v.market_cap}
         for v in market_cap_values
-        if v.symbol and v.market_cap
+        if v.ticker_id and v.market_cap
     )
 
-    df = df_holdings.merge(df_values, on="symbol", how="inner")
+    df = df_holdings.merge(df_values, on="ticker_id", how="inner")
 
     if df.empty:
-        raise ValueError("No overlapping symbols between holdings and market caps")
+        raise ValueError("No overlapping ticker_ids between holdings and market caps")
 
     total_etf_value = df["market_value"].sum()
     df["etf_weight"] = df["market_value"] / total_etf_value
@@ -43,7 +43,7 @@ def _find_best_ideas(holdings: list, market_cap_values: list, limit: int | None 
 
     dropped = best_ideas[best_ideas["delta"] > HOLDING_DELTA_LIMIT_DROP_OFF]
     if not dropped.empty:
-        log.record_status(f"Dropping {len(dropped)} best-idea(s) above delta limit {HOLDING_DELTA_LIMIT_DROP_OFF}: {dropped['symbol'].tolist()}")
+        log.record_status(f"Dropping {len(dropped)} best-idea(s) above delta limit {HOLDING_DELTA_LIMIT_DROP_OFF}: {dropped['ticker_id'].tolist()}")
     best_ideas = best_ideas[best_ideas["delta"] <= HOLDING_DELTA_LIMIT_DROP_OFF]
 
     if limit is not None:
@@ -90,14 +90,14 @@ def run() -> tuple[int, int, list[str]]:
                     holding_date = raw_holdings[0].holding_date
 
                     # 2. Fetch latest market caps within 7 days of the holding date
-                    symbols = [h.ticker for h in raw_holdings if h.ticker]
-                    market_cap_values = fetch_latest_market_caps_within_window(symbols, holding_date, DAYS_NO_PRICING)
+                    ticker_ids = [h.ticker_id for h in raw_holdings if h.ticker_id]
+                    market_cap_values = fetch_latest_market_caps_within_window(ticker_ids, holding_date, DAYS_NO_PRICING)
 
                     # 3. Identify and report stale tickers (no market cap within window)
-                    priced_symbols = {v.symbol for v in market_cap_values}
+                    priced_ids = {v.ticker_id for v in market_cap_values}
                     for h in raw_holdings:
-                        if h.ticker and h.ticker not in priced_symbols:
-                            record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="STALE HOLDING", message=f"{h.ticker} has no market cap for over {DAYS_NO_PRICING} days", problem_etfs=problem_etfs)
+                        if h.ticker_id and h.ticker_id not in priced_ids:
+                            record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="STALE HOLDING", message=f"ticker_id={h.ticker_id} has no market cap for over {DAYS_NO_PRICING} days", problem_etfs=problem_etfs)
 
                     # 4. Coverage check
                     coverage_ratio = len(market_cap_values) / len(raw_holdings)
@@ -108,7 +108,7 @@ def run() -> tuple[int, int, list[str]]:
                         continue
 
                     # 5. Generate and insert
-                    final_holdings = [h for h in raw_holdings if h.ticker in priced_symbols]
+                    final_holdings = [h for h in raw_holdings if h.ticker_id in priced_ids]
                     best_ideas_df = _find_best_ideas(final_holdings, market_cap_values, MAX_BEST_IDEAS_PER_FUND)
                     rows = best_idea.df_to_rows(best_ideas_df, provider_etf_id=pe.id, value_date=holding_date)
                     best_idea.insert_bulk(rows)

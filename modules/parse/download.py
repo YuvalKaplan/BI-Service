@@ -4,6 +4,7 @@ from modules.core.util import get_domain_from_url
 from modules.object.provider import Provider, update_domain, getMappingFromJson
 from modules.object.provider_etf import update_last_download
 from modules.object.provider_etf_holding import insert_all_holdings
+from modules.object.ticker import upsert_ticker
 
 from modules.parse.url import scrape_provider
 from modules.parse.convert import load, map_data
@@ -43,6 +44,17 @@ def process_provider(provider: Provider) -> None:
                         map = getMappingFromJson(mapping)
                         full_rows = load(etf_name=d.etf.name, file_format=file_format, mapping=map, file_name=d.file_name, raw_data=d.data)
                         df = map_data(full_rows=full_rows, file_name=d.file_name, date_from_page=d.date_from_page, mapping=map)
+                        df['ticker_id'] = df.apply(
+                            lambda row: upsert_ticker(
+                                symbol=row.get('symbol'),
+                                isin=row.get('isin'),
+                                region=d.etf.region,
+                                name=row.get('name'),
+                                cusip=row.get('cusip'),
+                            ),
+                            axis=1
+                        )
+                        df = df[df['ticker_id'].notna()]
                         insert_all_holdings(d.etf.id, df)
                         update_last_download(d.etf.id)
 

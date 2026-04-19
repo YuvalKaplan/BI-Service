@@ -3,11 +3,11 @@ from datetime import date, timedelta
 from typing import List
 from modules.bt.object import best_idea, fund, fund_holding, fund_holding_change, ticker, ticker_value
 from modules.object import provider_etf
-from modules.calc.model_fund import (
+from modules.bt.calc.model_fund import (
     FundChangesResult, results_to_string, to_fund_protocol, getStrategyFromJson,
     apply_equal_weights, apply_market_cap_weights,
 )
-from modules.calc import model_fund
+from modules.bt.calc import model_fund
 
 MARKET_CAP_LOOKBACK_DAYS = 7
 

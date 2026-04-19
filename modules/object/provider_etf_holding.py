@@ -12,7 +12,7 @@ class ProviderEtfHolding:
     created_at: datetime
     provider_etf_id: int
     holding_date: date
-    ticker: str
+    ticker_id: int | None
     shares: float
     market_value: float
     weight: float
@@ -22,16 +22,16 @@ def fetch_valid_tickers_in_holdings() -> List[str]:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 query = """
-                    SELECT DISTINCT peh.ticker 
+                    SELECT DISTINCT t.symbol
                     FROM public.provider_etf_holding AS peh
-                    INNER JOIN ticker AS t ON peh.ticker = t.symbol
-                    WHERE t.invalid IS null
-                    ORDER BY peh.ticker
+                    LEFT JOIN ticker AS t ON peh.ticker_id = t.id
+                    WHERE t.invalid IS NULL
+                    ORDER BY t.symbol
                 """
                 cur.execute(query)
                 return [row[0] for row in cur.fetchall()]
     except Error as e:
-        raise Exception(f"Error retrieving TickerMarketCap data: {e}")
+        raise Exception(f"Error retrieving valid tickers in holdings: {e}")
 
 def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, holding_date: date) -> List[ProviderEtfHolding]:
     try:
@@ -40,16 +40,15 @@ def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, holding_date: 
                 query_str = """
                     SELECT peh.*
                     FROM provider_etf_holding AS peh
-                    INNER JOIN ticker AS t ON peh.ticker = t.symbol
-                    WHERE t.invalid IS null
-                      AND provider_etf_id = %s
-                      AND holding_date = %s;
+                    INNER JOIN ticker AS t ON peh.ticker_id = t.id
+                    WHERE t.invalid IS NULL
+                      AND peh.provider_etf_id = %s
+                      AND peh.holding_date = %s;
                 """
                 cur.execute(query_str, (provider_etf_id, holding_date))
-                items = cur.fetchall()
-        return items
+                return cur.fetchall()
     except Error as e:
-        raise Exception(f"Error fetching the Provider ETFs Holdings for provider ETF ID from the DB: {e}")
+        raise Exception(f"Error fetching holdings for provider ETF ID from the DB: {e}")
 
 
 def fetch_latest_holdings_for_etf(provider_etf_id: int, look_back_days: int) -> List[ProviderEtfHolding]:
@@ -59,7 +58,7 @@ def fetch_latest_holdings_for_etf(provider_etf_id: int, look_back_days: int) -> 
                 query_str = """
                     SELECT peh.*
                     FROM provider_etf_holding AS peh
-                    INNER JOIN ticker AS t ON peh.ticker = t.symbol
+                    INNER JOIN ticker AS t ON peh.ticker_id = t.id
                     WHERE t.invalid IS NULL
                       AND peh.provider_etf_id = %s
                       AND peh.holding_date = (
@@ -82,7 +81,7 @@ def insert_all_holdings(etf_id: int, df: pd.DataFrame) -> None:
         df = df[[
             "provider_etf_id",
             "holding_date",
-            "ticker",
+            "ticker_id",
             "shares",
             "market_value",
             "weight"
@@ -91,16 +90,18 @@ def insert_all_holdings(etf_id: int, df: pd.DataFrame) -> None:
 
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
-                # Delete and insert in one transaction so a failed insert never leaves the table empty
                 delete_query = """
                     DELETE FROM provider_etf_holding peh
                     WHERE peh.provider_etf_id = %s
                     AND peh.holding_date = %s;
                 """
                 cur.execute(delete_query, (etf_id, df["holding_date"].iat[0]))
-                insert_query = "INSERT INTO provider_etf_holding (provider_etf_id, holding_date, ticker, shares, market_value, weight) VALUES (%s, %s, %s, %s, %s, %s);"
+                insert_query = """
+                    INSERT INTO provider_etf_holding
+                        (provider_etf_id, holding_date, ticker_id, shares, market_value, weight)
+                    VALUES (%s, %s, %s, %s, %s, %s);
+                """
                 cur.executemany(insert_query, rows)
 
     except Error as e:
         raise Exception(f"Error inserting the Provider ETF Holdings into the DB: {e}")
-    

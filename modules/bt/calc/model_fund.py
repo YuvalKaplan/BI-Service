@@ -56,7 +56,7 @@ def to_fund_protocol(f: Any) -> FundProtocol:
 @dataclass
 class FundHolding:
     fund_id: int
-    ticker_id: int
+    symbol: str
     holding_date: date
     ranking: int
     source_etf_id: int
@@ -67,7 +67,7 @@ class FundHolding:
 @dataclass
 class FundHoldingChange:
     fund_id: int
-    ticker_id: int
+    symbol: str
     change_date: date
     direction: str
     ranking: int | None = None
@@ -95,9 +95,9 @@ USE_RANKING_LOW = 1
 
 def results_to_string(results: FundChangesResult, ticker_module: types.ModuleType) -> str:
     aggregator = ""
-    all_ids: list[int] = list({ch.ticker_id for ch in results.changes})
-    tickers = ticker_module.fetch_by_ids(all_ids)
-    ticker_by_id = {t.id: t for t in tickers}
+    all_symbols: set[str] = {ch.symbol for ch in results.changes}
+    tickers = ticker_module.fetch_by_symbols(list(all_symbols))
+    ticker_by_symbol = {t.symbol: t for t in tickers}
 
     aggregator += f"{results.fund.name}\n" + "=" * 20 + "\n"
     if not results.changes:
@@ -107,15 +107,15 @@ def results_to_string(results: FundChangesResult, ticker_module: types.ModuleTyp
             "Direction", "Date", "Ranking", "Appearances", "Symbol", "Name"
         )
         for ch in results.changes:
-            t = ticker_by_id.get(ch.ticker_id)
+            ticker = ticker_by_symbol.get(ch.symbol)
             date_str = ch.change_date.strftime("%Y-%m-%d") if ch.change_date else "---"
             aggregator += "{:<12}{:<15}{:<12}{:<15}{:<10}{}\n".format(
                 ch.direction,
                 date_str,
                 ch.ranking if ch.ranking else "---",
                 ch.appearances if ch.appearances else "---",
-                t.symbol if t else str(ch.ticker_id),
-                t.name if t else "---",
+                ch.symbol,
+                ticker.name if ticker else "---",
             )
         aggregator += "-" * 30 + "\n\n"
 
@@ -233,13 +233,6 @@ def generate(
     Pure computation: determine today's holdings and changes for each fund.
     No DB access — callers are responsible for fetching previous holdings
     and saving the results.
-
-    Parameters
-    ----------
-    today             : the date being processed
-    fund              : the fund to process
-    previous_holdings : prior holdings for this fund
-    best_ideas_module : module exposing fetch_best_ideas_by_ranking(...)
     """
     strategy = getStrategyFromJson(fund.strategy)
     provider_etfs = strategy.provider_etfs or []
@@ -261,18 +254,18 @@ def generate(
         )
     else:
         for ph in previous_holdings:
-            found_in_ideal = next((x for x in ideal_holdings if x.ticker_id == ph.ticker_id), None)
+            found_in_ideal = next((x for x in ideal_holdings if x.symbol == ph.symbol), None)
             if found_in_ideal is None:
-                found_in_fetched = next((x for x in fetched if x.ticker_id == ph.ticker_id), None)
+                found_in_fetched = next((x for x in fetched if x.symbol == ph.symbol), None)
                 if found_in_fetched is None:
                     holdings_changed.append(FundHoldingChange(
-                        fund_id=fund.id, ticker_id=ph.ticker_id, change_date=today,
+                        fund_id=fund.id, symbol=ph.symbol, change_date=today,
                         direction="sell", reason="Not in best ideas top levels",
                     ))
                     continue
                 if found_in_fetched.ranking - ph.ranking >= ranking_gap_drop:
                     holdings_changed.append(FundHoldingChange(
-                        fund_id=fund.id, ticker_id=ph.ticker_id, change_date=today,
+                        fund_id=fund.id, symbol=ph.symbol, change_date=today,
                         direction="sell", reason="Dropped below min ranking",
                     ))
                     continue
@@ -282,20 +275,20 @@ def generate(
 
         missing = strategy.holdings - len(todays_holdings)
         if missing > 0:
-            existing_ids = {th.ticker_id for th in todays_holdings}
+            existing_symbols = {th.symbol for th in todays_holdings}
             for fi in ideal_holdings:
-                if fi.ticker_id in existing_ids:
+                if fi.symbol in existing_symbols:
                     continue
                 todays_holdings.append(FundHolding(
-                    fund_id=fund.id, holding_date=today, ticker_id=fi.ticker_id,
+                    fund_id=fund.id, holding_date=today, symbol=fi.symbol,
                     ranking=fi.ranking, source_etf_id=fi.source_etf_id, max_delta=fi.max_delta,
                 ))
                 holdings_changed.append(FundHoldingChange(
-                    fund_id=fund.id, ticker_id=fi.ticker_id, change_date=today, direction="buy",
+                    fund_id=fund.id, symbol=fi.symbol, change_date=today, direction="buy",
                     ranking=fi.ranking, appearances=fi.appearances, max_delta=fi.max_delta,
                     top_delta_provider_etf_id=fi.source_etf_id, all_provider_etf_ids=fi.all_provider_ids,
                 ))
-                existing_ids.add(fi.ticker_id)
+                existing_symbols.add(fi.symbol)
                 missing -= 1
                 if missing == 0:
                     break
@@ -314,11 +307,11 @@ def apply_equal_weights(holdings: List[FundHolding]) -> None:
 
 def apply_market_cap_weights(
     holdings: List[FundHolding],
-    market_cap_map: dict[int, float],
+    market_cap_map: dict[str, float],
 ) -> None:
-    total = sum(market_cap_map.get(h.ticker_id, 0.0) for h in holdings)
+    total = sum(market_cap_map.get(h.symbol, 0.0) for h in holdings)
     if total == 0:
         return
     for h in holdings:
-        mc = market_cap_map.get(h.ticker_id)
+        mc = market_cap_map.get(h.symbol)
         h.weight = (mc / total) if mc else None

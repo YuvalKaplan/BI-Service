@@ -8,7 +8,7 @@ from modules.core.db import db_pool_instance
 
 @dataclass
 class TickerValue:
-    symbol: str
+    ticker_id: int
     value_date: date | None
     stock_price: float | None
     market_cap: float | None
@@ -18,25 +18,25 @@ def ticker_values_to_df(values: list[TickerValue]) -> pd.DataFrame:
 
     return (
         df
-        .dropna(subset=["symbol", "stock_price", "market_cap"])
+        .dropna(subset=["ticker_id", "stock_price", "market_cap"])
         .query("stock_price > 0 and market_cap > 0")
     )
 
 
-def fetch_latest_market_caps_within_window(symbols: List[str], as_of_date: date, days: int) -> List[TickerValue]:
+def fetch_latest_market_caps_within_window(ticker_ids: List[int], as_of_date: date, days: int) -> List[TickerValue]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(TickerValue)) as cur:
                 query = """
-                    SELECT DISTINCT ON (symbol) symbol, value_date, stock_price, market_cap
+                    SELECT DISTINCT ON (ticker_id) ticker_id, value_date, stock_price, market_cap
                     FROM ticker_value
-                    WHERE symbol = ANY(%s)
+                    WHERE ticker_id = ANY(%s)
                       AND value_date <= %s
                       AND value_date >= %s - (%s * INTERVAL '1 day')
                       AND market_cap IS NOT NULL
-                    ORDER BY symbol, value_date DESC;
+                    ORDER BY ticker_id, value_date DESC;
                 """
-                cur.execute(query, (symbols, as_of_date, as_of_date, days))
+                cur.execute(query, (ticker_ids, as_of_date, as_of_date, days))
                 return cur.fetchall()
     except Error as e:
         raise Exception(f"Error fetching latest market caps within window: {e}")
@@ -47,9 +47,9 @@ def upsert(item: TickerValue) -> None:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 query = """
-                    INSERT INTO ticker_value (symbol, value_date, stock_price, market_cap)
+                    INSERT INTO ticker_value (ticker_id, value_date, stock_price, market_cap)
                     VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (symbol, value_date)
+                    ON CONFLICT (ticker_id, value_date)
                     DO UPDATE
                     SET
                         stock_price = EXCLUDED.stock_price,
@@ -57,8 +57,8 @@ def upsert(item: TickerValue) -> None:
                     WHERE ticker_value.stock_price IS DISTINCT FROM EXCLUDED.stock_price
                     OR ticker_value.market_cap  IS DISTINCT FROM EXCLUDED.market_cap;
                 """
-                cur.execute(query, (item.symbol, item.value_date, item.stock_price, item.market_cap))
-    
+                cur.execute(query, (item.ticker_id, item.value_date, item.stock_price, item.market_cap))
+
     except Error as e:
         raise Exception(f"Error inserting the Batch item into the DB: {e}")
 
@@ -72,20 +72,20 @@ def upsert_bulk(items: List[TickerValue]) -> None:
 
                 insert_sql = """
                     INSERT INTO ticker_value (
-                        symbol,
+                        ticker_id,
                         value_date,
                         stock_price,
                         market_cap
                     )
                     VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (symbol, value_date)
+                    ON CONFLICT (ticker_id, value_date)
                     DO UPDATE SET
                         stock_price = EXCLUDED.stock_price,
                         market_cap = EXCLUDED.market_cap;
                 """
 
                 insert_values = [
-                    (i.symbol, i.value_date, i.stock_price, i.market_cap)
+                    (i.ticker_id, i.value_date, i.stock_price, i.market_cap)
                     for i in items
                 ]
 

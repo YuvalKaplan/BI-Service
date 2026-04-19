@@ -80,6 +80,42 @@ def get_stock_profile(symbol: str) -> dict[str,str] | str:
         log.record_error(message)
         return message
     
+def search_by_isin(isin: str) -> dict | None:
+    try:
+        throttle_api_calls()
+        url = f"{FMP_API_URL}/search-isin?isin={isin}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        result = get_jsonparsed_data(url)
+        if not isinstance(result, list) or len(result) == 0:
+            return None
+        return result[0]
+    except Exception as e:
+        log.record_notice(f"Failed to search by ISIN '{isin}': {e}")
+        return None
+
+def search_by_symbol(query: str) -> list[dict]:
+    try:
+        throttle_api_calls()
+        url = f"{FMP_API_URL}/search-symbol?query={query}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        result = get_jsonparsed_data(url)
+        if not isinstance(result, list):
+            return []
+        return result
+    except Exception as e:
+        log.record_notice(f"Failed to search by symbol '{query}': {e}")
+        return []
+
+def fetch_available_exchanges() -> list[dict]:
+    try:
+        throttle_api_calls()
+        url = f"{FMP_API_URL}/available-exchanges?apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        result = get_jsonparsed_data(url)
+        if not isinstance(result, list):
+            return []
+        return result
+    except Exception as e:
+        log.record_notice(f"Failed to fetch available exchanges: {e}")
+        return []
+
 def get_stock_historic_prices(symbol: str, start: date, end: date) -> list[dict[str,str]] | str:
     try:
         throttle_api_calls()

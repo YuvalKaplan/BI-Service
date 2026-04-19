@@ -3,6 +3,7 @@ from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
 from modules.core.db import db_pool_instance
+from modules.core.protocols import CategorizeEtfProtocol
 
 
 @dataclass
@@ -24,7 +25,7 @@ class CategorizeEtf:
 
 @dataclass
 class CategorizeEtfDownload:
-    etf: CategorizeEtf
+    etf: CategorizeEtfProtocol
     file_name: str | None = None
     data: bytes | None = None
 

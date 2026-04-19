@@ -6,7 +6,7 @@ from modules.object.exit import cleanup
 from modules.core.db import db_pool_instance
 from modules.core import sender
 from modules.calc.model_fund import results_to_string
-from modules.cron import etf_downloader, best_ideas_generator, funds_update, stocks_categorize, stocks_downloader
+from modules.cron import etf_downloader, best_ideas_generator, funds_update, stocks_categorize
 from modules.object import ticker
 
 SEPERATOR_LINE = "-" * 20 + "\n"
@@ -37,16 +37,6 @@ if __name__ == '__main__':
             message_actions += f"Holdings Download\n" + SEPERATOR_LINE
             message_actions += f"{stats_downloader}\n" + SEPERATOR_LINE
             message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
-            message_actions += BREAKER_LINE
-
-            try:
-                total_updated, missing_data = stocks_downloader.run()
-            except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on download stock data (profile, price and market cap) with error:\n{e}\n\n")
-                raise e
-            
-            message_actions += f"Stocks updated: {total_updated - missing_data} out of {total_updated}\n"
-            message_actions += f"Stocks missing data: {missing_data}\n"
             message_actions += BREAKER_LINE
 
             try:
