@@ -129,6 +129,21 @@ def clean_numeric_column(df: pd.DataFrame, column: str, as_type: str = "float") 
 
 EXCLUDED_TICKERS = {'USD', 'CAD', 'EUR', 'TICKER'}
 
+_TREASURY_SECURITIES = {
+    'XTSLA', 'AGPXX', 'BOXX', 'CMQXX', 'DTRXX', 'FGXXX',
+    'FTIXX', 'GVMXX', 'JIMXX', 'JTSXX', 'MGMXX', 'PGLBB', 'SALXX',
+}
+
+def _sanitize_ticker_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows that are not valid equity holdings, based on the raw ticker string and name.
+    Must run before normalization so the full original ticker value is available for pattern matching."""
+    raw = df['ticker'].astype(str).str.strip()
+    root = raw.str.split().str[0].str.split(r'[.\-_]').str[0]
+    not_option   = ~raw.str.match(r'^\S+\s+\d{6}[CP]\d+', na=False)
+    not_treasury = ~root.isin(_TREASURY_SECURITIES)
+    not_etf_fund = ~df['name'].str.contains(r'\b(ETF|fund)\b', case=False, regex=True, na=False)
+    return df[not_option & not_treasury & not_etf_fund]
+
 def normalize_ticker_series(series: pd.Series) -> pd.Series:
     return (
         series
@@ -246,7 +261,7 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
     else:
         df["holding_date"] = pd.to_datetime(df["holding_date"], format=mapping.date.format, errors="coerce")
     
-    required_cols = ["holding_date", "ticker", "weight"]
+    required_cols = ["holding_date", "ticker", "weight", "name"]
     df = df.dropna(subset=required_cols)
 
     df["market_value"] = clean_numeric_column(df, "market_value")
@@ -264,6 +279,7 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
     if mapping.market_value.shift:
         df["market_value"] = df["market_value"] * (10 ** mapping.market_value.shift)
 
+    df = _sanitize_ticker_df(df)
     df['ticker'] = normalize_ticker_series(df['ticker'])
     df = filter_ticker_df(df, 'ticker', mapping.remove_tickers)
 
@@ -281,12 +297,16 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
     df = df.drop(columns=["price"], errors="ignore")
 
     # Sum up holdings that have the same ticker; take latest holding_date if rows differ
-    df = df.groupby('ticker', as_index=False).agg({
+    agg: dict = {
         'market_value': 'sum',
         'shares': 'sum',
         'weight': 'sum',
-        'holding_date': 'max'
-    })
+        'holding_date': 'max',
+    }
+    for col in ('isin', 'cusip', 'sedol', 'name'):
+        if col in df.columns:
+            agg[col] = 'first'
+    df = df.groupby('ticker', as_index=False).agg(agg)
 
     return df    
 

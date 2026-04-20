@@ -85,14 +85,27 @@ def fetch_by_ids(ids: list[int]) -> list[Ticker]:
     except Error as e:
         raise Exception(f"Error fetching Tickers by ids from the DB: {e}")
 
-def fetch_by_isin(isin: str) -> Ticker | None:
+def fetch_by_isin_and_symbol(isin: str, symbol: str, exchange: str | None = None) -> Ticker | None:
+    """Fetch by ISIN + base symbol (suffix stripped) + optional exchange.
+    Handles cross-listed stocks that share an ISIN across exchanges."""
+    import re as _re
+    base_symbol = _re.split(r'[\s.]', symbol)[0]
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Ticker)) as cur:
-                cur.execute('SELECT * FROM ticker WHERE isin = %s;', (isin,))
+                if exchange:
+                    cur.execute(
+                        'SELECT * FROM ticker WHERE isin = %s AND symbol = %s AND exchange = %s;',
+                        (isin, base_symbol, exchange),
+                    )
+                else:
+                    cur.execute(
+                        'SELECT * FROM ticker WHERE isin = %s AND symbol = %s;',
+                        (isin, base_symbol),
+                    )
                 return cur.fetchone()
     except Error as e:
-        raise Exception(f"Error fetching Ticker by ISIN from the DB: {e}")
+        raise Exception(f"Error fetching Ticker by ISIN and symbol from the DB: {e}")
 
 
 # ── DB write ─────────────────────────────────────────────────────────────────
@@ -125,35 +138,6 @@ def upsert_by_symbol(item: Ticker) -> int:
                 return row[0]
     except Error as e:
         raise Exception(f"Error upserting ticker by symbol into the DB: {e}")
-
-def upsert_by_isin(item: Ticker) -> int:
-    try:
-        with db_pool_instance.get_connection() as conn:
-            with conn.cursor() as cur:
-                query = """
-                    INSERT INTO ticker (symbol, isin, cusip, cik, name, exchange, industry, sector, currency, source, type_from)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (isin)
-                    DO UPDATE
-                    SET symbol = EXCLUDED.symbol,
-                        cusip = EXCLUDED.cusip,
-                        cik = EXCLUDED.cik,
-                        name = EXCLUDED.name,
-                        exchange = EXCLUDED.exchange,
-                        industry = EXCLUDED.industry,
-                        sector = EXCLUDED.sector,
-                        currency = EXCLUDED.currency,
-                        source = EXCLUDED.source,
-                        type_from = EXCLUDED.type_from
-                    RETURNING id;
-                """
-                cur.execute(query, (item.symbol, item.isin, item.cusip, item.cik, item.name, item.exchange, item.industry, item.sector, item.currency, item.source, item.type_from))
-                row = cur.fetchone()
-                if row is None:
-                    raise Exception("INSERT ... RETURNING id returned no row")
-                return row[0]
-    except Error as e:
-        raise Exception(f"Error upserting ticker by ISIN into the DB: {e}")
 
 def update_esg_qualified(symbols: list[str]) -> None:
     if not symbols:
@@ -243,7 +227,7 @@ def update_style_from_provider_etfs() -> None:
 # encounter and storing ticker, ticker_value, and ESG data in one pass.
 # Per-process caches avoid duplicate API calls for the same symbol/ISIN.
 
-from modules.core.api_stocks import get_stock_profile, search_by_isin as _search_by_isin, search_by_symbol as _search_by_symbol, fetch_esg_data, fetch_available_exchanges as _fetch_available_exchanges
+from modules.core import api_stocks
 from modules.object.ticker_value import TickerValue, upsert as _upsert_tv
 from modules.calc import esg as _esg
 
@@ -255,9 +239,9 @@ _exchange_suffix_map:  dict[str, str]        = {}  # exchange code → symbolSuf
 
 
 def upsert_ticker(
-    symbol: str | None,
-    isin: str | None,
     region: str | None,
+    symbol: str | None,
+    isin: str | None = None,
     name: str | None = None,
 ) -> int | None:
     """Return the DB id for a holding row, resolving and storing all ticker data as needed."""
@@ -266,13 +250,11 @@ def upsert_ticker(
     else:
         return _resolve_non_us(symbol, isin, name)
 
-
 def _get_value_date() -> date:
     now_et = datetime.now(ZoneInfo("America/New_York"))
     return (now_et - timedelta(days=1) if now_et.hour < _VALUE_DATE_CUT_OFF_HOUR else now_et).date()
 
-
-def _populate(profile: dict, symbol: str, isin: str | None, unique_identifier: str) -> int | None:
+def _populate(profile: dict, symbol: str, isin: str | None) -> int | None:
     """Shared post-profile logic: upsert ticker, validate name, store value + ESG."""
     exchange = profile.get('exchange')
     ticker = Ticker(
@@ -288,10 +270,7 @@ def _populate(profile: dict, symbol: str, isin: str | None, unique_identifier: s
         source='fmp',
         type_from='holding',
     )
-    if unique_identifier == 'symbol':
-        ticker_id = upsert_by_symbol(ticker)
-    else:
-        ticker_id = upsert_by_isin(ticker)
+    ticker_id = upsert_by_symbol(ticker)
 
     name = profile.get('companyName')
     if not name:
@@ -305,7 +284,6 @@ def _populate(profile: dict, symbol: str, isin: str | None, unique_identifier: s
     _store_esg(symbol, exchange)
     return ticker_id
 
-
 def _resolve_by_symbol(symbol: str | None) -> int | None:
     if not symbol:
         return None
@@ -317,20 +295,20 @@ def _resolve_by_symbol(symbol: str | None) -> int | None:
         _symbol_cache[symbol] = None
         return None
 
-    profile = get_stock_profile(symbol)
+    profile = api_stocks.get_stock_profile(symbol)
     if not isinstance(profile, dict):
-        log.record_notice(f"No FMP profile for symbol '{symbol}': {profile}")
+        log.record_notice(f"No stocks data provider profile for symbol '{symbol}': {profile}")
         result = existing.id if existing else None
         _symbol_cache[symbol] = result
         return result
 
-    result = _populate(profile, symbol, None, 'symbol')
+    result = _populate(profile, symbol, None)
     _symbol_cache[symbol] = result
     return result
 
 
-def _resolve_non_us(symbol: str | None, isin: str | None, name: str | None) -> int | None:
-    """Non-US path: prefer ISIN lookup; fall back to symbol+name search when ISIN is absent."""
+def _resolve_non_us(symbol: str | None, isin: str | None, name: str | None = None) -> int | None:
+    """Non-US path: prefer ISIN lookup; fall back to symbol search when ISIN is absent."""
     if isin:
         return _resolve_by_isin(isin)
     return _resolve_by_symbol_search(symbol, name)
@@ -342,38 +320,65 @@ def _resolve_by_isin(isin: str | None) -> int | None:
     if isin in _isin_cache:
         return _isin_cache[isin]
 
-    existing = fetch_by_isin(isin)
+    search_result = api_stocks.search_by_isin(isin)
+    if not search_result:
+        log.record_notice(f"No stocks data provider search result for ISIN '{isin}'")
+        _isin_cache[isin] = None
+        return None
+    symbol = search_result.get('symbol')
+    if not symbol:
+        _isin_cache[isin] = None
+        return None
+    exchange = search_result.get('stockExchange')
+
+    existing = fetch_by_isin_and_symbol(isin, symbol, exchange)
     if existing and existing.invalid:
         _isin_cache[isin] = None
         return None
 
-    # Use symbol already in DB; fall back to ISIN search
-    symbol = existing.symbol if existing and existing.symbol else None
-    if not symbol:
-        search_result = _search_by_isin(isin)
-        if not search_result:
-            log.record_notice(f"No FMP search result for ISIN '{isin}'")
-            _isin_cache[isin] = None
-            return None
-        symbol = search_result.get('symbol')
-        if not symbol:
-            _isin_cache[isin] = None
-            return None
-
-    profile = get_stock_profile(symbol)
+    profile = api_stocks.get_stock_profile(symbol)
     if not isinstance(profile, dict):
-        log.record_notice(f"No FMP profile for symbol '{symbol}' (ISIN '{isin}'): {profile}")
+        log.record_notice(f"No stocks data provider profile for symbol '{symbol}' (ISIN '{isin}'): {profile}")
         result = existing.id if existing else None
         _isin_cache[isin] = result
         return result
 
-    result = _populate(profile, symbol, isin, 'isin')
+    result = _populate(profile, symbol, isin)
     _isin_cache[isin] = result
     return result
 
 
-def _resolve_by_symbol_search(symbol: str | None, holdings_name: str | None, cusip: str | None = None) -> int | None:
-    """Resolve a non-US ticker that has no ISIN via FMP symbol search + name verification."""
+_NAME_NOISE = {
+    'the', 'a', 'an',
+    'inc', 'incorporated', 'corp', 'corporation', 'co', 'company', 'cos',
+    'ltd', 'limited', 'llc', 'lp', 'llp',
+    'plc', 'ag', 'se', 'sa', 'sas', 'nv', 'bv', 'gmbh', 'spa', 'srl', 'ab',
+    'holdings', 'holding', 'group', 'international', 'industries', 'industry',
+}
+
+def _name_tokens(name: str) -> list[str]:
+    """Return the meaningful lowercase tokens from a company name."""
+    raw = re.split(r'[\s.\-,&/()\']', name.lower())
+    return [t for t in raw if len(t) > 1 and t not in _NAME_NOISE]
+
+def _names_match(holding_name: str, api_name: str) -> bool:
+    """Return True if names share at least one meaningful token, or if comparison is not meaningful.
+    Returns True (non-comparable = don't filter) when either name is empty, an ETF/fund, or
+    yields no meaningful tokens after stripping noise words and single letters."""
+    if not holding_name or not api_name:
+        return True
+    if re.search(r'\b(etf|fund|trust|index)\b', holding_name, re.IGNORECASE) or \
+       re.search(r'\b(etf|fund|trust|index)\b', api_name, re.IGNORECASE):
+        return True
+    a = set(_name_tokens(holding_name))
+    b = set(_name_tokens(api_name))
+    if not a or not b:
+        return True
+    return bool(a & b)
+
+
+def _resolve_by_symbol_search(symbol: str | None, name: str | None = None) -> int | None:
+    """Resolve a non-US ticker that has no ISIN via FMP symbol search."""
     if not symbol:
         return None
 
@@ -385,7 +390,7 @@ def _resolve_by_symbol_search(symbol: str | None, holdings_name: str | None, cus
     # "2330.T" → "2330", "700 HK" → "700", "A005930" → "A005930"
     query = re.split(r'[\s.]', symbol)[0]
 
-    candidates = _search_by_symbol(query)
+    candidates = api_stocks.search_by_symbol(query)
     matched = _filter_symbol_candidates(candidates, query)
 
     result = None
@@ -393,40 +398,32 @@ def _resolve_by_symbol_search(symbol: str | None, holdings_name: str | None, cus
         fmp_symbol = candidate.get('symbol')
         if not fmp_symbol:
             continue
-        profile = get_stock_profile(fmp_symbol)
+        if name and not _names_match(name, candidate.get('name', '')):
+            continue
+        profile = api_stocks.get_stock_profile(fmp_symbol)
         if not isinstance(profile, dict):
             continue
-        if _names_match(holdings_name, profile.get('companyName')):
-            result = _populate(profile, fmp_symbol, None, 'symbol')
-            break
+        result = _populate(profile, fmp_symbol, None)
+        break
 
     if result is None:
-        log.record_notice(f"No verified FMP match for non-US symbol '{symbol}' (name='{holdings_name}')")
+        log.record_notice(f"No verified stocks data provider match for non-US symbol '{symbol}'")
 
     _symbol_cache[cache_key] = result
     return result
 
-
 def _filter_symbol_candidates(results: list[dict], query: str) -> list[dict]:
-    """Keep results where the FMP symbol exactly matches query or is query.<exchange-letters>."""
-    matched = []
+    """Keep results where the FMP symbol exactly matches query or is query.<exchange-letters>.
+    Exact matches (no suffix) are returned first, followed by suffixed matches in original order."""
+    exact = []
+    suffixed = []
     for r in results:
         s = r.get('symbol', '')
         if s == query:
-            matched.append(r)
+            exact.append(r)
         elif s.startswith(query + '.') and s[len(query) + 1:].isalpha():
-            matched.append(r)
-    return matched
-
-
-def _names_match(holdings_name: str | None, fmp_name: str | None) -> bool:
-    """True when the first word of both names matches (case-insensitive)."""
-    if not holdings_name or not fmp_name:
-        return False
-    first_holdings = holdings_name.strip().split()[0].upper()
-    first_fmp = fmp_name.strip().split()[0].upper()
-    return first_holdings == first_fmp
-
+            suffixed.append(r)
+    return exact + suffixed
 
 def _store_ticker_value(ticker_id: int, profile: dict) -> None:
     try:
@@ -448,7 +445,7 @@ def _get_exchange_suffix(exchange: str | None) -> str:
     if not exchange:
         return ''
     if not _exchange_suffix_map:
-        for e in _fetch_available_exchanges():
+        for e in api_stocks.fetch_available_exchanges():
             code = e.get('exchange')
             suffix = e.get('symbolSuffix', '')
             if code:
@@ -460,7 +457,7 @@ def _store_esg(symbol: str, exchange: str | None) -> None:
     try:
         suffix = _get_exchange_suffix(exchange)
         fmp_symbol = f"{symbol}{suffix}" if suffix else symbol
-        disclosure, rating = fetch_esg_data(fmp_symbol)
+        disclosure, rating = api_stocks.fetch_esg_data(fmp_symbol)
         esg_qualified, esg_factors = _esg.qualify(disclosure, rating)
         update_esg_data(symbol, esg_qualified, esg_factors)
     except Exception as e:

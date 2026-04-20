@@ -25,11 +25,10 @@ if __name__ == '__main__':
                         df = map_data(full_rows=full_rows, file_name=d.file_name, date_from_page=d.date_from_page, mapping=map)
                         df['ticker_id'] = df.apply(
                             lambda row: upsert_ticker(
-                                symbol=row.get('symbol'),
-                                isin=row.get('isin'),
                                 region=d.etf.region,
+                                symbol=row.get('ticker'),
+                                isin=row.get('isin'),
                                 name=row.get('name'),
-                                cusip=row.get('cusip'),
                             ),
                             axis=1
                         )

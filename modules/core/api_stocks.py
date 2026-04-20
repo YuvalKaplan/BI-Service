@@ -9,7 +9,7 @@ from threading import Lock
 from urllib.request import urlopen
 import json
 
-FMP_API_URL = 'https://financialmodelingprep.com/stable/'
+FMP_API_URL = 'https://financialmodelingprep.com/stable'
 
 CALLS_PER_MINUTE = 200
 WINDOW_SECONDS = 60.0
@@ -323,8 +323,8 @@ def fetch_esg_data(symbol: str) -> tuple[Dict, Dict]:
 
     try:
         endpoints = {
-            "disclosure": f"{FMP_API_URL}/esg-disclosure?symbol={symbol}&apikey={apikey}",
-            "rating":     f"{FMP_API_URL}/esg-rating?symbol={symbol}&apikey={apikey}",
+            "disclosure": f"{FMP_API_URL}/esg-disclosures?symbol={symbol}&apikey={apikey}",
+            "rating":     f"{FMP_API_URL}/esg-ratings?symbol={symbol}&apikey={apikey}",
         }
         results = {}
         with ThreadPoolExecutor(max_workers=2) as executor:
@@ -334,8 +334,8 @@ def fetch_esg_data(symbol: str) -> tuple[Dict, Dict]:
 
         d = results["disclosure"]
         r = results["rating"]
-        disclosure = d[0] if isinstance(d, list) and d else {}
-        rating     = r[0] if isinstance(r, list) and r else {}
+        disclosure = max(d, key=lambda x: x.get('date', ''), default={}) if isinstance(d, list) and d else {}
+        rating     = max(r, key=lambda x: x.get('fiscalYear', ''), default={}) if isinstance(r, list) and r else {}
         return disclosure, rating
 
     except Exception as e:
