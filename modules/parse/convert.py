@@ -3,11 +3,11 @@ import os
 import csv
 import warnings
 from datetime import date, datetime, timezone, timedelta
-import re
 from openpyxl import load_workbook
 import xlrd
 import pandas as pd
 from modules.core.util import clean_date
+from modules.ticker import util as tu
 from modules.object.provider import Mapping
 
 FILE_FOLDER = "./.downloads/"
@@ -127,38 +127,6 @@ def clean_numeric_column(df: pd.DataFrame, column: str, as_type: str = "float") 
     
     return col_numeric
 
-EXCLUDED_TICKERS = {'USD', 'CAD', 'EUR', 'TICKER'}
-
-_TREASURY_SECURITIES = {
-    'XTSLA', 'AGPXX', 'BOXX', 'CMQXX', 'DTRXX', 'FGXXX',
-    'FTIXX', 'GVMXX', 'JIMXX', 'JTSXX', 'MGMXX', 'PGLBB', 'SALXX',
-}
-
-def _sanitize_ticker_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Drop rows that are not valid equity holdings, based on the raw ticker string and name.
-    Must run before normalization so the full original ticker value is available for pattern matching."""
-    raw = df['ticker'].astype(str).str.strip()
-    root = raw.str.split().str[0].str.split(r'[.\-_]').str[0]
-    not_option   = ~raw.str.match(r'^\S+\s+\d{6}[CP]\d+', na=False)
-    not_treasury = ~root.isin(_TREASURY_SECURITIES)
-    not_etf_fund = ~df['name'].str.contains(r'\b(ETF|fund)\b', case=False, regex=True, na=False)
-    return df[not_option & not_treasury & not_etf_fund]
-
-def normalize_ticker_series(series: pd.Series) -> pd.Series:
-    return (
-        series
-        .astype(str)
-        .str.strip()
-        .str.split().str[0]
-        .str.split(r'[.\-_]').str[0]
-    )
-
-def filter_ticker_df(df: pd.DataFrame, col: str, remove_tickers: list[str]) -> pd.DataFrame:
-    return df[
-        df[col].str.fullmatch(r'[A-Z0-9]+', na=False) &
-        ~df[col].isin(EXCLUDED_TICKERS) &
-        ~df[col].isin(remove_tickers)
-    ]
 
 def convert_to_data_frame(full_rows: list[list[str]], mapping: Mapping) -> pd.DataFrame:
     skip = mapping.skip_rows
@@ -261,6 +229,16 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
     else:
         df["holding_date"] = pd.to_datetime(df["holding_date"], format=mapping.date.format, errors="coerce")
     
+    missing_mask = df['ticker'].isna() | (df['ticker'].astype(str).str.strip() == '')
+    if missing_mask.any():
+        has_isin = 'isin' in df.columns
+        for idx in df[missing_mask].index:
+            isin = str(df.at[idx, 'isin']) if has_isin and pd.notna(df.at[idx, 'isin']) else None
+            name = str(df.at[idx, 'name']) if pd.notna(df.at[idx, 'name']) else None
+            symbol = tu.resolve_ticker_from_alt_data(isin=isin, name=name)
+            if symbol:
+                df.at[idx, 'ticker'] = symbol
+
     required_cols = ["holding_date", "ticker", "weight", "name"]
     df = df.dropna(subset=required_cols)
 
@@ -279,9 +257,9 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
     if mapping.market_value.shift:
         df["market_value"] = df["market_value"] * (10 ** mapping.market_value.shift)
 
-    df = _sanitize_ticker_df(df)
-    df['ticker'] = normalize_ticker_series(df['ticker'])
-    df = filter_ticker_df(df, 'ticker', mapping.remove_tickers)
+    df = df[df.apply(lambda row: tu.is_valid_holding(row['ticker'], row.get('name')), axis=1)]
+    df['ticker'] = tu.normalize_ticker_series(df['ticker'])
+    df = tu.filter_ticker_df(df, 'ticker', mapping.remove_tickers)
 
     # drop rows where the shares, market_value or weight is empty or 0 (used for cash holdings)
     df = df[df["shares"].notna() & (df["shares"] > 0)]
@@ -316,8 +294,8 @@ def get_tickers(full_rows: list[list[str]], mapping: Mapping) -> list[str]:
     if not ticker_col_name:
         raise Exception("No ticker column defined in mapping.")
 
-    df[ticker_col_name] = normalize_ticker_series(df[ticker_col_name])
-    df = filter_ticker_df(df, ticker_col_name, mapping.remove_tickers)
+    df[ticker_col_name] = tu.normalize_ticker_series(df[ticker_col_name])
+    df = tu.filter_ticker_df(df, ticker_col_name, mapping.remove_tickers)
     distinct_tickers = df[ticker_col_name].unique().tolist()    
     return distinct_tickers
 

@@ -95,13 +95,25 @@ def search_by_isin(isin: str) -> dict | None:
 def search_by_symbol(query: str) -> list[dict]:
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/search-symbol?query={query}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{FMP_API_URL}/search-symbol?query={query}&limit=1000&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         result = get_jsonparsed_data(url)
         if not isinstance(result, list):
             return []
         return result
     except Exception as e:
         log.record_notice(f"Failed to search by symbol '{query}': {e}")
+        return []
+
+def search_by_name(query: str) -> list[dict]:
+    try:
+        throttle_api_calls()
+        url = f"{FMP_API_URL}/search-name?query={query}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        result = get_jsonparsed_data(url)
+        if not isinstance(result, list):
+            return []
+        return result
+    except Exception as e:
+        log.record_notice(f"Failed to search by name '{query}': {e}")
         return []
 
 def fetch_available_exchanges() -> list[dict]:

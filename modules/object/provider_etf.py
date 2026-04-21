@@ -9,15 +9,15 @@ from modules.object.provider import Provider
 @dataclass
 class ProviderEtf:
     id: int
-    created_at: datetime | None
-    provider_id: int | None
-    disabled: bool | None
+    created_at: datetime
+    provider_id: int
+    disabled: bool
     disabled_reason: str | None
+    region: str
     name: str | None
     description: str | None
     isin: str | None
     ticker: str | None
-    region: str | None
     cap_type: str | None
     style_type: str | None
     benchmark: str | None
@@ -49,11 +49,13 @@ def fetch_regions_by_ids(ids: list[int]) -> dict[int, str | None]:
             cur.execute('SELECT id, region FROM provider_etf WHERE id = ANY(%s);', (ids,))
             return {row[0]: row[1] for row in cur.fetchall()}
 
-def fetch_by_id(id: int) -> ProviderEtf | None:
+def fetch_by_id(id: int) -> ProviderEtf:
     with db_pool_instance.get_connection() as conn:
         with conn.cursor(row_factory=class_row(ProviderEtf)) as cur:
             cur.execute('SELECT * FROM provider_etf WHERE id = %s;', (id,))
             item = cur.fetchone()
+    if item is None:
+        raise Exception(f"Provider ETF not found for id={id}")
     return item
 
 def fetch_by_provider_id(provider_id: int) -> list[ProviderEtf]:

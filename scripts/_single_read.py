@@ -15,9 +15,6 @@ if __name__ == '__main__':
         filename = 'NBCE-04_16_2026.xlsx'
 
         etf = provider_etf.fetch_by_id(provider_etf_id)
-        if not etf or not etf.provider_id:
-            raise Exception(f"No provider_etf found with id={provider_etf_id}")
-
         p = provider.fetch_by_id(etf.provider_id)
         if not p:
             raise Exception(f"No provider found with id={etf.provider_id}")

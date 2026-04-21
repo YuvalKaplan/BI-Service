@@ -6,7 +6,7 @@ from modules.core.util import get_domain_from_url
 from modules.object.provider import Provider, update_domain, getMappingFromJson
 from modules.object.provider_etf import update_last_download
 from modules.object.provider_etf_holding import insert_all_holdings
-from modules.object.ticker import upsert_ticker
+from modules.ticker.resolver import resolve
 
 from modules.parse.url import scrape_provider
 from modules.parse.convert import load, map_data
@@ -65,7 +65,7 @@ def process_provider(provider: Provider, save_dir: str | None = None) -> list[Et
                     mapping = d.etf.mapping or d.provider.mapping
                     if mapping and d.file_name and d.data:
                         if save_dir:
-                            file_name = f"{d.etf.id} - {d.etf.region} - {d.file_name}" if d.etf.region else f"{d.etf.id} - {d.file_name}"
+                            file_name = f"{d.etf.id} - {d.etf.region} - {d.file_name}"
                             with open(os.path.join(save_dir, file_name), 'wb') as f:
                                 f.write(d.data)
 
@@ -76,7 +76,7 @@ def process_provider(provider: Provider, save_dir: str | None = None) -> list[Et
 
                         log.record_status(f"Resolving tickers for ETF '{d.etf.name}'...")
                         df['ticker_id'] = df.apply(
-                            lambda row: upsert_ticker(
+                            lambda row: resolve(
                                 region=d.etf.region,
                                 symbol=row.get('ticker'),
                                 isin=row.get('isin'),

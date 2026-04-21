@@ -266,7 +266,7 @@ def scrape_provider_etf(cp: Provider, etf: ProviderEtf) -> EtfDownload:
         raise Exception('Missing URL or trigger_download for provider ETF.')
 
     with Stealth().use_sync(sync_playwright()) as p:
-        browser = p.chromium.launch(headless=False, args=CHROME_LAUNCH_ARGS)
+        browser = p.chromium.launch(headless=True, args=CHROME_LAUNCH_ARGS)
         context = browser.new_context(
             user_agent=REAL_USER_AGENT,
             viewport={'width': 1920, 'height': 1080},

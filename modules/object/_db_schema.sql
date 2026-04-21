@@ -611,11 +611,7 @@ CREATE TABLE public.provider_etf (
     provider_id integer NOT NULL,
     disabled boolean DEFAULT false NOT NULL,
     disabled_reason text,
-    name text,
-    description text,
-    isin text,
-    ticker text,
-    region text,
+    region text NOT NULL,
     cap_type text,
     style_type text,
     benchmark text,
@@ -628,7 +624,11 @@ CREATE TABLE public.provider_etf (
     trigger_download jsonb,
     mapping jsonb,
     file_format character varying(10),
-    last_downloaded timestamp without time zone
+    last_downloaded timestamp without time zone,
+    name text,
+    description text,
+    isin text,
+    ticker text
 );
 
 
