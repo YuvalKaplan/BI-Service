@@ -65,7 +65,7 @@ def run() -> tuple[int, int, list[str]]:
     try:
         batch_run_id = None
         if batch_run_id is None:
-            batch_run_id = batch_run.insert(batch_run.BatchRun('best_ideas_generator', 'auto'))
+            batch_run_id = batch_run.insert(batch_run.BatchRun(process='best_ideas_generator', activation='auto'))
 
         providers = provider.fetch_active_providers()
         log.record_status(f"Running Best Ideas Generator batch job ID {batch_run_id} - will proccess {len(providers)} providers.")

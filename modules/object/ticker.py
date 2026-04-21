@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from typing import Optional
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
@@ -7,50 +8,24 @@ from modules.core.db import db_pool_instance
 
 @dataclass
 class Ticker:
-    id: int | None
-    symbol: str
-    created_at: datetime | None
-    source: str | None
-    style_type: str | None
-    cap_type: str | None
-    type_from: str | None
-    isin: str | None
-    cusip: str | None
-    cik: str | None
-    exchange: str | None
-    name: str | None
-    industry: str | None
-    sector: str | None
-    currency: str | None
-    esg_factors: dict | None
-    esg_qualified: bool | None
-    invalid: str | None
-
-    def __init__(self, symbol: str, created_at: datetime | None = None,
-                 source: str | None = None, style_type: str | None = None, cap_type: str | None = None, type_from: str | None = None,
-                 isin: str | None = None, cusip: str | None = None, cik: str | None = None, exchange: str | None = None,
-                 name: str | None = None, industry: str | None = None, sector: str | None = None,
-                 currency: str | None = None, esg_factors: dict | None = None,
-                 esg_qualified: bool | None = None, invalid: str | None = None,
-                 id: int | None = None):
-        self.id = id
-        self.symbol = symbol
-        self.created_at = created_at
-        self.source = source
-        self.style_type = style_type
-        self.cap_type = cap_type
-        self.type_from = type_from
-        self.isin = isin
-        self.cusip = cusip
-        self.cik = cik
-        self.exchange = exchange
-        self.name = name
-        self.industry = industry
-        self.sector = sector
-        self.currency = currency
-        self.esg_factors = esg_factors
-        self.esg_qualified = esg_qualified
-        self.invalid = invalid
+    id: Optional[int] = None
+    symbol: Optional[str] = None
+    created_at: Optional[datetime] = None
+    source: str | None = None
+    style_type: str | None = None
+    cap_type: str | None = None
+    type_from: str | None = None
+    isin: str | None = None
+    cusip: str | None = None
+    cik: str | None = None
+    exchange: str | None = None
+    name: str | None = None
+    industry: str | None = None
+    sector: str | None = None
+    currency: str | None = None
+    esg_factors: dict | None = None
+    esg_qualified: bool | None = None
+    invalid: str | None = None
 
 
 # ── DB read ──────────────────────────────────────────────────────────────────
@@ -63,6 +38,26 @@ def fetch_by_symbol(symbol: str) -> Ticker | None:
                 return cur.fetchone()
     except Error as e:
         raise Exception(f"Error fetching the Ticker from the DB: {e}")
+
+def fetch_all_for_symbol_cache() -> dict[str, int | None]:
+    """Return {symbol: id} for valid tickers and {symbol: None} for invalid ones."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT symbol, id, invalid FROM ticker;')
+                return {row[0]: None if row[2] else row[1] for row in cur.fetchall()}
+    except Error as e:
+        raise Exception(f"Error fetching all tickers for cache: {e}")
+
+def fetch_all_for_isin_cache() -> dict[str, int | None]:
+    """Return {isin: id} for valid tickers and {isin: None} for invalid ones."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT isin, id, invalid FROM ticker WHERE isin IS NOT NULL;')
+                return {row[0]: None if row[2] else row[1] for row in cur.fetchall()}
+    except Error as e:
+        raise Exception(f"Error fetching all ISINs for cache: {e}")
 
 def fetch_by_symbols(symbols: list[str]) -> list[Ticker]:
     try:

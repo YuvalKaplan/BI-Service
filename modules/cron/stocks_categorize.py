@@ -7,12 +7,12 @@ from modules.parse.convert import load, get_tickers
 from modules.object.ticker import fetch_by_symbols
 
 
-def download_data() -> int:
+def run() -> int:
     """Scrape categorization ETF holdings and update the ticker table [style (value/growth)]."""
     try:
-        batch_run_id = batch_run.insert(batch_run.BatchRun('categorize_download', 'auto'))
+        batch_run_id = batch_run.insert(batch_run.BatchRun(process='categorize_download', activation='auto'))
 
-        # --- Style (Growth/Value) ETFs → categorize_etf_holding ---
+        # --- Style (Growth/Value) → categorize_etf_holding ---
         style_etfs = categorize_etf.fetch_all('style')
         log.record_status(f"Style (Growth/Value) update: processing {len(style_etfs)} style ETFs.")
 

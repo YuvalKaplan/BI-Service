@@ -5,16 +5,10 @@ from modules.core.db import db_pool_instance
 
 @dataclass
 class BatchRunLog:
-    id: int | None
-    created_at: datetime | None
     batch_run_id: int
     note: str
-
-    def __init__(self, batch_run_id: int, note: str, id: int | None = None, created_at: datetime | None = None):
-        self.id = id 
-        self.created_at = created_at
-        self.batch_run_id = batch_run_id
-        self.note = note
+    id: int | None = None
+    created_at: datetime | None = None
 
 @dataclass
 class ActiveUser:

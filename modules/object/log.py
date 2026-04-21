@@ -1,24 +1,17 @@
 import sys
 from psycopg.errors import Error
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from modules.core.db import db_pool_instance
 
 @dataclass
 class Log:
-    id: int
-    created_at: datetime
-    process: str
     log_type: str
-    code: str | None
+    code: str | int | None
     msg: str
-
-    def __init__(self, type: str, code: str | int | None, msg: str):
-        self.created_at = datetime.now(timezone.utc)
-        self.process = 'Service'
-        self.log_type = type
-        self.code = code
-        self.msg = msg
+    id: int | None = None
+    process: str = 'Service'
+    created_at: datetime | None = None
 
 def insert(item: Log) -> int | None:
     try:

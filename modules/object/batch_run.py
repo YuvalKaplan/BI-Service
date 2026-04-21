@@ -6,18 +6,11 @@ from modules.core.db import db_pool_instance
 
 @dataclass
 class BatchRun:
-    id: int | None
-    created_at: datetime | None
-    process: str | None
-    activation: str | None
-    completed_at: datetime | None
-
-    def __init__(self, process: str, activation: str, id: int | None = None, created_at: datetime | None = None, completed_at: datetime | None = None):
-        self.id = id 
-        self.created_at = created_at
-        self.process = process
-        self.activation = activation
-        self.completed_at = completed_at
+    process: str
+    activation: str
+    id: int | None = None
+    created_at: datetime | None = None
+    completed_at: datetime | None = None
 
 def fetch_by_type(process: str, activation: str) -> list[BatchRun]:
     try:

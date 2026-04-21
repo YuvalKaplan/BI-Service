@@ -17,6 +17,21 @@ class ProviderEtfHolding:
     market_value: float
     weight: float
 
+def fetch_valid_ticker_ids_in_holdings() -> List[int]:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT DISTINCT peh.ticker_id
+                    FROM provider_etf_holding AS peh
+                    JOIN ticker AS t ON peh.ticker_id = t.id
+                    WHERE t.invalid IS NULL
+                """)
+                return [row[0] for row in cur.fetchall()]
+    except Error as e:
+        raise Exception(f"Error retrieving valid ticker IDs in holdings: {e}")
+
+
 def fetch_valid_tickers_in_holdings() -> List[str]:
     try:
         with db_pool_instance.get_connection() as conn:

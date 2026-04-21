@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from modules.core import api_stocks
 from modules.ticker import util as tu
-from modules.object.ticker import Ticker, fetch_by_symbol, upsert_by_symbol, update_invalid, update_esg_data
+from modules.object.ticker import Ticker, upsert_by_symbol, update_invalid, update_esg_data
 from modules.object.ticker_value import TickerValue, upsert as _upsert_tv
 from modules.calc import esg as _esg
 
@@ -27,6 +27,18 @@ def resolve(
     else:
         return _resolve_non_us(symbol, isin, name)
 
+
+def get_exchange_suffix(exchange: str | None) -> str:
+    """Return the FMP symbol suffix for an exchange code (e.g. '.MU'), or '' for US/unknown."""
+    if not exchange:
+        return ''
+    if not _exchange_suffix_map:
+        for e in api_stocks.fetch_available_exchanges():
+            code = e.get('exchange')
+            suffix = e.get('symbolSuffix', '')
+            if code:
+                _exchange_suffix_map[code] = '' if suffix == 'N/A' else suffix
+    return _exchange_suffix_map.get(exchange, '')
 
 def _get_value_date() -> date:
     now_et = datetime.now(ZoneInfo("America/New_York"))
@@ -71,20 +83,15 @@ def _populate(profile: dict, symbol: str, isin: str | None) -> int | None:
 def _resolve_by_symbol(symbol: str | None) -> int | None:
     if not symbol:
         return None
+
     if symbol in _symbol_cache:
         return _symbol_cache[symbol]
-
-    existing = fetch_by_symbol(symbol)
-    if existing and existing.invalid:
-        _symbol_cache[symbol] = None
-        return None
 
     profile = api_stocks.get_stock_profile(symbol)
     if not isinstance(profile, dict):
         log.record_notice(f"No stocks data provider profile for symbol '{symbol}': {profile}")
-        result = existing.id if existing else None
-        _symbol_cache[symbol] = result
-        return result
+        _symbol_cache[symbol] = None
+        return None
 
     result = _populate(profile, symbol, None)
     _symbol_cache[symbol] = result
@@ -115,17 +122,17 @@ def _resolve_by_isin(isin: str | None) -> int | None:
         return None
     symbol = re.split(r'[\s.]', symbol_full)[0]
 
-    existing = fetch_by_symbol(symbol)
-    if existing and existing.invalid:
-        _isin_cache[isin] = None
-        return None
+
+    if symbol in _symbol_cache:
+        result = _symbol_cache[symbol]
+        _isin_cache[isin] = result
+        return result
 
     profile = api_stocks.get_stock_profile(symbol_full)
     if not isinstance(profile, dict):
         log.record_notice(f"No stocks data provider profile for symbol '{symbol}' (ISIN '{isin}'): {profile}")
-        result = existing.id if existing else None
-        _isin_cache[isin] = result
-        return result
+        _isin_cache[isin] = None
+        return None
 
     result = _populate(profile, symbol, isin)
     _isin_cache[isin] = result
@@ -136,6 +143,7 @@ def _resolve_by_symbol_search(symbol: str | None, name: str | None = None) -> in
     """Resolve a non-US ticker that has no ISIN via FMP symbol search."""
     if not symbol:
         return None
+
 
     cache_key = symbol
     if cache_key in _symbol_cache:
@@ -192,22 +200,9 @@ def _store_ticker_value(ticker_id: int, profile: dict) -> None:
         log.record_notice(f"Failed to store ticker_value for ticker_id={ticker_id}: {e}")
 
 
-def _get_exchange_suffix(exchange: str | None) -> str:
-    """Return the FMP symbol suffix for an exchange code (e.g. '.MU'), or '' for US/unknown."""
-    if not exchange:
-        return ''
-    if not _exchange_suffix_map:
-        for e in api_stocks.fetch_available_exchanges():
-            code = e.get('exchange')
-            suffix = e.get('symbolSuffix', '')
-            if code:
-                _exchange_suffix_map[code] = '' if suffix == 'N/A' else suffix
-    return _exchange_suffix_map.get(exchange, '')
-
-
 def _store_esg(symbol: str, exchange: str | None) -> None:
     try:
-        suffix = _get_exchange_suffix(exchange)
+        suffix = get_exchange_suffix(exchange)
         fmp_symbol = f"{symbol}{suffix}" if suffix else symbol
         disclosure, rating = api_stocks.fetch_esg_data(fmp_symbol)
         esg_qualified, esg_factors = _esg.qualify(disclosure, rating)

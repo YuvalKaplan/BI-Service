@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict g7IwZfg5C6lPDItOS9qkb0C8XQKC5tkxx1Fr2FQsYtBmif2tYpyilWTUH9EhMLX
+\restrict x9W3lV6HdmeMcwwAfN9bl39ulghllhjYAfyIU4nrQjuqeWrsVBLttJTBXMdLVZS
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 18.0
 
--- Started on 2026-04-17 23:29:44
+-- Started on 2026-04-21 18:39:37
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -22,11 +22,11 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
--- TOC entry 255 (class 1255 OID 251318)
+-- TOC entry 257 (class 1255 OID 251602)
 -- Name: get_best_ideas_by_ranking(integer, text, text, date, integer[], text[], boolean); Type: FUNCTION; Schema: public; Owner: admin
 --
 
-CREATE FUNCTION public.get_best_ideas_by_ranking(p_ranking_level integer, p_style_type text, p_cap_type text, p_as_of_date date, p_provider_etf_ids integer[], p_exchanges text[], p_esg_only boolean) RETURNS TABLE(symbol text, ranking integer, appearances bigint, max_delta double precision, source_etf_id integer, all_provider_ids integer[])
+CREATE FUNCTION public.get_best_ideas_by_ranking(p_ranking_level integer, p_style_type text, p_cap_type text, p_as_of_date date, p_provider_etf_ids integer[], p_exchanges text[], p_esg_only boolean) RETURNS TABLE(ticker_id integer, ranking integer, appearances bigint, max_delta double precision, source_etf_id integer, all_provider_ids integer[])
     LANGUAGE sql
     AS $$
 
@@ -34,75 +34,67 @@ CREATE FUNCTION public.get_best_ideas_by_ranking(p_ranking_level integer, p_styl
         SELECT INTERVAL '10 days' AS lookback
     ),
 
-    -- 1. Pre-filter the "Universe" of allowed symbols based on Style (and calculate cap level)
-    eligible_symbols AS (
-        SELECT DISTINCT ON (t.symbol)
-            t.symbol,
+    eligible_tickers AS (
+        SELECT DISTINCT ON (t.id)
+            t.id AS ticker_id,
             (CASE WHEN tv.market_cap >= 10000000000 THEN 'large' ELSE 'mid_small' END) AS calc_cap
         FROM public.ticker t
-        JOIN public.ticker_value tv ON t.symbol = tv.symbol,
+        JOIN public.ticker_value tv ON t.id = tv.ticker_id,
         constants
         WHERE tv.value_date <= p_as_of_date
           AND tv.value_date >= p_as_of_date - lookback
-          -- Style filter
           AND (p_style_type = 'blend' OR t.style_type = p_style_type)
-          -- Exchange filter
           AND (cardinality(p_exchanges) = 0 OR t.exchange = ANY(p_exchanges))
-          -- ESG filter
           AND (NOT p_esg_only OR t.esg_qualified = TRUE)
-        ORDER BY t.symbol, tv.value_date DESC
+        ORDER BY t.id, tv.value_date DESC
     ),
 
-    -- 2. Further restrict by the Cap Filter
     filtered_universe AS (
-        SELECT symbol
-        FROM eligible_symbols
+        SELECT ticker_id
+        FROM eligible_tickers
         WHERE (p_cap_type = 'all_cap' OR calc_cap = p_cap_type)
     ),
 
-    -- 3. Get the latest date
     symbol_latest_date AS (
         SELECT
-            be.symbol,
+            be.ticker_id,
             MAX(be.value_date) AS max_date
         FROM public.best_idea be
-        JOIN filtered_universe fu ON be.symbol = fu.symbol,
+        JOIN filtered_universe fu ON be.ticker_id = fu.ticker_id,
         constants
         WHERE be.value_date <= p_as_of_date
           AND be.value_date >= p_as_of_date - lookback
           AND (cardinality(p_provider_etf_ids) = 0 OR be.provider_etf_id = ANY(p_provider_etf_ids))
-        GROUP BY be.symbol
+        GROUP BY be.ticker_id
     ),
 
-    -- 4. Get the best rank on the max date
     symbol_targets AS (
-        SELECT DISTINCT ON (be.symbol)
-            be.symbol,
+        SELECT DISTINCT ON (be.ticker_id)
+            be.ticker_id,
             be.value_date AS max_date,
-            be.ranking AS best_ranking
+            be.ranking    AS best_ranking
         FROM public.best_idea be
-        JOIN symbol_latest_date sld ON be.symbol = sld.symbol
+        JOIN symbol_latest_date sld ON be.ticker_id = sld.ticker_id
                                    AND be.value_date = sld.max_date
         WHERE be.ranking <= p_ranking_level
           AND (cardinality(p_provider_etf_ids) = 0 OR be.provider_etf_id = ANY(p_provider_etf_ids))
-        ORDER BY be.symbol, be.ranking ASC
+        ORDER BY be.ticker_id, be.ranking ASC
     )
 
-    -- 5. Final aggregation using the pre-filtered targets
     SELECT
-        be.symbol::TEXT,
-        st.best_ranking AS ranking,
-        COUNT(DISTINCT be.provider_etf_id) AS appearances,
-        MAX(be.delta) AS max_delta,
-        (array_agg(be.provider_etf_id ORDER BY be.delta DESC))[1] AS source_etf_id,
-        array_agg(DISTINCT be.provider_etf_id) AS all_provider_ids
+        st.ticker_id,
+        st.best_ranking                                                AS ranking,
+        COUNT(DISTINCT be.provider_etf_id)                            AS appearances,
+        MAX(be.delta)                                                  AS max_delta,
+        (array_agg(be.provider_etf_id ORDER BY be.delta DESC))[1]    AS source_etf_id,
+        array_agg(DISTINCT be.provider_etf_id)                       AS all_provider_ids
     FROM public.best_idea be
-    JOIN symbol_targets st ON be.symbol = st.symbol
+    JOIN symbol_targets st ON be.ticker_id = st.ticker_id
                            AND be.value_date = st.max_date
-                           AND be.ranking = st.best_ranking
-    GROUP BY be.symbol, st.best_ranking
-    ORDER BY st.best_ranking, appearances DESC, max_delta DESC
-    ;
+                           AND be.ranking    = st.best_ranking
+    JOIN filtered_universe fu ON be.ticker_id = fu.ticker_id
+    GROUP BY st.ticker_id, st.best_ranking
+    ORDER BY st.best_ranking, appearances DESC, max_delta DESC;
 
 $$;
 
@@ -110,33 +102,7 @@ $$;
 ALTER FUNCTION public.get_best_ideas_by_ranking(p_ranking_level integer, p_style_type text, p_cap_type text, p_as_of_date date, p_provider_etf_ids integer[], p_exchanges text[], p_esg_only boolean) OWNER TO admin;
 
 --
--- TOC entry 252 (class 1255 OID 241996)
--- Name: get_latest_fund_holdings(); Type: FUNCTION; Schema: public; Owner: admin
---
-
-CREATE FUNCTION public.get_latest_fund_holdings() RETURNS TABLE(fund_name text, holding_date date, symbol text, ticker_name text)
-    LANGUAGE sql STABLE
-    AS $$
-    SELECT
-        f.name        AS fund_name,
-        fh.holding_date,
-        t.symbol,
-        t.name        AS ticker_name
-    FROM public.fund_holding fh
-    JOIN fund f   ON fh.fund_id = f.id
-    JOIN ticker t ON fh.symbol = t.symbol
-    WHERE fh.holding_date = (
-        SELECT MAX(holding_date)
-        FROM public.fund_holding
-    )
-    ORDER BY f.name, t.symbol;
-$$;
-
-
-ALTER FUNCTION public.get_latest_fund_holdings() OWNER TO admin;
-
---
--- TOC entry 256 (class 1255 OID 251337)
+-- TOC entry 255 (class 1255 OID 251337)
 -- Name: sanitize_tickers(); Type: FUNCTION; Schema: public; Owner: admin
 --
 
@@ -146,7 +112,7 @@ CREATE FUNCTION public.sanitize_tickers() RETURNS void
     WITH candidates AS (
         SELECT symbol,
                CASE
-                   WHEN symbol !~ '^[A-Z]{1,5}$'  THEN 'Invalid ticker format'
+                   WHEN symbol !~ '^[A-Z0-9]{1,10}$'  THEN 'Invalid ticker format'
                    WHEN name ~* '\m(ETF|fund)\M'   THEN 'Fund or ETF'
                    WHEN symbol = ANY(ARRAY[
                        'XTSLA','AGPXX','BOXX','CMQXX','DTRXX','FGXXX',
@@ -261,7 +227,6 @@ BEGIN
 		public.best_idea, 
 		public.categorize_etf,
 		public.categorize_etf_holding,
-		public.categorize_ticker,
 		public.fund,
 		public.fund_holding,
 		public.fund_holding_change,
@@ -280,7 +245,7 @@ $$;
 ALTER PROCEDURE public.truncate_all_tables() OWNER TO admin;
 
 --
--- TOC entry 240 (class 1255 OID 241503)
+-- TOC entry 241 (class 1255 OID 241503)
 -- Name: x_d_shift_columns_template(); Type: PROCEDURE; Schema: public; Owner: admin
 --
 
@@ -319,6 +284,33 @@ $$;
 
 
 ALTER PROCEDURE public.x_d_shift_columns_template() OWNER TO admin;
+
+--
+-- TOC entry 256 (class 1255 OID 251431)
+-- Name: x_m_resequence_ids(); Type: PROCEDURE; Schema: public; Owner: admin
+--
+
+CREATE PROCEDURE public.x_m_resequence_ids()
+    LANGUAGE sql
+    AS $$
+
+-- https://stackoverflow.com/questions/4448340/postgresql-duplicate-key-violates-unique-constraint
+
+SELECT SETVAL((SELECT PG_GET_SERIAL_SEQUENCE('"batch_run"', 'id')), (SELECT (MAX("id") + 1) FROM "batch_run"), FALSE);
+SELECT SETVAL((SELECT PG_GET_SERIAL_SEQUENCE('"batch_run_log"', 'id')), (SELECT (MAX("id") + 1) FROM "batch_run_log"), FALSE);
+SELECT SETVAL((SELECT PG_GET_SERIAL_SEQUENCE('"categorize_etf"', 'id')), (SELECT (MAX("id") + 1) FROM "categorize_etf"), FALSE);
+SELECT SETVAL((SELECT PG_GET_SERIAL_SEQUENCE('"categorize_etf_holding"', 'id')), (SELECT (MAX("id") + 1) FROM "categorize_etf_holding"), FALSE);
+SELECT SETVAL((SELECT PG_GET_SERIAL_SEQUENCE('"fund"', 'id')), (SELECT (MAX("id") + 1) FROM "fund"), FALSE);
+SELECT SETVAL((SELECT PG_GET_SERIAL_SEQUENCE('"log"', 'id')), (SELECT (MAX("id") + 1) FROM "log"), FALSE);
+SELECT SETVAL((SELECT PG_GET_SERIAL_SEQUENCE('"provider"', 'id')), (SELECT (MAX("id") + 1) FROM "provider"), FALSE);
+SELECT SETVAL((SELECT PG_GET_SERIAL_SEQUENCE('"provider_etf"', 'id')), (SELECT (MAX("id") + 1) FROM "provider_etf"), FALSE);
+SELECT SETVAL((SELECT PG_GET_SERIAL_SEQUENCE('"provider_etf_holding"', 'id')), (SELECT (MAX("id") + 1) FROM "provider_etf_holding"), FALSE);
+
+
+$$;
+
+
+ALTER PROCEDURE public.x_m_resequence_ids() OWNER TO admin;
 
 SET default_tablespace = '';
 
@@ -392,7 +384,7 @@ ALTER TABLE public.batch_run_log ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDE
 
 CREATE TABLE public.best_idea (
     provider_etf_id integer NOT NULL,
-    symbol character varying(32) NOT NULL,
+    ticker_id integer NOT NULL,
     value_date date NOT NULL,
     etf_weight double precision,
     benchmark_weight double precision,
@@ -438,7 +430,7 @@ CREATE TABLE public.categorize_etf_holding (
     created_at timestamp without time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
     categorize_etf_id integer NOT NULL,
     holding_date timestamp without time zone NOT NULL,
-    ticker text
+    ticker_id integer
 );
 
 
@@ -497,7 +489,7 @@ ALTER TABLE public.fund OWNER TO admin;
 
 CREATE TABLE public.fund_holding (
     fund_id integer NOT NULL,
-    symbol text NOT NULL,
+    ticker_id integer NOT NULL,
     holding_date date NOT NULL,
     ranking integer NOT NULL,
     source_etf_id integer,
@@ -515,7 +507,7 @@ ALTER TABLE public.fund_holding OWNER TO admin;
 
 CREATE TABLE public.fund_holding_change (
     fund_id integer NOT NULL,
-    symbol text NOT NULL,
+    ticker_id integer NOT NULL,
     change_date date NOT NULL,
     direction character varying(5) NOT NULL,
     ranking integer,
@@ -612,23 +604,23 @@ CREATE TABLE public.provider_etf (
     disabled boolean DEFAULT false NOT NULL,
     disabled_reason text,
     region text NOT NULL,
+    name text,
+    description text,
+    isin text,
+    ticker text,
     cap_type text,
     style_type text,
     benchmark text,
     trading_since timestamp without time zone,
     number_of_managers integer,
-    url text NOT NULL,
+    url text,
     wait_pre_events text,
     wait_post_events text,
     events jsonb,
     trigger_download jsonb,
     mapping jsonb,
     file_format character varying(10),
-    last_downloaded timestamp without time zone,
-    name text,
-    description text,
-    isin text,
-    ticker text
+    last_downloaded timestamp without time zone
 );
 
 
@@ -644,7 +636,7 @@ CREATE TABLE public.provider_etf_holding (
     created_at timestamp without time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
     provider_etf_id integer NOT NULL,
     holding_date timestamp without time zone NOT NULL,
-    ticker text,
+    ticker_id integer,
     shares double precision,
     market_value double precision,
     weight double precision
@@ -704,13 +696,15 @@ ALTER TABLE public.provider ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDENTITY
 --
 
 CREATE TABLE public.ticker (
-    symbol character varying(32) NOT NULL,
+    id integer NOT NULL,
     created_at timestamp without time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
     source character varying(16),
     style_type character varying(16),
     cap_type character varying(16),
     type_from character varying(16),
+    symbol character varying(32) NOT NULL,
     isin character varying(16),
+    cusip character varying(16),
     cik character varying(16),
     exchange character varying(32),
     name text,
@@ -726,12 +720,27 @@ CREATE TABLE public.ticker (
 ALTER TABLE public.ticker OWNER TO admin;
 
 --
+-- TOC entry 240 (class 1259 OID 251524)
+-- Name: ticker_id_seq; Type: SEQUENCE; Schema: public; Owner: admin
+--
+
+ALTER TABLE public.ticker ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME public.ticker_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
 -- TOC entry 232 (class 1259 OID 239154)
 -- Name: ticker_value; Type: TABLE; Schema: public; Owner: admin
 --
 
 CREATE TABLE public.ticker_value (
-    symbol character varying(32) NOT NULL,
+    ticker_id integer NOT NULL,
     value_date date NOT NULL,
     stock_price double precision,
     market_cap double precision
@@ -741,7 +750,7 @@ CREATE TABLE public.ticker_value (
 ALTER TABLE public.ticker_value OWNER TO admin;
 
 --
--- TOC entry 4828 (class 2606 OID 186137)
+-- TOC entry 4829 (class 2606 OID 186137)
 -- Name: batch_run_log batch_run_log_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -750,7 +759,7 @@ ALTER TABLE ONLY public.batch_run_log
 
 
 --
--- TOC entry 4826 (class 2606 OID 186119)
+-- TOC entry 4827 (class 2606 OID 186119)
 -- Name: batch_run batch_run_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -759,16 +768,16 @@ ALTER TABLE ONLY public.batch_run
 
 
 --
--- TOC entry 4843 (class 2606 OID 241458)
+-- TOC entry 4848 (class 2606 OID 251596)
 -- Name: best_idea best_idea_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
 ALTER TABLE ONLY public.best_idea
-    ADD CONSTRAINT best_idea_pkey PRIMARY KEY (provider_etf_id, symbol, value_date);
+    ADD CONSTRAINT best_idea_pkey PRIMARY KEY (provider_etf_id, ticker_id, value_date);
 
 
 --
--- TOC entry 4850 (class 2606 OID 250208)
+-- TOC entry 4854 (class 2606 OID 250208)
 -- Name: categorize_etf_holding categorize_etf_holding_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -777,7 +786,7 @@ ALTER TABLE ONLY public.categorize_etf_holding
 
 
 --
--- TOC entry 4837 (class 2606 OID 239108)
+-- TOC entry 4839 (class 2606 OID 239108)
 -- Name: categorize_etf categorize_etf_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -786,25 +795,25 @@ ALTER TABLE ONLY public.categorize_etf
 
 
 --
--- TOC entry 4856 (class 2606 OID 251117)
+-- TOC entry 4863 (class 2606 OID 251600)
 -- Name: fund_holding_change fund_holding_change_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
 ALTER TABLE ONLY public.fund_holding_change
-    ADD CONSTRAINT fund_holding_change_pkey PRIMARY KEY (fund_id, change_date, symbol, direction);
+    ADD CONSTRAINT fund_holding_change_pkey PRIMARY KEY (fund_id, change_date, ticker_id, direction);
 
 
 --
--- TOC entry 4854 (class 2606 OID 251100)
+-- TOC entry 4860 (class 2606 OID 251598)
 -- Name: fund_holding fund_holding_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
 ALTER TABLE ONLY public.fund_holding
-    ADD CONSTRAINT fund_holding_pkey PRIMARY KEY (fund_id, holding_date, symbol);
+    ADD CONSTRAINT fund_holding_pkey PRIMARY KEY (fund_id, holding_date, ticker_id);
 
 
 --
--- TOC entry 4848 (class 2606 OID 241486)
+-- TOC entry 4852 (class 2606 OID 241486)
 -- Name: fund fund_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -813,7 +822,7 @@ ALTER TABLE ONLY public.fund
 
 
 --
--- TOC entry 4824 (class 2606 OID 186112)
+-- TOC entry 4825 (class 2606 OID 186112)
 -- Name: log log_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -822,25 +831,16 @@ ALTER TABLE ONLY public.log
 
 
 --
--- TOC entry 4839 (class 2606 OID 239153)
--- Name: ticker pk_ticker; Type: CONSTRAINT; Schema: public; Owner: admin
---
-
-ALTER TABLE ONLY public.ticker
-    ADD CONSTRAINT pk_ticker PRIMARY KEY (symbol);
-
-
---
--- TOC entry 4841 (class 2606 OID 239165)
+-- TOC entry 4846 (class 2606 OID 251594)
 -- Name: ticker_value pk_ticker_value; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
 ALTER TABLE ONLY public.ticker_value
-    ADD CONSTRAINT pk_ticker_value PRIMARY KEY (symbol, value_date);
+    ADD CONSTRAINT pk_ticker_value PRIMARY KEY (ticker_id, value_date);
 
 
 --
--- TOC entry 4835 (class 2606 OID 192301)
+-- TOC entry 4837 (class 2606 OID 192301)
 -- Name: provider_etf_holding provider_etf_holding_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -849,7 +849,7 @@ ALTER TABLE ONLY public.provider_etf_holding
 
 
 --
--- TOC entry 4831 (class 2606 OID 192270)
+-- TOC entry 4832 (class 2606 OID 192270)
 -- Name: provider_etf provider_etf_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -858,7 +858,7 @@ ALTER TABLE ONLY public.provider_etf
 
 
 --
--- TOC entry 4822 (class 2606 OID 186070)
+-- TOC entry 4823 (class 2606 OID 186070)
 -- Name: provider provider_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -867,7 +867,25 @@ ALTER TABLE ONLY public.provider
 
 
 --
--- TOC entry 4844 (class 1259 OID 241469)
+-- TOC entry 4841 (class 2606 OID 251534)
+-- Name: ticker ticker_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.ticker
+    ADD CONSTRAINT ticker_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 4843 (class 2606 OID 251605)
+-- Name: ticker ticker_symbol_key; Type: CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.ticker
+    ADD CONSTRAINT ticker_symbol_key UNIQUE (symbol);
+
+
+--
+-- TOC entry 4849 (class 1259 OID 241469)
 -- Name: fki_fk_best_idea_provider_etf_id; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -875,23 +893,15 @@ CREATE INDEX fki_fk_best_idea_provider_etf_id ON public.best_idea USING btree (p
 
 
 --
--- TOC entry 4845 (class 1259 OID 241470)
--- Name: fki_fk_best_idea_symbol; Type: INDEX; Schema: public; Owner: admin
+-- TOC entry 4850 (class 1259 OID 251548)
+-- Name: fki_fk_best_idea_ticker_id; Type: INDEX; Schema: public; Owner: admin
 --
 
-CREATE INDEX fki_fk_best_idea_symbol ON public.best_idea USING btree (symbol) WITH (fillfactor='100', deduplicate_items='true');
-
-
---
--- TOC entry 4846 (class 1259 OID 241471)
--- Name: fki_fk_best_idea_value_date; Type: INDEX; Schema: public; Owner: admin
---
-
-CREATE INDEX fki_fk_best_idea_value_date ON public.best_idea USING btree (value_date) WITH (fillfactor='100', deduplicate_items='true');
+CREATE INDEX fki_fk_best_idea_ticker_id ON public.best_idea USING btree (ticker_id) WITH (fillfactor='100', deduplicate_items='true');
 
 
 --
--- TOC entry 4851 (class 1259 OID 250214)
+-- TOC entry 4855 (class 1259 OID 250214)
 -- Name: fki_fk_categorize_etf_holding_categorize_etf_id; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -899,7 +909,31 @@ CREATE INDEX fki_fk_categorize_etf_holding_categorize_etf_id ON public.categoriz
 
 
 --
--- TOC entry 4832 (class 1259 OID 192307)
+-- TOC entry 4856 (class 1259 OID 251584)
+-- Name: fki_fk_categorize_etf_holding_ticker_id; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX fki_fk_categorize_etf_holding_ticker_id ON public.categorize_etf_holding USING btree (ticker_id) WITH (fillfactor='100', deduplicate_items='true');
+
+
+--
+-- TOC entry 4861 (class 1259 OID 251564)
+-- Name: fki_fk_fund_holding_change_ticker_id; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX fki_fk_fund_holding_change_ticker_id ON public.fund_holding_change USING btree (ticker_id) WITH (fillfactor='100', deduplicate_items='true');
+
+
+--
+-- TOC entry 4858 (class 1259 OID 251556)
+-- Name: fki_fk_fund_holding_ticker_id; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX fki_fk_fund_holding_ticker_id ON public.fund_holding USING btree (ticker_id) WITH (fillfactor='100', deduplicate_items='true');
+
+
+--
+-- TOC entry 4833 (class 1259 OID 192307)
 -- Name: fki_fk_provider_etf_holding_provider_etf_id; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -907,7 +941,15 @@ CREATE INDEX fki_fk_provider_etf_holding_provider_etf_id ON public.provider_etf_
 
 
 --
--- TOC entry 4829 (class 1259 OID 192276)
+-- TOC entry 4834 (class 1259 OID 251578)
+-- Name: fki_fk_provider_etf_holding_ticker_id; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX fki_fk_provider_etf_holding_ticker_id ON public.provider_etf_holding USING btree (ticker_id) WITH (fillfactor='100', deduplicate_items='true');
+
+
+--
+-- TOC entry 4830 (class 1259 OID 192276)
 -- Name: fki_fk_provider_etf_provider_id; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -915,7 +957,15 @@ CREATE INDEX fki_fk_provider_etf_provider_id ON public.provider_etf USING btree 
 
 
 --
--- TOC entry 4852 (class 1259 OID 250215)
+-- TOC entry 4844 (class 1259 OID 251540)
+-- Name: fki_fk_ticker_value_ticker_id; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX fki_fk_ticker_value_ticker_id ON public.ticker_value USING btree (ticker_id) WITH (fillfactor='100', deduplicate_items='true');
+
+
+--
+-- TOC entry 4857 (class 1259 OID 250215)
 -- Name: idx_categorize_etf_holding_trade_date; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -923,7 +973,7 @@ CREATE INDEX idx_categorize_etf_holding_trade_date ON public.categorize_etf_hold
 
 
 --
--- TOC entry 4833 (class 1259 OID 192308)
+-- TOC entry 4835 (class 1259 OID 192308)
 -- Name: idx_provider_etf_holding_holding_date; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -931,7 +981,7 @@ CREATE INDEX idx_provider_etf_holding_holding_date ON public.provider_etf_holdin
 
 
 --
--- TOC entry 4860 (class 2606 OID 241459)
+-- TOC entry 4868 (class 2606 OID 241459)
 -- Name: best_idea fk_best_idea_provider_etf_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -940,16 +990,16 @@ ALTER TABLE ONLY public.best_idea
 
 
 --
--- TOC entry 4861 (class 2606 OID 241464)
--- Name: best_idea fk_best_idea_symbol; Type: FK CONSTRAINT; Schema: public; Owner: admin
+-- TOC entry 4869 (class 2606 OID 251543)
+-- Name: best_idea fk_best_idea_ticker_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
 ALTER TABLE ONLY public.best_idea
-    ADD CONSTRAINT fk_best_idea_symbol FOREIGN KEY (symbol) REFERENCES public.ticker(symbol) ON UPDATE CASCADE ON DELETE CASCADE;
+    ADD CONSTRAINT fk_best_idea_ticker_id FOREIGN KEY (ticker_id) REFERENCES public.ticker(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
--- TOC entry 4862 (class 2606 OID 250209)
+-- TOC entry 4870 (class 2606 OID 250209)
 -- Name: categorize_etf_holding fk_categorize_etf_holding_categorize_etf_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -958,7 +1008,16 @@ ALTER TABLE ONLY public.categorize_etf_holding
 
 
 --
--- TOC entry 4865 (class 2606 OID 251118)
+-- TOC entry 4871 (class 2606 OID 251579)
+-- Name: categorize_etf_holding fk_categorize_etf_holding_ticker_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.categorize_etf_holding
+    ADD CONSTRAINT fk_categorize_etf_holding_ticker_id FOREIGN KEY (ticker_id) REFERENCES public.ticker(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- TOC entry 4874 (class 2606 OID 251118)
 -- Name: fund_holding_change fk_fund_holding_change_fund_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -967,16 +1026,16 @@ ALTER TABLE ONLY public.fund_holding_change
 
 
 --
--- TOC entry 4866 (class 2606 OID 251123)
--- Name: fund_holding_change fk_fund_holding_change_symbol; Type: FK CONSTRAINT; Schema: public; Owner: admin
+-- TOC entry 4875 (class 2606 OID 251559)
+-- Name: fund_holding_change fk_fund_holding_change_ticker_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
 ALTER TABLE ONLY public.fund_holding_change
-    ADD CONSTRAINT fk_fund_holding_change_symbol FOREIGN KEY (symbol) REFERENCES public.ticker(symbol) ON UPDATE CASCADE ON DELETE CASCADE;
+    ADD CONSTRAINT fk_fund_holding_change_ticker_id FOREIGN KEY (ticker_id) REFERENCES public.ticker(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
--- TOC entry 4863 (class 2606 OID 251101)
+-- TOC entry 4872 (class 2606 OID 251101)
 -- Name: fund_holding fk_fund_holding_fund_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -985,16 +1044,16 @@ ALTER TABLE ONLY public.fund_holding
 
 
 --
--- TOC entry 4864 (class 2606 OID 251106)
--- Name: fund_holding fk_fund_holding_symbol; Type: FK CONSTRAINT; Schema: public; Owner: admin
+-- TOC entry 4873 (class 2606 OID 251551)
+-- Name: fund_holding fk_fund_holding_ticker_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
 ALTER TABLE ONLY public.fund_holding
-    ADD CONSTRAINT fk_fund_holding_symbol FOREIGN KEY (symbol) REFERENCES public.ticker(symbol) ON UPDATE CASCADE ON DELETE CASCADE;
+    ADD CONSTRAINT fk_fund_holding_ticker_id FOREIGN KEY (ticker_id) REFERENCES public.ticker(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
--- TOC entry 4858 (class 2606 OID 192302)
+-- TOC entry 4865 (class 2606 OID 192302)
 -- Name: provider_etf_holding fk_provider_etf_holding_provider_etf_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1003,7 +1062,16 @@ ALTER TABLE ONLY public.provider_etf_holding
 
 
 --
--- TOC entry 4857 (class 2606 OID 192271)
+-- TOC entry 4866 (class 2606 OID 251573)
+-- Name: provider_etf_holding fk_provider_etf_holding_ticker_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.provider_etf_holding
+    ADD CONSTRAINT fk_provider_etf_holding_ticker_id FOREIGN KEY (ticker_id) REFERENCES public.ticker(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- TOC entry 4864 (class 2606 OID 192271)
 -- Name: provider_etf fk_provider_etf_provider_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1012,19 +1080,19 @@ ALTER TABLE ONLY public.provider_etf
 
 
 --
--- TOC entry 4859 (class 2606 OID 251169)
--- Name: ticker_value fk_ticker_symbol; Type: FK CONSTRAINT; Schema: public; Owner: admin
+-- TOC entry 4867 (class 2606 OID 251535)
+-- Name: ticker_value fk_ticker_value_ticker_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
 ALTER TABLE ONLY public.ticker_value
-    ADD CONSTRAINT fk_ticker_symbol FOREIGN KEY (symbol) REFERENCES public.ticker(symbol) ON UPDATE CASCADE ON DELETE CASCADE;
+    ADD CONSTRAINT fk_ticker_value_ticker_id FOREIGN KEY (ticker_id) REFERENCES public.ticker(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
--- Completed on 2026-04-17 23:29:45
+-- Completed on 2026-04-21 18:39:37
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict g7IwZfg5C6lPDItOS9qkb0C8XQKC5tkxx1Fr2FQsYtBmif2tYpyilWTUH9EhMLX
+\unrestrict x9W3lV6HdmeMcwwAfN9bl39ulghllhjYAfyIU4nrQjuqeWrsVBLttJTBXMdLVZS
 

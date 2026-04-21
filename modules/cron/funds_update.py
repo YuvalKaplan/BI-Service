@@ -14,7 +14,7 @@ MARKET_CAP_LOOKBACK_DAYS = 7
 
 def run() -> List[FundChangesResult]:
     try:
-        batch_run_id = batch_run.insert(batch_run.BatchRun("funds_update", "auto"))
+        batch_run_id = batch_run.insert(batch_run.BatchRun(process="funds_update", activation="auto"))
 
         funds = [to_fund_protocol(f) for f in fund.fetch_all()]
         log.record_status(f"Running Fund Update batch job ID {batch_run_id} - will process {len(funds)} funds.")

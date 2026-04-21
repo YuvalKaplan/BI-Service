@@ -40,7 +40,7 @@ if __name__ == '__main__':
             message_actions += BREAKER_LINE
 
             try:
-                total_etfs = stocks_categorize.download_data()
+                total_etfs = stocks_categorize.run()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on categorize stocks with error:\n{e}\n\n")
                 raise e
