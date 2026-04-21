@@ -1,5 +1,4 @@
 import re
-import pandas as pd
 from modules.core import api_stocks
 
 NAME_NOISE: set[str] = {
@@ -10,13 +9,14 @@ NAME_NOISE: set[str] = {
     'holdings', 'holding', 'group', 'international', 'industries', 'industry',
 }
 
-_ETF_FUND_PATTERN = re.compile(r'\b(?:etf|fund|trust|index)\b', re.IGNORECASE)
+UNWANTED_NAMES = re.compile(r'\b(?:etf|fund|trust|index|crypto)\b', re.IGNORECASE)
 
 
-def is_etf_or_fund(name: str | None) -> bool:
-    return bool(name and _ETF_FUND_PATTERN.search(name))
+def is_unwanted_names(name: str | None) -> bool:
+    return bool(name and UNWANTED_NAMES.search(name))
 
-EXCLUDED_TICKERS: set[str] = {'USD', 'CAD', 'EUR', 'ISR', 'JPY', 'GBP', 'TICKER'}
+# Currencies and combination holdings (BRK - Berkshire Hathaway)
+EXCLUDED_TICKERS: set[str] = {'USD', 'BACKUSD', 'CAD', 'EUR', 'ISR', 'JPY', 'GBP', 'TICKER', 'BRK'}
 
 TREASURY_SECURITIES: set[str] = {
     'XTSLA', 'AGPXX', 'BOXX', 'CMQXX', 'DTRXX', 'FGXXX',
@@ -55,7 +55,9 @@ def filter_symbol_candidates(results: list[dict], query: str) -> list[dict]:
     exact = []
     suffixed = []
     for r in results:
-        if is_etf_or_fund(r.get('name')):
+        if is_unwanted_names(r.get('name')):
+            continue
+        if r.get('exchange') == 'CRYPTO':
             continue
         s = r.get('symbol', '')
         if s == query:
@@ -65,37 +67,32 @@ def filter_symbol_candidates(results: list[dict], query: str) -> list[dict]:
     return exact + suffixed
 
 
-def normalize_ticker_series(series: pd.Series) -> pd.Series:
-    normalized = (
-        series
-        .astype(str)
-        .str.strip()
-        .str.lstrip("'")
-        .str.split().str[0]
-        .str.split(r'[.\-_]').str[0]
-    )
-    short_numeric = normalized.str.match(r'^\d{1,3}$')
-    return normalized.where(~short_numeric, normalized.str.zfill(4))
+def normalize_ticker(ticker: str | None) -> str:
+    s = str(ticker).strip().lstrip("'") if ticker else ''
+    s = s.split()[0] if s else ''
+    s = re.split(r'[.\-_]', s)[0] if s else ''
+    if re.match(r'^\d{1,3}$', s):
+        s = s.zfill(4)
+    return s
 
 
-def filter_ticker_df(df: pd.DataFrame, col: str, remove_tickers: list[str]) -> pd.DataFrame:
-    return df[
-        df[col].str.fullmatch(r'[A-Z0-9]+', na=False) &
-        ~df[col].isin(EXCLUDED_TICKERS) &
-        ~df[col].isin(remove_tickers)
-    ]
+def is_included_ticker(ticker: str | None, remove_tickers: list[str]) -> bool:
+    if not ticker or not re.fullmatch(r'[A-Z0-9]+', ticker):
+        return False
+    return ticker not in EXCLUDED_TICKERS and ticker not in remove_tickers
 
 
 def is_valid_holding(ticker: str | None, name: str | None) -> bool:
     """Return True if a holding row should be kept (not an option, treasury, ETF, or fund).
     Must be called on raw ticker values before normalization."""
+
     raw = str(ticker).strip() if ticker else ''
     root = re.split(r'[.\-_]', re.split(r'\s', raw)[0])[0]
     if re.match(r'^\S+\s+\d{6}[CP]\d+', raw):
         return False
     if root in TREASURY_SECURITIES:
         return False
-    if is_etf_or_fund(name):
+    if is_unwanted_names(name):
         return False
     return True
 

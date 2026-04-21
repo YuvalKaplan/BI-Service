@@ -51,11 +51,15 @@ def _populate(profile: dict, symbol: str, isin: str | None) -> int | None:
     )
     ticker_id = upsert_by_symbol(ticker)
 
+    if profile.get('exchange') == 'CRYPTO':
+        update_invalid(symbol, 'Crypto')
+        return None
+
     name = profile.get('companyName')
     if not name:
         update_invalid(symbol, 'Missing details')
         return None
-    if tu.is_etf_or_fund(name):
+    if tu.is_unwanted_names(name):
         update_invalid(symbol, 'Fund or ETF')
         return None
 

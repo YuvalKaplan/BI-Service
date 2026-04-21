@@ -227,7 +227,7 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
     if good_date:
         df.loc[:, "holding_date"] = good_date
     else:
-        df["holding_date"] = pd.to_datetime(df["holding_date"], format=mapping.date.format, errors="coerce")
+        df["holding_date"] = pd.to_datetime(df["holding_date"].tolist(), format=mapping.date.format, errors="coerce")
     
     missing_mask = df['ticker'].isna() | (df['ticker'].astype(str).str.strip() == '')
     if missing_mask.any():
@@ -258,8 +258,8 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
         df["market_value"] = df["market_value"] * (10 ** mapping.market_value.shift)
 
     df = df[df.apply(lambda row: tu.is_valid_holding(row['ticker'], row.get('name')), axis=1)]
-    df['ticker'] = tu.normalize_ticker_series(df['ticker'])
-    df = tu.filter_ticker_df(df, 'ticker', mapping.remove_tickers)
+    df['ticker'] = df['ticker'].map(tu.normalize_ticker)
+    df = df[df['ticker'].map(lambda t: tu.is_included_ticker(None if pd.isna(t) else str(t), mapping.remove_tickers))]
 
     # drop rows where the shares, market_value or weight is empty or 0 (used for cash holdings)
     df = df[df["shares"].notna() & (df["shares"] > 0)]
