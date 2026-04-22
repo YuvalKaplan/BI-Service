@@ -4,7 +4,7 @@ from modules.object.exit import cleanup
 from modules.object.provider_etf_holding import fetch_valid_ticker_ids_in_holdings
 from modules.object.ticker import fetch_by_ids
 from modules.object.ticker_value import TickerValue, upsert_bulk
-from modules.ticker import resolver
+from modules.ticker.resolver import get_full_symbol
 from modules.core.api_stocks import get_stock_historic_prices, get_stock_historic_market_cap
 from modules.core.db import db_pool_instance
 from psycopg.errors import Error
@@ -102,9 +102,7 @@ if __name__ == "__main__":
         if not gaps:
             continue
 
-        suffix = resolver.get_exchange_suffix(ticker.exchange)
-        full_symbol = f"{ticker.symbol}{suffix}" if suffix else ticker.symbol
-        assert full_symbol is not None
+        full_symbol = get_full_symbol(ticker)
 
         print(f"[{full_symbol}] {len(gaps)} gap(s) found:")
         ticker_filled = 0

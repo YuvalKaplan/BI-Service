@@ -27,30 +27,39 @@ def resolve(
     else:
         return _resolve_non_us(symbol, isin, name)
 
+def populate_esg(ticker_id: int, full_symbol: str) -> None:
+    try:
+        disclosure, rating = api_stocks.fetch_esg_data(full_symbol)
+        esg_qualified, esg_factors = _esg.qualify(disclosure, rating)
+        update_esg_data(ticker_id, esg_qualified, esg_factors)
+    except Exception as e:
+        log.record_notice(f"Failed to store ESG for '{full_symbol}': {e}")
 
-def get_exchange_suffix(exchange: str | None) -> str:
-    """Return the FMP symbol suffix for an exchange code (e.g. '.MU'), or '' for US/unknown."""
-    if not exchange:
-        return ''
-    if not _exchange_suffix_map:
+def get_full_symbol(ticker: Ticker) -> str:
+    if ticker.exchange and not _exchange_suffix_map:
         for e in api_stocks.fetch_available_exchanges():
             code = e.get('exchange')
             suffix = e.get('symbolSuffix', '')
             if code:
                 _exchange_suffix_map[code] = '' if suffix == 'N/A' else suffix
-    return _exchange_suffix_map.get(exchange, '')
+    suffix = _exchange_suffix_map.get(ticker.exchange, '') if ticker.exchange else ''
+    return f"{ticker.symbol}{suffix}" if suffix else ticker.symbol
 
 def _get_value_date() -> date:
     now_et = datetime.now(ZoneInfo("America/New_York"))
     return (now_et - timedelta(days=1) if now_et.hour < _VALUE_DATE_CUT_OFF_HOUR else now_et).date()
 
 
-def _populate(profile: dict, symbol: str, isin: str | None) -> int | None:
+def _populate(profile: dict) -> int | None:
     """Shared post-profile logic: upsert ticker, validate name, store value + ESG."""
+    full_symbol = profile.get('symbol')
     exchange = profile.get('exchange')
+    assert(full_symbol)
+    assert(exchange)
+    bare_symbol = re.split(r'[\s.]', full_symbol)[0]
     ticker = Ticker(
-        symbol=symbol,
-        isin=isin or profile.get('isin'),
+        symbol=bare_symbol,
+        isin=profile.get('isin'),
         cusip=profile.get('cusip'),
         cik=profile.get('cik'),
         name=profile.get('companyName'),
@@ -59,24 +68,24 @@ def _populate(profile: dict, symbol: str, isin: str | None) -> int | None:
         sector=profile.get('sector'),
         currency=profile.get('currency'),
         source='fmp',
-        type_from='holding',
     )
-    ticker_id = upsert_by_symbol(ticker)
+    ticker_id, is_new = upsert_by_symbol(ticker)
 
     if profile.get('exchange') == 'CRYPTO':
-        update_invalid(symbol, 'Crypto')
+        update_invalid(ticker_id, 'Crypto')
         return None
 
     name = profile.get('companyName')
     if not name:
-        update_invalid(symbol, 'Missing details')
+        update_invalid(ticker_id, 'Missing details')
         return None
     if tu.is_unwanted_names(name):
-        update_invalid(symbol, 'Fund or ETF')
+        update_invalid(ticker_id, 'Fund or ETF')
         return None
 
     _store_ticker_value(ticker_id, profile)
-    _store_esg(symbol, exchange)
+    if is_new:
+        populate_esg(ticker_id, full_symbol)
     return ticker_id
 
 
@@ -93,7 +102,7 @@ def _resolve_by_symbol(symbol: str | None) -> int | None:
         _symbol_cache[symbol] = None
         return None
 
-    result = _populate(profile, symbol, None)
+    result = _populate(profile)
     _symbol_cache[symbol] = result
     return result
 
@@ -134,7 +143,7 @@ def _resolve_by_isin(isin: str | None) -> int | None:
         _isin_cache[isin] = None
         return None
 
-    result = _populate(profile, symbol, isin)
+    result = _populate(profile)
     _isin_cache[isin] = result
     return result
 
@@ -163,20 +172,18 @@ def _resolve_by_symbol_search(symbol: str | None, name: str | None = None) -> in
             continue
         if name and not tu.names_match(name, candidate.get('name', '')):
             continue
-        fmp_symbol = re.split(r'[\s.]', fmp_symbol_full)[0]
         profile = api_stocks.get_stock_profile(fmp_symbol_full)
         if not isinstance(profile, dict):
             continue
-        result = _populate(profile, fmp_symbol, None)
+        result = _populate(profile)
         break
 
     if result is None and name:
-        found_symbol = tu.resolve_ticker_from_alt_data(isin=None, name=name)
-        if found_symbol:
-            fmp_symbol = re.split(r'[\s.]', found_symbol)[0]
-            profile = api_stocks.get_stock_profile(found_symbol)
+        fmp_symbol_full = tu.resolve_ticker_from_alt_data(isin=None, name=name)
+        if fmp_symbol_full:
+            profile = api_stocks.get_stock_profile(fmp_symbol_full)
             if isinstance(profile, dict):
-                result = _populate(profile, fmp_symbol, None)
+                result = _populate(profile)
 
     if result is None:
         log.record_notice(f"No verified stocks data provider match for non-US symbol '{symbol}'")
@@ -200,12 +207,3 @@ def _store_ticker_value(ticker_id: int, profile: dict) -> None:
         log.record_notice(f"Failed to store ticker_value for ticker_id={ticker_id}: {e}")
 
 
-def _store_esg(symbol: str, exchange: str | None) -> None:
-    try:
-        suffix = get_exchange_suffix(exchange)
-        fmp_symbol = f"{symbol}{suffix}" if suffix else symbol
-        disclosure, rating = api_stocks.fetch_esg_data(fmp_symbol)
-        esg_qualified, esg_factors = _esg.qualify(disclosure, rating)
-        update_esg_data(symbol, esg_qualified, esg_factors)
-    except Exception as e:
-        log.record_notice(f"Failed to store ESG for '{symbol}': {e}")

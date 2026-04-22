@@ -44,7 +44,7 @@ def process_symbol(s: str, start_date: date, end_date: date) -> tuple[bool, str,
             name=sd['companyName'],
             industry=sd['industry'],
             sector=sd['sector'],
-            source='provider_etf'
+            source='fmp'
         )
 
         ticker.upsert(t)

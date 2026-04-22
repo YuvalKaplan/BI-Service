@@ -14,8 +14,6 @@ def run(start_time: datetime) -> tuple[str, int, list[int] | None]:
         if batch_run_id is None:
             batch_run_id = batch_run.insert(batch_run.BatchRun(process='etf_downloader', activation='auto'))
 
-        ticker.sanitize()
-
         to_scrape = provider.fetch_active_providers()
 
         log.record_status(f"Running ETF Downloader batch job ID {batch_run_id} - will proccess {len(to_scrape)} items.")
@@ -27,6 +25,10 @@ def run(start_time: datetime) -> tuple[str, int, list[int] | None]:
         failed_providers = [p.name for f, p in future_to_provider.items() if f.exception() is not None]
         if failed_providers:
             log.record_error(f"{len(failed_providers)} provider(s) failed during collection: {', '.join(str(n) for n in failed_providers)}")
+
+        ticker.update_style_for_unclassified()
+        ticker.update_style_from_provider_etfs()
+        log.record_status("Updated style/cap for newly created tickers.")
 
         batch_run.update_completed_at(batch_run_id)
 

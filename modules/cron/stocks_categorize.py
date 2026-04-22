@@ -32,9 +32,6 @@ def run() -> int:
         ticker.update_style_from_categorization_etfs()
         log.record_status("Updated ticker style_type/cap_type from categorization ETF holdings.")
 
-        ticker.update_style_from_provider_etfs()
-        log.record_status("Updated remaining ticker style_type from provider ETF holdings.")
-
         batch_run.update_completed_at(batch_run_id)
         log.record_status(f"Finished categorize ETF update.\n")
         return len(style_etfs)

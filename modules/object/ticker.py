@@ -8,8 +8,8 @@ from modules.core.db import db_pool_instance
 
 @dataclass
 class Ticker:
+    symbol: str
     id: Optional[int] = None
-    symbol: Optional[str] = None
     created_at: Optional[datetime] = None
     source: str | None = None
     style_type: str | None = None
@@ -68,6 +68,16 @@ def fetch_by_symbols(symbols: list[str]) -> list[Ticker]:
     except Error as e:
         raise Exception(f"Error fetching the Ticker list from the DB: {e}")
 
+def fetch_all_valid() -> list['Ticker']:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                cur.execute("SELECT * FROM ticker WHERE invalid IS NULL;")
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching all valid tickers: {e}")
+
+
 def fetch_by_ids(ids: list[int]) -> list[Ticker]:
     try:
         with db_pool_instance.get_connection() as conn:
@@ -102,14 +112,14 @@ def fetch_by_isin_and_symbol(isin: str, symbol: str, exchange: str | None = None
 
 # ── DB write ─────────────────────────────────────────────────────────────────
 
-def upsert_by_symbol(item: Ticker) -> int:
+def upsert_by_symbol(item: Ticker) -> tuple[int, bool]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 query = """
                     INSERT INTO ticker (symbol, isin, cusip, cik, name, exchange, industry, sector, currency, source, type_from)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (symbol)
+                    ON CONFLICT (symbol, exchange)
                     DO UPDATE
                     SET isin = EXCLUDED.isin,
                         cusip = EXCLUDED.cusip,
@@ -121,15 +131,39 @@ def upsert_by_symbol(item: Ticker) -> int:
                         currency = EXCLUDED.currency,
                         source = EXCLUDED.source,
                         type_from = EXCLUDED.type_from
-                    RETURNING id;
+                    RETURNING id, (xmax = 0) AS is_new;
                 """
                 cur.execute(query, (item.symbol, item.isin, item.cusip, item.cik, item.name, item.exchange, item.industry, item.sector, item.currency, item.source, item.type_from))
                 row = cur.fetchone()
                 if row is None:
                     raise Exception("INSERT ... RETURNING id returned no row")
-                return row[0]
+                return row[0], row[1]
     except Error as e:
         raise Exception(f"Error upserting ticker by symbol into the DB: {e}")
+
+def update_profile(ticker_id: int, item: Ticker) -> None:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE ticker
+                    SET isin      = %s,
+                        cusip     = %s,
+                        cik       = %s,
+                        name      = %s,
+                        exchange  = %s,
+                        industry  = %s,
+                        sector    = %s,
+                        currency  = %s,
+                        source    = %s,
+                        type_from = %s
+                    WHERE id = %s;
+                """, (item.isin, item.cusip, item.cik, item.name, item.exchange,
+                      item.industry, item.sector, item.currency, item.source, item.type_from,
+                      ticker_id))
+    except Error as e:
+        raise Exception(f"Error updating profile for ticker {ticker_id}: {e}")
+
 
 def update_esg_qualified(symbols: list[str]) -> None:
     if not symbols:
@@ -145,7 +179,7 @@ def update_esg_qualified(symbols: list[str]) -> None:
     except Error as e:
         raise Exception(f"Error updating esg_qualified in the DB: {e}")
 
-def update_esg_data(symbol: str, esg_qualified: bool, esg_factors: dict) -> None:
+def update_esg_data(ticker_id: int, esg_qualified: bool, esg_factors: dict) -> None:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
@@ -153,27 +187,28 @@ def update_esg_data(symbol: str, esg_qualified: bool, esg_factors: dict) -> None
                     UPDATE ticker
                     SET esg_qualified = %s,
                         esg_factors   = %s
-                    WHERE symbol = %s;
-                """, (esg_qualified, json.dumps(esg_factors), symbol))
+                    WHERE id = %s;
+                """, (esg_qualified, json.dumps(esg_factors), ticker_id))
     except Error as e:
-        raise Exception(f"Error updating esg data for {symbol}: {e}")
+        raise Exception(f"Error updating esg data for ticker {ticker_id}: {e}")
 
-def update_invalid(symbol: str, reason: str) -> None:
+def fetch_with_missing_exchange() -> list['Ticker']:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                cur.execute("SELECT * FROM ticker WHERE exchange IS NULL AND invalid IS NULL;")
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching tickers with missing exchange: {e}")
+
+
+def update_invalid(ticker_id: int, reason: str) -> None:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("UPDATE ticker SET invalid = %s WHERE symbol = %s;", (reason, symbol))
+                cur.execute("UPDATE ticker SET invalid = %s WHERE id = %s;", (reason, ticker_id))
     except Error as e:
         raise Exception(f"Error updating the Ticker invalid reason into the DB: {e}")
-
-def sanitize() -> None:
-    """Mark any ticker table rows with non-standard symbols as invalid."""
-    try:
-        with db_pool_instance.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute('SELECT sanitize_tickers();')
-    except Error as e:
-        raise Exception(f"Error sanitizing tickers: {e}")
 
 def update_style_from_categorization_etfs() -> None:
     try:
@@ -193,6 +228,28 @@ def update_style_from_categorization_etfs() -> None:
                 """)
     except Error as e:
         raise Exception(f"Error updating ticker style from categorization ETFs: {e}")
+
+def update_style_for_unclassified() -> None:
+    """Set style/cap for tickers that have never been classified, using existing categorize ETF data."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE public.ticker t
+                    SET style_type = ce.style_type,
+                        cap_type   = ce.cap_type,
+                        type_from  = 'CAT_ETF'
+                    FROM public.categorize_etf_holding ceh
+                    JOIN public.categorize_etf ce ON ce.id = ceh.categorize_etf_id
+                    WHERE t.id            = ceh.ticker_id
+                      AND ce.usage        = 'style'
+                      AND ce.style_type   IS NOT NULL
+                      AND t.style_type    IS NULL
+                      AND t.invalid       IS NULL;
+                """)
+    except Error as e:
+        raise Exception(f"Error updating style for unclassified tickers: {e}")
+
 
 def update_style_from_provider_etfs() -> None:
     """Fill style_type for unclassified tickers using provider_etf holdings (value/growth only)."""
