@@ -1,10 +1,11 @@
 import log
 from modules.object import batch_run
 from modules.object.ticker import fetch_all_valid
-from modules.ticker.resolver import populate_esg, get_full_symbol
+from modules.ticker.resolver import populate_esg, TickerResolver
 
 
 def run() -> int:
+    resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
     batch_run_id = batch_run.insert(batch_run.BatchRun(process='esg_update', activation='auto'))
     tickers = fetch_all_valid()
     log.record_status(f"ESG update: refreshing {len(tickers)} tickers.")
@@ -12,7 +13,7 @@ def run() -> int:
     count = 0
     for t in tickers:
         assert t.id is not None
-        populate_esg(t.id, get_full_symbol(t))
+        populate_esg(t.id, resolver.get_full_symbol(t))
         count += 1
 
     batch_run.update_completed_at(batch_run_id)

@@ -4,7 +4,7 @@ from modules.object.exit import cleanup
 from modules.object import provider, provider_etf, provider_etf_holding
 from modules.parse.url import scrape_provider_etf
 from modules.parse.convert import load, map_data
-from modules.ticker.resolver import resolve
+from modules.ticker.resolver import TickerResolver
 
 atexit.register(cleanup)
 
@@ -31,12 +31,13 @@ if __name__ == '__main__':
 
         file_format = etf.file_format or p.file_format
         mapping = etf.mapping or p.mapping
+        resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
         if etf.id and file_format and mapping:
             map_obj = provider.getMappingFromJson(mapping)
             full_rows = load(etf_name=etf.name, file_format=file_format, mapping=map_obj, file_name=d.file_name, raw_data=d.data)
             df = map_data(full_rows=full_rows, file_name=d.file_name, date_from_page=d.date_from_page, mapping=map_obj)
             df['ticker_id'] = df.apply(
-                lambda row: resolve(
+                lambda row: resolver.resolve(
                     region=etf.region,
                     symbol=row.get('ticker'),
                     isin=row.get('isin'),

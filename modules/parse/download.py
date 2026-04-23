@@ -6,7 +6,7 @@ from modules.core.util import get_domain_from_url
 from modules.object.provider import Provider, update_domain, getMappingFromJson
 from modules.object.provider_etf import update_last_download
 from modules.object.provider_etf_holding import insert_all_holdings
-from modules.ticker.resolver import resolve
+from modules.ticker.resolver import TickerResolver
 
 from modules.parse.url import scrape_provider
 from modules.parse.convert import load, map_data
@@ -75,8 +75,9 @@ def process_provider(provider: Provider, save_dir: str | None = None) -> list[Et
                         etf_stat.holdings = len(df)
 
                         log.record_status(f"Resolving tickers for ETF '{d.etf.name}'...")
+                        etf_resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
                         df['ticker_id'] = df.apply(
-                            lambda row: resolve(
+                            lambda row: etf_resolver.resolve(
                                 region=d.etf.region,
                                 symbol=row.get('ticker'),
                                 isin=row.get('isin'),

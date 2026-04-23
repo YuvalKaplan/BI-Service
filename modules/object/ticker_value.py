@@ -31,12 +31,12 @@ def fetch_latest_market_caps_within_window(ticker_ids: List[int], as_of_date: da
                     SELECT DISTINCT ON (ticker_id) ticker_id, value_date, stock_price, market_cap
                     FROM ticker_value
                     WHERE ticker_id = ANY(%s)
-                      AND value_date <= %s
                       AND value_date >= %s - (%s * INTERVAL '1 day')
+                      AND value_date <= %s + (%s * INTERVAL '1 day')
                       AND market_cap IS NOT NULL
                     ORDER BY ticker_id, value_date DESC;
                 """
-                cur.execute(query, (ticker_ids, as_of_date, as_of_date, days))
+                cur.execute(query, (ticker_ids, as_of_date, days, as_of_date, days))
                 return cur.fetchall()
     except Error as e:
         raise Exception(f"Error fetching latest market caps within window: {e}")

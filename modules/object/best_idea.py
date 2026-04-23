@@ -65,11 +65,11 @@ class BestIdeaRanked:
     source_etf_id: int
     all_provider_ids: List[int]
 
-def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: str, as_of_date: date, provider_etf_ids: list[int], exchanges: list[str] = [], esg_only: bool = False) -> List[BestIdeaRanked]:
+def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: str, as_of_date: date, provider_etf_ids: list[int], exchanges: list[str] = [], esg_only: bool = False, country_type: str = 'all') -> List[BestIdeaRanked]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(BestIdeaRanked)) as cur:
-                cur.execute('SELECT * FROM get_best_ideas_by_ranking(%s, %s, %s, %s, %s, %s, %s);', (ranking_level, style_type, cap_type, as_of_date, provider_etf_ids, exchanges, esg_only))
+                cur.execute('SELECT * FROM get_best_ideas_by_ranking(%s, %s, %s, %s, %s, %s, %s, %s);', (ranking_level, style_type, cap_type, as_of_date, provider_etf_ids, exchanges, esg_only, country_type))
                 items = cur.fetchall()
         return items
     except Error as e:

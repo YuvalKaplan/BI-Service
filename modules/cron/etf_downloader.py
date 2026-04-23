@@ -3,8 +3,10 @@ import os
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, wait
 from modules.object import batch_run, ticker
+from modules.object import categorize_ticker as cat_ticker_obj
 from modules.parse.download import process_provider
 from modules.object import provider
+from modules.calc import classification
 
 MAX_WORKERS = 5
 
@@ -29,6 +31,13 @@ def run(start_time: datetime) -> tuple[str, int, list[int] | None]:
         ticker.update_style_for_unclassified()
         ticker.update_style_from_provider_etfs()
         log.record_status("Updated style/cap for newly created tickers.")
+
+        training_data = cat_ticker_obj.fetch_all_for_style_classification()
+        if training_data:
+            items = [classification.to_categorize_ticker_item(t) for t in training_data]
+            classifier = classification.get_classifier(items)
+            classification.mark_style(classifier, ticker)
+            log.record_status("Ran model classifier for NULL style_type tickers.")
 
         batch_run.update_completed_at(batch_run_id)
 

@@ -4,7 +4,7 @@ from modules.object import provider, provider_etf_holding
 from modules.parse.url import scrape_provider
 from modules.parse.convert import load, map_data
 from modules.parse.download import process_provider
-from modules.ticker.resolver import resolve
+from modules.ticker.resolver import TickerResolver
 
 atexit.register(cleanup)
 
@@ -15,6 +15,7 @@ if __name__ == '__main__':
         if p and p.url_start:
             # process_provider(p)
             downloads = scrape_provider(p)
+            resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
             for d in downloads:
                 try:
                     file_format = d.etf.file_format or d.provider.file_format
@@ -24,7 +25,7 @@ if __name__ == '__main__':
                         full_rows = load(etf_name=d.etf.name, file_format=file_format, mapping=map, file_name=d.file_name, raw_data=d.data)
                         df = map_data(full_rows=full_rows, file_name=d.file_name, date_from_page=d.date_from_page, mapping=map)
                         df['ticker_id'] = df.apply(
-                            lambda row: resolve(
+                            lambda row: resolver.resolve(
                                 region=d.etf.region,
                                 symbol=row.get('ticker'),
                                 isin=row.get('isin'),

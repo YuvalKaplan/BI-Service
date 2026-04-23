@@ -10,13 +10,13 @@ import pandas as pd
 class CategorizeEtfHolding:
     categorize_etf_id: int
     holding_date: date
-    ticker_id: int
+    categorize_ticker_id: int
     id: Optional[int]
     created_at: Optional[datetime]
 
 
-def insert_holding(categorize_etf_id: int, holding_date: date, ticker_ids: List[int]) -> None:
-    if not ticker_ids:
+def insert_holding(categorize_etf_id: int, holding_date: date, categorize_ticker_ids: List[int]) -> None:
+    if not categorize_ticker_ids:
         return
 
     try:
@@ -34,14 +34,14 @@ def insert_holding(categorize_etf_id: int, holding_date: date, ticker_ids: List[
                     INSERT INTO categorize_etf_holding (
                         categorize_etf_id,
                         holding_date,
-                        ticker_id
+                        categorize_ticker_id
                     )
                     VALUES (%s, %s, %s);
                 """
 
                 insert_values = [
                     (categorize_etf_id, holding_date, tid)
-                    for tid in ticker_ids
+                    for tid in categorize_ticker_ids
                 ]
 
                 cur.executemany(insert_sql, insert_values)

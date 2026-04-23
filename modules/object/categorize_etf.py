@@ -11,6 +11,7 @@ class CategorizeEtf:
     id: int | None
     created_at: datetime | None
     name: str | None
+    region: str | None
     usage: str | None
     cap_type: str | None
     style_type: str | None

@@ -3,7 +3,7 @@ import types
 from datetime import date
 from typing import Any, List, Optional
 from dataclasses import dataclass
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ── Shared strategy models ──────────────────────────────────────────────────
@@ -17,8 +17,9 @@ class Style(BaseModel):
     growth: Optional[int] = None
 
 class RegionSplit(BaseModel):
-    US: Optional[int] = None
-    International: Optional[int] = None
+    model_config = {'populate_by_name': True}
+    us: Optional[int] = Field(None, alias='US')
+    non_us: Optional[int] = Field(None, alias='Non-US')
 
 class Region(BaseModel):
     name: str
@@ -131,6 +132,7 @@ def _fetch_and_select_by_style(
     today: date,
     best_ideas_module: types.ModuleType,
     fetch_ranking_level: int,
+    country_type: str = 'all',
 ) -> tuple[list, list]:
     """
     Returns (ideal, fetched).
@@ -148,11 +150,13 @@ def _fetch_and_select_by_style(
             ranking_level=fetch_ranking_level, style_type="growth",
             cap_type=strategy.cap.name, as_of_date=today,
             provider_etf_ids=etf_ids, exchanges=exchanges, esg_only=strategy.esg_only,
+            country_type=country_type,
         )
         fetched_value = best_ideas_module.fetch_best_ideas_by_ranking(
             ranking_level=fetch_ranking_level, style_type="value",
             cap_type=strategy.cap.name, as_of_date=today,
             provider_etf_ids=etf_ids, exchanges=exchanges, esg_only=strategy.esg_only,
+            country_type=country_type,
         )
 
         if USE_RANKING_HIGH != 1:
@@ -171,6 +175,7 @@ def _fetch_and_select_by_style(
             ranking_level=fetch_ranking_level, style_type=strategy.style.name,
             cap_type=strategy.cap.name, as_of_date=today,
             provider_etf_ids=etf_ids, exchanges=exchanges, esg_only=strategy.esg_only,
+            country_type=country_type,
         )
 
         if USE_RANKING_HIGH != 1:
@@ -185,34 +190,29 @@ def _fetch_and_select_by_style(
 def _fetch_and_select_by_region(
     strategy: Strategy,
     provider_etfs: list[int],
-    provider_etf_regions: dict[int, str] | None,
     today: date,
     best_ideas_module: types.ModuleType,
     fetch_ranking_level: int,
 ) -> tuple[list, list]:
     """
     Returns (ideal, fetched).
-    If the strategy has a region split and `provider_etf_regions` is provided, partitions
-    `provider_etfs` into US and International groups, fetches each independently, then
-    combines them according to the split percentages. Otherwise delegates directly to
-    `_fetch_and_select_by_style` using the full ETF list.
+    If the strategy has a region split, fetches US and International tickers
+    independently (filtering by ticker.country in the SQL layer) using the full
+    ETF list, then combines them according to the split percentages.
+    Otherwise delegates directly to _fetch_and_select_by_style.
     """
     region = strategy.region
     region_split = region.split if region is not None else None
 
     if (
         region_split is not None
-        and region_split.US is not None
-        and region_split.International is not None
-        and provider_etf_regions is not None
+        and region_split.us is not None
+        and region_split.non_us is not None
     ):
-        us_etf_ids   = [i for i in provider_etfs if provider_etf_regions.get(i) == "US"]
-        intl_etf_ids = [i for i in provider_etfs if provider_etf_regions.get(i) == "International"]
+        us_ideal,   us_fetched   = _fetch_and_select_by_style(strategy.holdings, strategy, provider_etfs, today, best_ideas_module, fetch_ranking_level, country_type='US')
+        intl_ideal, intl_fetched = _fetch_and_select_by_style(strategy.holdings, strategy, provider_etfs, today, best_ideas_module, fetch_ranking_level, country_type='Non-US')
 
-        us_ideal,   us_fetched   = _fetch_and_select_by_style(strategy.holdings, strategy, us_etf_ids,   today, best_ideas_module, fetch_ranking_level)
-        intl_ideal, intl_fetched = _fetch_and_select_by_style(strategy.holdings, strategy, intl_etf_ids, today, best_ideas_module, fetch_ranking_level)
-
-        us_n_target   = round(strategy.holdings * region_split.US / 100)
+        us_n_target   = round(strategy.holdings * region_split.us / 100)
         intl_n_target = strategy.holdings - us_n_target
         us_n   = min(len(us_ideal),   us_n_target)
         intl_n = min(len(intl_ideal), intl_n_target)
@@ -227,7 +227,6 @@ def generate(
     fund: FundProtocol,
     previous_holdings: List[FundHolding],
     best_ideas_module: types.ModuleType,
-    provider_etf_regions: dict[int, str] | None = None,
 ) -> FundChangesResult:
     """
     Pure computation: determine today's holdings and changes for each fund.
@@ -246,7 +245,7 @@ def generate(
     ranking_gap_drop = 5 if strategy.allocation == "market_cap" else 2
     fetch_ranking_level = USE_RANKING_LOW + ranking_gap_drop
 
-    ideal_holdings, fetched = _fetch_and_select_by_region(strategy, provider_etfs, provider_etf_regions, today, best_ideas_module, fetch_ranking_level)
+    ideal_holdings, fetched = _fetch_and_select_by_region(strategy, provider_etfs, today, best_ideas_module, fetch_ranking_level)
 
     holdings_changed: List[FundHoldingChange] = []
     todays_holdings: List[FundHolding] = []

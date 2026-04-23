@@ -4,7 +4,7 @@ from modules.object.exit import cleanup
 from modules.object.provider_etf_holding import fetch_valid_ticker_ids_in_holdings
 from modules.object.ticker import fetch_by_ids
 from modules.object.ticker_value import TickerValue, upsert_bulk
-from modules.ticker.resolver import get_full_symbol
+from modules.ticker.resolver import TickerResolver
 from modules.core.api_stocks import get_stock_historic_prices, get_stock_historic_market_cap
 from modules.core.db import db_pool_instance
 from psycopg.errors import Error
@@ -85,6 +85,7 @@ def fill_gap(ticker_id: int, fmp_symbol: str, gap_start: date, gap_end: date) ->
 
 
 if __name__ == "__main__":
+    resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
     end_date = date.today()
     ticker_ids = fetch_valid_ticker_ids_in_holdings()
     tickers = fetch_by_ids(ticker_ids)
@@ -102,7 +103,7 @@ if __name__ == "__main__":
         if not gaps:
             continue
 
-        full_symbol = get_full_symbol(ticker)
+        full_symbol = resolver.get_full_symbol(ticker)
 
         print(f"[{full_symbol}] {len(gaps)} gap(s) found:")
         ticker_filled = 0

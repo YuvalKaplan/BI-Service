@@ -278,6 +278,8 @@ def fetch_company_factors(symbol: str) -> tuple[Dict, Dict]:
             "company_name": p.get("companyName"),
             "industry": p.get("industry"),
             "market_cap": p.get("marketCap", 0),
+            "country": p.get("country"),
+            "currency": p.get("currency"),
         }
 
         factors = {

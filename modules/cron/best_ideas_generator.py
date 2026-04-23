@@ -6,9 +6,9 @@ from modules.object.provider_etf_holding import fetch_latest_holdings_for_etf
 from modules.object.ticker_value import fetch_latest_market_caps_within_window
 from modules.object import best_idea
 
-DAYS_NO_PRICING = 7
+DAYS_NO_MARKET_CAP = 5
 MIN_HOLDINGS_WITH_PRICES_PCT = 0.9
-LOOK_BACK_FOR_COMMON_DATE = 14
+LOOK_BACK_WINDOW = 14
 MAX_BEST_IDEAS_PER_FUND = 10
 HOLDING_DELTA_LIMIT_DROP_OFF = 0.25
 
@@ -82,22 +82,24 @@ def run() -> tuple[int, int, list[str]]:
             for pe in pe_list:
                 try:
                     # 1. Fetch holdings for the latest holding date within the look-back window
-                    raw_holdings = fetch_latest_holdings_for_etf(pe.id, LOOK_BACK_FOR_COMMON_DATE)
+                    raw_holdings = fetch_latest_holdings_for_etf(pe.id, LOOK_BACK_WINDOW)
                     if not raw_holdings:
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"No holdings have been downloaded for the past {LOOK_BACK_FOR_COMMON_DATE} days", message=None, problem_etfs=problem_etfs)
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"No holdings have been downloaded for the past {LOOK_BACK_WINDOW} days", message=None, problem_etfs=problem_etfs)
                         continue
 
                     holding_date = raw_holdings[0].holding_date
 
-                    # 2. Fetch latest market caps within 7 days of the holding date
+                    # 2. Fetch latest market caps within +/- 5 days of the holding date. 
+                    # Going a few days after the holding is useful if we have a new ticker that was just added to the 
+                    # holdings as the first market_cap downloaded using the profile API may be a day or two after the holding date..
                     ticker_ids = [h.ticker_id for h in raw_holdings if h.ticker_id]
-                    market_cap_values = fetch_latest_market_caps_within_window(ticker_ids, holding_date, DAYS_NO_PRICING)
+                    market_cap_values = fetch_latest_market_caps_within_window(ticker_ids, holding_date, DAYS_NO_MARKET_CAP)
 
                     # 3. Identify and report stale tickers (no market cap within window)
                     priced_ids = {v.ticker_id for v in market_cap_values}
                     for h in raw_holdings:
                         if h.ticker_id and h.ticker_id not in priced_ids:
-                            record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="STALE HOLDING", message=f"ticker_id={h.ticker_id} has no market cap for over {DAYS_NO_PRICING} days", problem_etfs=problem_etfs)
+                            record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="STALE HOLDING", message=f"ticker_id={h.ticker_id} has no market cap for over {DAYS_NO_MARKET_CAP} days", problem_etfs=problem_etfs)
 
                     # 4. Coverage check
                     coverage_ratio = len(market_cap_values) / len(raw_holdings)

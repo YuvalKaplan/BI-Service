@@ -58,6 +58,7 @@ if __name__ == "__main__":
             exchange=exchange,
             industry=profile.get('industry'),
             sector=profile.get('sector'),
+            country=profile.get('country'),
             currency=profile.get('currency'),
             source='fmp',
             type_from=t.type_from,
