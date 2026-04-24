@@ -17,6 +17,7 @@ def run() -> int:
         style_etfs = categorize_etf.fetch_all('style')
         log.record_status(f"Style (Growth/Value) update: processing {len(style_etfs)} style ETFs.")
 
+        resolver = TickerResolver(TickerResolver.POPULATE_CATEGORY_TICKER)
         for etf in style_etfs:
             d = scrape_categorizer(etf)
             log.record_status(f"Processing '{etf.name}' ETF for categorization.")
@@ -31,13 +32,9 @@ def run() -> int:
                     date_from_page=None, mapping=map_obj,
                 )
                 log.record_status(f"Resolving tickers for ETF '{etf.name}'...")
-                etf_resolver = TickerResolver(
-                    populate=TickerResolver.POPULATE_CATEGORY_TICKER,
-                    style_type=etf.style_type,
-                    cap_type=etf.cap_type,
-                )
+                resolver.set_classification(etf.style_type, etf.cap_type)
                 df['cat_ticker_id'] = df.apply(
-                    lambda row: etf_resolver.resolve(
+                    lambda row: resolver.resolve(
                         region=etf.region or 'US',
                         symbol=row.get('ticker'),
                         isin=row.get('isin'),

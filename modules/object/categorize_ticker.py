@@ -24,56 +24,6 @@ class CategorizeTicker:
     last_update: datetime | None = None
 
 
-def upsert_bulk(items: list[dict]) -> list[int]:
-    """
-    Insert or update categorize_ticker rows. Conflict key: (symbol, exchange).
-    Returns the list of assigned DB ids in the same order as items.
-    """
-    if not items:
-        return []
-    try:
-        with db_pool_instance.get_connection() as conn:
-            with conn.cursor() as cur:
-                ids = []
-                for item in items:
-                    cur.execute("""
-                        INSERT INTO categorize_ticker
-                            (name, symbol, isin, exchange, country, currency,
-                             style_type, cap_type, sector, market_cap, factors, last_update)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
-                        ON CONFLICT (symbol, exchange)
-                        DO UPDATE SET
-                            name        = EXCLUDED.name,
-                            isin        = EXCLUDED.isin,
-                            country     = EXCLUDED.country,
-                            currency    = EXCLUDED.currency,
-                            style_type  = EXCLUDED.style_type,
-                            cap_type    = EXCLUDED.cap_type,
-                            sector      = EXCLUDED.sector,
-                            market_cap  = EXCLUDED.market_cap,
-                            factors     = EXCLUDED.factors,
-                            last_update = now()
-                        RETURNING id
-                    """, (
-                        item.get("name"),
-                        item.get("symbol"),
-                        item.get("isin"),
-                        item.get("exchange"),
-                        item.get("country"),
-                        item.get("currency"),
-                        item.get("style_type"),
-                        item.get("cap_type"),
-                        item.get("sector"),
-                        item.get("market_cap"),
-                        json.dumps(item["factors"]) if item.get("factors") else None,
-                    ))
-                    row = cur.fetchone()
-                    ids.append(row[0] if row else None)
-        return ids
-    except Error as e:
-        raise Exception(f"Error upserting categorize_ticker rows: {e}")
-
-
 def fetch_all_for_style_classification() -> List[CategorizeTicker]:
     try:
         with db_pool_instance.get_connection() as conn:
@@ -89,3 +39,45 @@ def fetch_all_for_style_classification() -> List[CategorizeTicker]:
                 return cur.fetchall()
     except Error as e:
         raise Exception(f"Error loading categorize_ticker for style classification: {e}")
+
+def upsert(item: dict) -> int | None:
+    """Insert or update a single categorize_ticker row. Conflict key: (symbol, exchange). Returns the assigned id."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO categorize_ticker
+                        (name, symbol, isin, exchange, country, currency,
+                         style_type, cap_type, sector, market_cap, factors, last_update)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                    ON CONFLICT (symbol, exchange)
+                    DO UPDATE SET
+                        name        = EXCLUDED.name,
+                        isin        = EXCLUDED.isin,
+                        country     = EXCLUDED.country,
+                        currency    = EXCLUDED.currency,
+                        style_type  = EXCLUDED.style_type,
+                        cap_type    = EXCLUDED.cap_type,
+                        sector      = EXCLUDED.sector,
+                        market_cap  = EXCLUDED.market_cap,
+                        factors     = EXCLUDED.factors,
+                        last_update = now()
+                    RETURNING id
+                """, (
+                    item.get("name"),
+                    item.get("symbol"),
+                    item.get("isin"),
+                    item.get("exchange"),
+                    item.get("country"),
+                    item.get("currency"),
+                    item.get("style_type"),
+                    item.get("cap_type"),
+                    item.get("sector"),
+                    item.get("market_cap"),
+                    json.dumps(item["factors"]) if item.get("factors") else None,
+                ))
+                row = cur.fetchone()
+                return row[0] if row else None
+    except Error as e:
+        raise Exception(f"Error upserting categorize_ticker row: {e}")
+

@@ -207,6 +207,16 @@ def fetch_with_missing_exchange() -> list['Ticker']:
         raise Exception(f"Error fetching tickers with missing exchange: {e}")
 
 
+def fetch_with_missing_country() -> list['Ticker']:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                cur.execute("SELECT * FROM ticker WHERE country IS NULL AND exchange IS NOT NULL AND invalid IS NULL;")
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching tickers with missing country: {e}")
+
+
 def update_invalid(ticker_id: int, reason: str) -> None:
     try:
         with db_pool_instance.get_connection() as conn:

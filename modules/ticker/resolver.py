@@ -28,18 +28,17 @@ class TickerResolver:
     POPULATE_TICKER          = 'ticker'
     POPULATE_CATEGORY_TICKER = 'category_ticker'
 
-    def __init__(
-        self,
-        populate: str,
-        style_type: str | None = None,
-        cap_type: str | None = None,
-    ):
+    def __init__(self, populate: str):
         self.populate = populate
-        self.style_type = style_type
-        self.cap_type = cap_type
+        self.style_type: str | None = None
+        self.cap_type: str | None = None
         self._symbol_cache: dict[str, Any] = {}
         self._isin_cache:   dict[str, Any] = {}
         self._exchange_suffix_map: dict[str, str] = {}
+
+    def set_classification(self, style_type: str, cap_type: str) -> None:
+        self.style_type = style_type
+        self.cap_type = cap_type
 
     def resolve(
         self,
@@ -212,7 +211,7 @@ class TickerResolver:
         _, factors = api_stocks.fetch_company_factors(full_symbol)
         if not factors:
             return None
-        ids = _cat_ticker.upsert_bulk([{
+        return _cat_ticker.upsert({
             "name":       profile.get('companyName'),
             "symbol":     canonical,
             "isin":       profile.get('isin'),
@@ -224,8 +223,7 @@ class TickerResolver:
             "sector":     profile.get('sector'),
             "market_cap": profile.get('marketCap'),
             "factors":    factors,
-        }])
-        return ids[0] if ids else None
+        })
 
     def _get_value_date(self) -> date:
         now_et = datetime.now(ZoneInfo("America/New_York"))

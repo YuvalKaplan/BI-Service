@@ -56,6 +56,7 @@ def process_provider(provider: Provider, save_dir: str | None = None) -> list[Et
         log.record_status(f"Storing holdings for {len(downloads)} ETFs for analysis of provider '{provider.name}'.")
 
         stats: list[EtfStats] = []
+        resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
 
         for d in downloads:
             etf_stat = EtfStats(etf_name=d.etf.name or '', etf_id=d.etf.id, etf_region=d.etf.region)
@@ -75,9 +76,8 @@ def process_provider(provider: Provider, save_dir: str | None = None) -> list[Et
                         etf_stat.holdings = len(df)
 
                         log.record_status(f"Resolving tickers for ETF '{d.etf.name}'...")
-                        etf_resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
                         df['ticker_id'] = df.apply(
-                            lambda row: etf_resolver.resolve(
+                            lambda row: resolver.resolve(
                                 region=d.etf.region,
                                 symbol=row.get('ticker'),
                                 isin=row.get('isin'),
