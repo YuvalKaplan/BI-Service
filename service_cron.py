@@ -27,7 +27,7 @@ if __name__ == '__main__':
         weekday = start_time.weekday() # 0 = Monday, 4 = Friday, 6 = Sunday
         message_actions = ""
 
-        if 1 <= weekday <= 6: # Tuesday through Saturday
+        if 1 <= weekday <= 5: # Tuesday through Saturday
             try:
                 stats_downloader, total_downloaded, provider_ids, = etf_downloader.run(start_time)
             except Exception as e:
@@ -43,7 +43,7 @@ if __name__ == '__main__':
             try:
                 total_etfs = categorize_downloader.run()
             except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on categorize stocks with error:\n{e}\n\n")
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed in categorize ETF download with error:\n{e}\n\n")
                 raise e
 
             message_actions += f"Categorization ETFs processed: {total_etfs}\n"
@@ -58,7 +58,7 @@ if __name__ == '__main__':
             message_actions += f"ESG tickers refreshed: {total_esg}\n"
             message_actions += BREAKER_LINE
 
-        if 1 <= weekday <= 6: # Tuesday through Saturday
+        if 1 <= weekday <= 5: # Tuesday through Saturday
             try:
                 etfs_processed, generated_etfs, problems = best_ideas_generator.run()
             except Exception as e:

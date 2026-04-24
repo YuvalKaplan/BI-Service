@@ -86,6 +86,27 @@ def detect_single_header_row(
     return None
 
 
+def detect_shifted_single_date(
+    full_rows: list[list[str]],
+    start_row: int,
+    col: int,
+    date_format: str,
+    max_scan: int = 0,
+) -> date | None:
+    for i in range(start_row, min(start_row + max_scan + 1, len(full_rows))):
+        try:
+            cell = full_rows[i][col]
+        except IndexError:
+            continue
+        if cell in (None, "", "nan"):
+            continue
+        try:
+            return clean_date(str(cell).strip(), format=date_format)
+        except Exception:
+            continue
+    return None
+
+
 def clean_numeric_column(df: pd.DataFrame, column: str, as_type: str = "float") -> pd.Series:
     col = df[column].astype(str).str.strip()
     col_clean = col.str.replace(r"[$€£,%]", "", regex=True)
@@ -157,8 +178,19 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
 
     # If the date is not a part of the table or is only in the first row - grab it:
     if mapping.date.single:
-        dirty = full_rows[mapping.date.single.row][mapping.date.single.col]
-        good_date = clean_date(dirty, format=mapping.date.format)
+        if mapping.date.single.max_row_scan:
+            detected_date = detect_shifted_single_date(
+                full_rows,
+                start_row=mapping.date.single.row,
+                col=mapping.date.single.col,
+                date_format=mapping.date.format,
+                max_scan=mapping.date.single.max_row_scan,
+            )
+            if detected_date:
+                good_date = detected_date
+        else:
+            dirty = full_rows[mapping.date.single.row][mapping.date.single.col]
+            good_date = clean_date(dirty, format=mapping.date.format)
 
     # select only the rows of the product (if this is a multi-product sheet)
     if mapping.product_column:

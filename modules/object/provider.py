@@ -25,6 +25,7 @@ class Provider:
 class DatePosition(BaseModel):
     row: int
     col: int
+    max_row_scan: Optional[int] = 0
 
 class DateOnPage(BaseModel):
     location: str

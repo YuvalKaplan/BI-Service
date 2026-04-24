@@ -111,14 +111,16 @@ class StyleClassifier:
     def __init__(self, model):
         self.model = model
 
-    def classify_symbols(self, symbols: list[str]) -> list[dict]:
+    def classify_symbols(self, symbols: list[str]) -> tuple[list[dict], list[str]]:
         rows = []
+        no_data_symbols = []
         total = len(symbols)
         for count, symbol in enumerate(symbols, start=1):
             log.record_status(f"Classifying {symbol} with model ({count} out of {total})")
             try:
                 profile, factors = fetch_company_factors(symbol)
                 if not factors:
+                    no_data_symbols.append(symbol)
                     continue
                 feature_row = {k: factors.get(k) for k in FEATURE_COLS}
                 feature_row["symbol"] = symbol
@@ -127,7 +129,7 @@ class StyleClassifier:
                 continue
 
         if not rows:
-            return []
+            return [], no_data_symbols
 
         df = pd.DataFrame(rows)
         probs = self.model.predict_proba(df[FEATURE_COLS])[:, 1]
@@ -147,7 +149,7 @@ class StyleClassifier:
                 "growth_probability": float(p)
             })
 
-        return results
+        return results, no_data_symbols
 
 
 def get_classifier(categorized_tickers: list[CategorizeTickerItem]) -> StyleClassifier:
@@ -155,15 +157,25 @@ def get_classifier(categorized_tickers: list[CategorizeTickerItem]) -> StyleClas
     return StyleClassifier(model)
 
 
-def mark_style(classifier: StyleClassifier, ticker_module) -> None:
-    tickers = ticker_module.fetch_all_with_missing_style()
+def _run_style_stage(label: str, tickers: list, classifier: 'StyleClassifier', ticker_module) -> None:
+    log.record_status(f"Style classification [{label}]: {len(tickers)} tickers to classify.")
     if not tickers:
         return
     symbol_to_id = {t.symbol: t.id for t in tickers}
-    results = classifier.classify_symbols(list(symbol_to_id))
+    results, no_data_symbols = classifier.classify_symbols(list(symbol_to_id))
     updates = [
         {"ticker_id": symbol_to_id[r["symbol"]], "style_type": r["style"]}
         for r in results if r["symbol"] in symbol_to_id
     ]
     ticker_module.update_style_from_model_bulk(updates)
-    log.record_status(f"Classified {len(updates)} tickers via model (type_from='MODEL').")
+    failed_ids = [symbol_to_id[s] for s in no_data_symbols if s in symbol_to_id]
+    ticker_module.update_style_factors_failed_at_bulk(failed_ids)
+    log.record_status(
+        f"Style classification [{label}] done: {len(updates)} classified, "
+        f"{len(failed_ids)} had no FMP data."
+    )
+
+
+def mark_style(classifier: StyleClassifier, ticker_module) -> None:
+    _run_style_stage("new", ticker_module.fetch_new_tickers_for_style(), classifier, ticker_module)
+    _run_style_stage("retry", ticker_module.fetch_retry_tickers_for_style(), classifier, ticker_module)

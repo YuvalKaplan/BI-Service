@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict NLotg3apoO9BHKbhn7zmdsmhxlHoGxeCeZVgqRUGz9ViX0zl1oGyRow5nk2o0lV
+\restrict cty9FsqyNqyVpcqjbQIHbmXMYzvVve9NMGievzbfGbRVrYVqatLwxBOfBTWeKNS
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 18.0
 
--- Started on 2026-04-24 11:59:10
+-- Started on 2026-04-24 19:32:31
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -643,6 +643,7 @@ CREATE TABLE public.ticker (
     style_type character varying(16),
     cap_type character varying(16),
     type_from character varying(16),
+    style_factors_failed_at timestamp without time zone,
     symbol character varying(32) NOT NULL,
     isin character varying(16),
     cusip character varying(16),
@@ -837,7 +838,7 @@ ALTER TABLE ONLY public.ticker
 
 
 --
--- TOC entry 4846 (class 2606 OID 251928)
+-- TOC entry 4846 (class 2606 OID 251985)
 -- Name: ticker ticker_symbol_exchange_key; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1049,11 +1050,11 @@ ALTER TABLE ONLY public.ticker_value
     ADD CONSTRAINT fk_ticker_value_ticker_id FOREIGN KEY (ticker_id) REFERENCES public.ticker(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
--- Completed on 2026-04-24 11:59:10
+-- Completed on 2026-04-24 19:32:31
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict NLotg3apoO9BHKbhn7zmdsmhxlHoGxeCeZVgqRUGz9ViX0zl1oGyRow5nk2o0lV
+\unrestrict cty9FsqyNqyVpcqjbQIHbmXMYzvVve9NMGievzbfGbRVrYVqatLwxBOfBTWeKNS
 

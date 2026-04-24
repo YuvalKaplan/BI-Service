@@ -15,6 +15,7 @@ class Ticker:
     style_type: str | None = None
     cap_type: str | None = None
     type_from: str | None = None
+    style_factors_failed_at: datetime | None = None
     isin: str | None = None
     cusip: str | None = None
     cik: str | None = None
@@ -286,17 +287,33 @@ def update_style_from_provider_etfs() -> None:
         raise Exception(f"Error updating ticker style from provider ETFs: {e}")
 
 
-def fetch_all_with_missing_style() -> list['Ticker']:
+def fetch_new_tickers_for_style() -> list['Ticker']:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Ticker)) as cur:
                 cur.execute("""
                     SELECT id, symbol FROM ticker
                     WHERE style_type IS NULL AND invalid IS NULL
+                      AND style_factors_failed_at IS NULL
                 """)
                 return cur.fetchall()
     except Error as e:
-        raise Exception(f"Error fetching tickers with missing style: {e}")
+        raise Exception(f"Error fetching new tickers for style classification: {e}")
+
+
+def fetch_retry_tickers_for_style() -> list['Ticker']:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                cur.execute("""
+                    SELECT id, symbol FROM ticker
+                    WHERE style_type IS NULL AND invalid IS NULL
+                      AND style_factors_failed_at < NOW() - INTERVAL '30 days'
+                    LIMIT 200
+                """)
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching retry tickers for style classification: {e}")
 
 
 def update_style_from_model_bulk(updates: list[dict]) -> None:
@@ -311,3 +328,17 @@ def update_style_from_model_bulk(updates: list[dict]) -> None:
                 )
     except Error as e:
         raise Exception(f"Error bulk-updating ticker style from model: {e}")
+
+
+def update_style_factors_failed_at_bulk(ticker_ids: list[int]) -> None:
+    if not ticker_ids:
+        return
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "UPDATE ticker SET style_factors_failed_at = NOW() WHERE id = %s",
+                    [(tid,) for tid in ticker_ids]
+                )
+    except Error as e:
+        raise Exception(f"Error bulk-updating style_factors_failed_at: {e}")
