@@ -85,37 +85,6 @@ def detect_single_header_row(
 
     return None
 
-from datetime import datetime
-from typing import Optional
-
-
-def detect_shifted_single_date(
-    full_rows: list[list[str]],
-    start_row: int,
-    col: int,
-    date_format: str,
-    max_scan: int = 0,
-) -> Optional[datetime]:
-    """
-    Attempt to detect a date in a fixed column by scanning downward
-    from a starting row.
-    """
-    for i in range(start_row, min(start_row + max_scan + 1, len(full_rows))):
-        try:
-            cell = full_rows[i][col]
-        except IndexError:
-            continue
-
-        if cell in (None, "", "nan"):
-            continue
-
-        text = str(cell).strip()
-        try:
-            return datetime.strptime(text, date_format)
-        except ValueError:
-            continue
-
-    return None
 
 def clean_numeric_column(df: pd.DataFrame, column: str, as_type: str = "float") -> pd.Series:
     col = df[column].astype(str).str.strip()
@@ -172,14 +141,12 @@ def convert_to_data_frame(full_rows: list[list[str]], mapping: Mapping) -> pd.Da
 
     data = full_rows[data_start:]
     df = pd.DataFrame(data, columns=header)
-
     df.columns = df.columns.str.replace('\ufeff', '', regex=True)
-
     return df
 
 def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | None, mapping: Mapping) -> pd.DataFrame:
     df = convert_to_data_frame(full_rows=full_rows, mapping=mapping)
-
+    
     good_date: date | None = None
     
     if mapping.date.on_page and date_from_page:
@@ -190,20 +157,8 @@ def map_data(full_rows: list[list[str]], file_name:str, date_from_page: date | N
 
     # If the date is not a part of the table or is only in the first row - grab it:
     if mapping.date.single:
-        if mapping.date.single.max_row_scan:
-            detected_date = detect_shifted_single_date(
-                full_rows,
-                start_row=mapping.date.single.row,
-                col=mapping.date.single.col,
-                date_format=mapping.date.format,
-                max_scan=mapping.date.single.max_row_scan
-            )
-
-            if detected_date:
-                good_date = detected_date
-        else:
-            dirty = full_rows[mapping.date.single.row][mapping.date.single.col]
-            good_date = clean_date(dirty, format=mapping.date.format)
+        dirty = full_rows[mapping.date.single.row][mapping.date.single.col]
+        good_date = clean_date(dirty, format=mapping.date.format)
 
     # select only the rows of the product (if this is a multi-product sheet)
     if mapping.product_column:
@@ -294,8 +249,8 @@ def get_tickers(full_rows: list[list[str]], mapping: Mapping) -> list[str]:
     if not ticker_col_name:
         raise Exception("No ticker column defined in mapping.")
 
-    df[ticker_col_name] = tu.normalize_ticker_series(df[ticker_col_name])
-    df = tu.filter_ticker_df(df, ticker_col_name, mapping.remove_tickers)
+    df[ticker_col_name] = df[ticker_col_name].apply(tu.normalize_ticker)
+    df = df[df[ticker_col_name].apply(lambda t: tu.is_included_ticker(t, mapping.remove_tickers))]
     distinct_tickers = df[ticker_col_name].unique().tolist()    
     return distinct_tickers
 

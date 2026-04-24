@@ -29,7 +29,7 @@ def run() -> int:
                 )
                 df = map_data(
                     full_rows=full_rows, file_name=d.file_name,
-                    date_from_page=None, mapping=map_obj,
+                    date_from_page=d.date_from_page, mapping=map_obj,
                 )
                 log.record_status(f"Resolving tickers for ETF '{etf.name}'...")
                 resolver.set_classification(etf.style_type, etf.cap_type)

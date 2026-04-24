@@ -13,7 +13,6 @@ from modules.calc import esg as _esg
 
 _VALUE_DATE_CUT_OFF_HOUR = 17
 
-
 def populate_esg(ticker_id: int, full_symbol: str) -> None:
     try:
         disclosure, rating = api_stocks.fetch_esg_data(full_symbol)
@@ -199,6 +198,7 @@ class TickerResolver:
             return None
 
         self._store_ticker_value(ticker_id, profile)
+        
         if is_new:
             populate_esg(ticker_id, full_symbol)
         return ticker_id
@@ -225,18 +225,17 @@ class TickerResolver:
             "factors":    factors,
         })
 
-    def _get_value_date(self) -> date:
-        now_et = datetime.now(ZoneInfo("America/New_York"))
-        return (now_et - timedelta(days=1) if now_et.hour < _VALUE_DATE_CUT_OFF_HOUR else now_et).date()
-
     def _store_ticker_value(self, ticker_id: int, profile: dict) -> None:
         try:
             price = profile.get('price')
             market_cap = profile.get('marketCap')
+            now_et = datetime.now(ZoneInfo("America/New_York"))
+            value_date = (now_et - timedelta(days=1) if now_et.hour < _VALUE_DATE_CUT_OFF_HOUR else now_et).date()
+
             if price and market_cap:
                 _upsert_tv(TickerValue(
                     ticker_id=ticker_id,
-                    value_date=self._get_value_date(),
+                    value_date=value_date,
                     stock_price=float(price),
                     market_cap=float(market_cap),
                 ))

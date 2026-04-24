@@ -7,10 +7,10 @@ from modules.object.ticker_value import fetch_latest_market_caps_within_window
 from modules.object import best_idea
 
 DAYS_NO_MARKET_CAP = 5
-MIN_HOLDINGS_WITH_PRICES_PCT = 0.9
-LOOK_BACK_WINDOW = 14
+MIN_HOLDINGS_WITH_PRICES_PCT = 0.95
+LOOK_BACK_WINDOW = 7
 MAX_BEST_IDEAS_PER_FUND = 10
-HOLDING_DELTA_LIMIT_DROP_OFF = 0.25
+HOLDING_DELTA_LIMIT_DROP_OFF = 0.20
 
 
 def _find_best_ideas(holdings: list, market_cap_values: list, limit: int | None = None) -> pd.DataFrame:

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
@@ -29,6 +29,7 @@ class CategorizeEtfDownload:
     etf: CategorizeEtfProtocol
     file_name: str | None = None
     data: bytes | None = None
+    date_from_page: date | None = None
 
 
 def fetch_all(usage: str) -> list[CategorizeEtf]:

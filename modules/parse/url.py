@@ -320,6 +320,10 @@ def scrape_categorizer(etf: CategorizeEtfProtocol) -> CategorizeEtfDownload:
                     raise Exception('Missing URL or Trigger Method for categorizer etf.')
 
                 if open_page(page=open_browser.page, url=etf.url, wait_pre_events=etf.wait_pre_events, wait_post_events=etf.wait_post_events, events=etf.events):
+                    if etf.mapping:
+                        map = getMappingFromJson(etf.mapping)
+                        if map.date.on_page:
+                            download.date_from_page = get_date_on_page(page=open_browser.page, mapping=map)
                     file_name, data, error = get_holdings(page=open_browser.page, trigger_download=etf.trigger_download)
                     if file_name and data:
                         download.file_name = file_name

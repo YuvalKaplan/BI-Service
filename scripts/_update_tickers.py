@@ -1,6 +1,6 @@
 import atexit
 from modules.object.exit import cleanup
-from modules.object.ticker import Ticker, fetch_all_valid, update_profile, update_invalid
+from modules.object.ticker import Ticker, fetch_all_valid, update, update_invalid
 from modules.ticker import util as tu
 from modules.ticker.resolver import TickerResolver
 from modules.core.api_stocks import get_stock_profile
@@ -28,48 +28,41 @@ if __name__ == "__main__":
             continue
 
         exchange = profile.get('exchange')
-        if exchange == 'CRYPTO':
-            update_invalid(t.id, 'Crypto')
-            print(f"  [{full_symbol}] Marked invalid: Crypto")
-            marked_invalid += 1
-            continue
-
         name = profile.get('companyName')
-        if not name or tu.is_unwanted_names(name):
-            update_invalid(t.id, 'Fund or ETF')
-            print(f"  [{full_symbol}] Marked invalid: Fund or ETF")
-            marked_invalid += 1
-            continue
-
         is_active = profile.get('isActivelyTrading')
-        if is_active is not None and not is_active:
-            update_invalid(t.id, 'Not actively trading')
-            print(f"  [{full_symbol}] Marked invalid: not actively trading")
-            marked_invalid += 1
-            continue
 
-        country = profile.get('country')
-        if not country:
-            print(f"  [{full_symbol}] No country in profile — skipping")
-            skipped += 1
-            continue
+        invalid_reason = None
+        if exchange == 'CRYPTO':
+            invalid_reason = 'Crypto'
+        elif not name or tu.is_unwanted_names(name):
+            invalid_reason = 'Fund or ETF'
+        elif is_active is not None and not is_active:
+            invalid_reason = 'Not actively trading'
 
         updated_ticker = Ticker(
+            id=t.id,
             symbol=t.symbol,
-            isin=t.isin or profile.get('isin'),
-            cusip=t.cusip or profile.get('cusip'),
-            cik=t.cik or profile.get('cik'),
-            name=name,
+            isin=profile.get('isin') or t.isin,
+            cusip=profile.get('cusip') or t.cusip,
+            cik=profile.get('cik') or t.cik,
+            name=name or t.name,
             exchange=t.exchange,
-            industry=t.industry or profile.get('industry'),
-            sector=t.sector or profile.get('sector'),
-            country=country,
-            currency=t.currency or profile.get('currency'),
+            industry=profile.get('industry') or t.industry,
+            sector=profile.get('sector') or t.sector,
+            country=profile.get('country') or t.country,
+            currency=profile.get('currency') or t.currency,
             source=t.source,
             type_from=t.type_from,
+            is_actively_trading=bool(is_active) if is_active is not None else None,
         )
-        update_profile(t.id, updated_ticker)
-        print(f"  [{full_symbol}] Updated (country={country})")
-        updated += 1
+        update(updated_ticker)
+
+        update_invalid(t.id, invalid_reason)
+        if invalid_reason:
+            print(f"  [{full_symbol}] Marked invalid: {invalid_reason}")
+            marked_invalid += 1
+        else:
+            print(f"  [{full_symbol}] Updated")
+            updated += 1
 
     print(f"\nDone. Updated: {updated} | Marked invalid: {marked_invalid} | Skipped: {skipped}")

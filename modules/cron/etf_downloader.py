@@ -28,6 +28,7 @@ def run(start_time: datetime) -> tuple[str, int, list[int] | None]:
         if failed_providers:
             log.record_error(f"{len(failed_providers)} provider(s) failed during collection: {', '.join(str(n) for n in failed_providers)}")
 
+        ## -- Classification ---
         ticker.update_style_for_unclassified()
         ticker.update_style_from_provider_etfs()
         log.record_status("Updated style/cap for newly created tickers.")

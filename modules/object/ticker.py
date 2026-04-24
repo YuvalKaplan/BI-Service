@@ -145,29 +145,31 @@ def upsert_by_symbol(item: Ticker) -> tuple[int, bool]:
     except Error as e:
         raise Exception(f"Error upserting ticker by symbol into the DB: {e}")
 
-def update_profile(ticker_id: int, item: Ticker) -> None:
+def update(item: Ticker) -> None:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
                     UPDATE ticker
-                    SET isin      = %s,
-                        cusip     = %s,
-                        cik       = %s,
-                        name      = %s,
-                        exchange  = %s,
-                        industry  = %s,
-                        sector    = %s,
-                        country   = %s,
-                        currency  = %s,
-                        source    = %s,
-                        type_from = %s
+                    SET isin                 = %s,
+                        cusip                = %s,
+                        cik                  = %s,
+                        name                 = %s,
+                        exchange             = %s,
+                        industry             = %s,
+                        sector               = %s,
+                        country              = %s,
+                        currency             = %s,
+                        source               = %s,
+                        type_from            = %s,
+                        is_actively_trading  = %s
                     WHERE id = %s;
                 """, (item.isin, item.cusip, item.cik, item.name, item.exchange,
                       item.industry, item.sector, item.country, item.currency, item.source, item.type_from,
-                      ticker_id))
+                      item.is_actively_trading,
+                      item.id))
     except Error as e:
-        raise Exception(f"Error updating profile for ticker {ticker_id}: {e}")
+        raise Exception(f"Error updating ticker {item.id}: {e}")
 
 
 def update_esg_qualified(symbols: list[str]) -> None:
@@ -217,7 +219,7 @@ def fetch_with_missing_country() -> list['Ticker']:
         raise Exception(f"Error fetching tickers with missing country: {e}")
 
 
-def update_invalid(ticker_id: int, reason: str) -> None:
+def update_invalid(ticker_id: int, reason: str | None) -> None:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
