@@ -193,10 +193,6 @@ class TickerResolver:
             update_invalid(ticker_id, 'Fund or ETF')
             return None
 
-        if is_active is not None and not is_active:
-            update_invalid(ticker_id, 'Not actively trading')
-            return None
-
         self._store_ticker_value(ticker_id, profile)
         
         if is_new:

@@ -20,7 +20,7 @@ EXCLUDED_TICKERS: set[str] = {'USD', 'BACKUSD', 'CAD', 'EUR', 'ISR', 'JPY', 'GBP
 
 TREASURY_SECURITIES: set[str] = {
     'XTSLA', 'AGPXX', 'BOXX', 'CMQXX', 'DTRXX', 'FGXXX',
-    'FTIXX', 'GVMXX', 'JIMXX', 'JTSXX', 'MGMXX', 'PGLBB', 'SALXX',
+    'FTIXX', 'GVMXX', 'JIMXX', 'JTSXX', 'MGMXX', 'PGLXX', 'PGLBB', 'SALXX',
 }
 
 
