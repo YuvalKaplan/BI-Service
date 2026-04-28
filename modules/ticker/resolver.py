@@ -132,7 +132,8 @@ class TickerResolver:
             fmp_symbol_full = candidate.get('symbol')
             if not fmp_symbol_full:
                 continue
-            if name and not tu.names_match(name, candidate.get('name', '')):
+            api_name = candidate.get('name', '')
+            if name and api_name and not tu.names_match(name, api_name):
                 continue
             profile = api_stocks.get_stock_profile(fmp_symbol_full)
             if not isinstance(profile, dict):

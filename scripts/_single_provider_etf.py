@@ -12,7 +12,7 @@ OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', '.downloads')
 
 if __name__ == '__main__':
     try:
-        provider_etf_id = 38
+        provider_etf_id = 312
         etf = provider_etf.fetch_by_id(provider_etf_id)
         p = provider.fetch_by_id(etf.provider_id)
         if not p:

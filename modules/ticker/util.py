@@ -37,15 +37,11 @@ def longest_name_token(name: str) -> str | None:
 
 
 def names_match(holding_name: str, api_name: str) -> bool:
-    """Return True if names share at least one meaningful token, or if comparison is not meaningful.
-    Returns True (non-comparable = don't filter) when either name is empty or
-    yields no meaningful tokens after stripping noise words and single letters."""
-    if not holding_name or not api_name:
-        return True
+    """Return True if names share at least one meaningful token after stripping noise words."""
     a = set(name_tokens(holding_name))
     b = set(name_tokens(api_name))
     if not a or not b:
-        return True
+        return False
     return bool(a & b)
 
 
