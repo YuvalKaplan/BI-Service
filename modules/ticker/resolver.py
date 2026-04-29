@@ -194,6 +194,11 @@ class TickerResolver:
             update_invalid(ticker_id, 'Fund or ETF')
             return None
 
+        market_cap = profile.get('marketCap')
+        if not market_cap:
+            update_invalid(ticker_id, 'Missing market cap')
+            return None
+
         self._store_ticker_value(ticker_id, profile)
         
         if is_new:
