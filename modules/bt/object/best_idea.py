@@ -75,6 +75,58 @@ def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: s
     except Error as e:
         raise Exception(f"Error fetching the BestIdeaResult from the DB: {e}")
 
+def fetch_all_as_df(as_of_date: date, ranking_level: int) -> pd.DataFrame:
+    """
+    Load one row per (provider_etf_id, symbol) for all best ideas within
+    the lookback window, including ticker attributes needed for per-fund filtering.
+    Returned DataFrame columns: provider_etf_id, symbol, value_date, ranking,
+    delta, style_type, exchange, esg_qualified, market_cap.
+    """
+    sql = """
+        WITH latest_per_etf_ticker AS (
+            SELECT DISTINCT ON (bi.provider_etf_id, bi.symbol)
+                bi.provider_etf_id,
+                bi.symbol,
+                bi.value_date,
+                bi.ranking,
+                bi.delta
+            FROM best_idea bi
+            WHERE bi.value_date BETWEEN %(date)s - INTERVAL '10 days' AND %(date)s
+              AND bi.ranking <= %(ranking)s
+            ORDER BY bi.provider_etf_id, bi.symbol, bi.value_date DESC, bi.ranking ASC
+        )
+        SELECT
+            lpet.provider_etf_id,
+            lpet.symbol,
+            lpet.value_date,
+            lpet.ranking,
+            lpet.delta,
+            t.style_type,
+            t.exchange,
+            t.esg_qualified,
+            tv.market_cap
+        FROM latest_per_etf_ticker lpet
+        JOIN ticker t ON t.symbol = lpet.symbol
+        LEFT JOIN LATERAL (
+            SELECT market_cap
+            FROM ticker_value
+            WHERE symbol = lpet.symbol
+              AND value_date BETWEEN %(date)s - INTERVAL '10 days' AND %(date)s
+            ORDER BY value_date DESC
+            LIMIT 1
+        ) tv ON TRUE
+        WHERE t.invalid IS NULL
+    """
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, {'date': as_of_date, 'ranking': ranking_level})
+                rows = cur.fetchall()
+                cols = [desc[0] for desc in cur.description] if cur.description else []
+        return pd.DataFrame(rows, columns=cols)
+    except Error as e:
+        raise Exception(f"Error fetching all best ideas as DataFrame: {e}")
+
 def reset() -> None:
     try:
         with db_pool_instance_bt.get_connection() as conn:

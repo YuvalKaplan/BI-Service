@@ -2,50 +2,49 @@ import log
 from datetime import date, timedelta
 from typing import List
 from modules.object import batch_run
-from modules.object import best_idea, fund, fund_holding, fund_holding_change, ticker, ticker_value
-from modules.calc.model_fund import (
-    FundChangesResult, results_to_string, to_fund_protocol, getStrategyFromJson,
-    apply_equal_weights, apply_market_cap_weights,
-)
+from modules.object import best_idea, fund, fund_holding, fund_holding_change
 from modules.calc import model_fund
 
-MARKET_CAP_LOOKBACK_DAYS = 7
 
-
-def run() -> List[FundChangesResult]:
+def run() -> List[model_fund.FundChangesResult]:
     try:
         batch_run_id = batch_run.insert(batch_run.BatchRun(process="funds_update", activation="auto"))
 
-        funds = [to_fund_protocol(f) for f in fund.fetch_all()]
+        funds = [model_fund.to_fund_protocol(f) for f in fund.fetch_all()]
         log.record_status(f"Running Fund Update batch job ID {batch_run_id} - will process {len(funds)} funds.")
 
         today = date.today()
         yesterday = today - timedelta(days=1)
 
-        all_results: List[FundChangesResult] = []
-        for f in funds:
-            strategy = getStrategyFromJson(f.strategy)
+        max_ranking = model_fund.USE_RANKING_LOW + max(5, 2)
+        all_best_ideas_df = best_idea.fetch_all_as_df(as_of_date=today, ranking_level=max_ranking)
+        log.record_status(
+            f"Best ideas loaded for fund generation ({len(all_best_ideas_df)} rows):\n"
+            + all_best_ideas_df.to_string(index=False) + "\n"
+        )
 
+        mc_map = (
+            all_best_ideas_df[['ticker_id', 'market_cap']]
+            .dropna(subset=['market_cap'])
+            .drop_duplicates(subset='ticker_id')
+            .set_index('ticker_id')['market_cap']
+            .to_dict()
+        )
+
+        all_results: List[model_fund.FundChangesResult] = []
+        for f in funds:
             results = model_fund.generate(
                 today=today,
                 fund=f,
                 previous_holdings=fund_holding.fetch_funds_holdings(f.id, yesterday),
-                best_ideas_module=best_idea,
+                all_best_ideas_df=all_best_ideas_df,
+                mc_map=mc_map,
             )
-
-            if results.holdings:
-                if strategy.allocation == 'market_cap':
-                    ticker_ids = [h.ticker_id for h in results.holdings]
-                    mc_values = ticker_value.fetch_latest_market_caps_within_window(ticker_ids, today, MARKET_CAP_LOOKBACK_DAYS)
-                    mc_map = {tv.ticker_id: tv.market_cap for tv in mc_values if tv.market_cap}
-                    apply_market_cap_weights(results.holdings, mc_map)
-                else:
-                    apply_equal_weights(results.holdings)
 
             fund_holding.insert_fund_holding(results.holdings)
             fund_holding_change.insert_fund_changes(results.changes)
 
-            log.record_status(results_to_string(results, ticker))
+            log.record_status(model_fund.results_to_string(results))
             all_results.append(results)
 
         batch_run.update_completed_at(batch_run_id)

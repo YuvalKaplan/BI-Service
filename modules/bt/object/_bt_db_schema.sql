@@ -816,6 +816,7 @@ CREATE TABLE public.provider_etf (
     provider_id integer NOT NULL,
     disabled boolean DEFAULT false NOT NULL,
     disabled_reason text,
+    region text COLLATE pg_catalog."default" NOT NULL,
     name text,
     description text,
     isin text,

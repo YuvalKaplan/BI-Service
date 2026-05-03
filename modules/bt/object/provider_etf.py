@@ -13,6 +13,7 @@ class ProviderEtf:
     provider_id: int | None
     disabled: bool | None
     disabled_reason: str | None
+    region: str | None
     name: str | None
     description: str | None
     isin: str | None
@@ -42,6 +43,19 @@ def fetch_by_ticker(ticker: str) -> ProviderEtf:
         if item is None:
             raise Exception(f"Provider ETF not found for ID {id}")
     return item
+
+def fetch_regions_by_ids(ids: list[int]) -> dict[int, str]:
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'SELECT id, region FROM provider_etf WHERE id = ANY(%s);',
+                    (ids,)
+                )
+                rows = cur.fetchall()
+        return {row[0]: row[1] for row in rows}
+    except Error as e:
+        raise Exception(f"Error fetching provider ETF regions from the DB: {e}")
 
 def fetch_by_provider_id(provider_id: int) -> list[ProviderEtf]:
     try:

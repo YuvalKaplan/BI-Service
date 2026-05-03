@@ -18,7 +18,7 @@ def fetch_all() -> list[Fund]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Fund)) as cur:
-                query_str = "SELECT * FROM fund WHERE active = true;"
+                query_str = "SELECT * FROM fund WHERE active = true ORDER by name;"
                 cur.execute(query_str)
                 items = cur.fetchall()
         return items

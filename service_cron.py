@@ -7,7 +7,6 @@ from modules.core.db import db_pool_instance
 from modules.core import sender
 from modules.calc.model_fund import results_to_string
 from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, esg_update
-from modules.object import ticker
 
 SEPERATOR_LINE = "-" * 20 + "\n"
 BREAKER_LINE = "=" * 20 + "\n\n"
@@ -80,7 +79,7 @@ if __name__ == '__main__':
 
             message_actions += f"Fund Updates:\n" + SEPERATOR_LINE
             for r in results:
-                message_actions += f"{results_to_string(r, ticker)}\n"
+                message_actions += f"{results_to_string(r)}\n"
                 message_actions += BREAKER_LINE
 
         end = datetime.now(timezone.utc)
