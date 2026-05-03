@@ -92,6 +92,10 @@ class FundChangesResult:
 USE_RANKING_HIGH = 1
 USE_RANKING_LOW = 1
 
+MC_WEIGHT_ALPHA = 0.5   # power-law exponent: 1.0 = pure market-cap, 0.0 = equal-weight
+MC_WEIGHT_CAP   = 0.10  # maximum weight per holding
+MC_WEIGHT_FLOOR = 0.01  # minimum weight per holding
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -452,9 +456,57 @@ def apply_market_cap_weights(
     holdings: List[FundHolding],
     market_cap_map: dict,
 ) -> None:
-    total = sum(market_cap_map.get(h.ticker_id, 0.0) for h in holdings)
+    # Pure market-cap weighting produces extreme concentration: a single mega-cap
+    # can absorb 40–50% of the fund while the smallest holdings fall below 0.1%.
+    # To address this we apply a two-stage approach:
+    #
+    # Stage 1 — Power-law compression (MC_WEIGHT_ALPHA = 0.5, i.e. square root).
+    #   Instead of weighting by raw market cap, we weight by mc^alpha.  This
+    #   preserves the relative ordering of holdings (larger cap still gets more
+    #   weight) but compresses the ratio between the largest and smallest: a
+    #   company 100× bigger than another gets only 10× the weight instead of 100×.
+    #
+    # Stage 2 — Single cap + floor pass with proportional redistribution.
+    #   After compression, holdings that still breach the hard bounds (MC_WEIGHT_CAP
+    #   and MC_WEIGHT_FLOOR) are pinned to those bounds.  The net weight freed by
+    #   capping minus the weight consumed by flooring is redistributed to the
+    #   unconstrained "middle" holdings proportionally to their compressed weights,
+    #   so their relative ordering is maintained.
+    #   Holdings with no market-cap data are excluded from all calculations and
+    #   receive weight = None.
+
+    # Stage 1: apply power-law transform and normalise
+    transformed = [
+        (mc ** MC_WEIGHT_ALPHA if (mc := market_cap_map.get(h.ticker_id)) else None)
+        for h in holdings
+    ]
+    total = sum(t for t in transformed if t is not None)
     if total == 0:
         return
-    for h in holdings:
-        mc = market_cap_map.get(h.ticker_id)
-        h.weight = (mc / total) if mc else None
+
+    weights: list[float | None] = [t / total if t is not None else None for t in transformed]
+
+    # Stage 2: cap + floor with proportional redistribution to middle holdings
+    valid   = [i for i, w in enumerate(weights) if w is not None]
+    capped  = [i for i in valid if weights[i] > MC_WEIGHT_CAP]   # type: ignore[operator]
+    floored = [i for i in valid if weights[i] < MC_WEIGHT_FLOOR]  # type: ignore[operator]
+    middle  = [i for i in valid if MC_WEIGHT_FLOOR <= weights[i] <= MC_WEIGHT_CAP]  # type: ignore[operator]
+
+    if capped or floored:
+        # net > 0: capping freed more than flooring consumed — middle holdings grow
+        # net < 0: flooring consumed more than capping freed — middle holdings shrink
+        excess  = sum(weights[i] - MC_WEIGHT_CAP   for i in capped)   # type: ignore[operator]
+        deficit = sum(MC_WEIGHT_FLOOR - weights[i]  for i in floored)  # type: ignore[operator]
+        net = excess - deficit
+        for i in capped:
+            weights[i] = MC_WEIGHT_CAP
+        for i in floored:
+            weights[i] = MC_WEIGHT_FLOOR
+        if middle:
+            middle_total = sum(weights[i] for i in middle)  # type: ignore[misc]
+            if middle_total > 0:
+                for i in middle:
+                    weights[i] += net * (weights[i] / middle_total)  # type: ignore[operator]
+
+    for h, w in zip(holdings, weights):
+        h.weight = w
