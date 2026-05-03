@@ -14,16 +14,20 @@ def run(today: date) -> List[model_fund.FundChangesResult]:
 
         max_ranking = model_fund.USE_RANKING_LOW + max(5, 2)
         all_best_ideas_df = best_idea.fetch_all_as_df(as_of_date=today, ranking_level=max_ranking)
+        all_best_ideas_df = model_fund.resolve_canonical_symbols(all_best_ideas_df)
         log.record_status(
             f"Best ideas loaded for fund generation ({len(all_best_ideas_df)} rows):\n"
             + all_best_ideas_df.to_string(index=False) + "\n"
         )
 
+        canonical_rows = all_best_ideas_df[
+            all_best_ideas_df['symbol'] == all_best_ideas_df['canonical_symbol']
+        ]
         mc_map = (
-            all_best_ideas_df[['symbol', 'market_cap']]
+            canonical_rows[['canonical_symbol', 'market_cap']]
             .dropna(subset=['market_cap'])
-            .drop_duplicates(subset='symbol')
-            .set_index('symbol')['market_cap']
+            .drop_duplicates(subset='canonical_symbol')
+            .set_index('canonical_symbol')['market_cap']
             .to_dict()
         )
 

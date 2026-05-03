@@ -105,6 +105,7 @@ def fetch_all_as_df(as_of_date: date, ranking_level: int) -> pd.DataFrame:
             t.exchange,
             t.country,
             t.esg_qualified,
+            t.name,
             tv.market_cap
         FROM latest_per_etf_ticker lpet
         JOIN ticker t ON t.id = lpet.ticker_id

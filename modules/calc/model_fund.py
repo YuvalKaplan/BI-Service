@@ -97,13 +97,29 @@ USE_RANKING_LOW = 1
 
 def results_to_string(results: FundChangesResult) -> str:
     aggregator = ""
-    all_ids: list[int] = list({ch.ticker_id for ch in results.changes})
+    all_ids: list[int] = list({
+        *{h.ticker_id for h in results.holdings},
+        *{ch.ticker_id for ch in results.changes},
+    })
     tickers = ticker.fetch_by_ids(all_ids)
     ticker_by_id = {t.id: t for t in tickers}
 
     aggregator += f"{results.fund.name}\n" + "=" * 20 + "\n"
+
+    aggregator += f"Holdings ({len(results.holdings)}):\n"
+    aggregator += "{:<12}{:<35}{}\n".format("Symbol", "Name", "Weight")
+    for h in sorted(results.holdings, key=lambda h: h.weight or 0, reverse=True):
+        t = ticker_by_id.get(h.ticker_id)
+        weight_str = f"{h.weight * 100:.2f}%" if h.weight is not None else "---"
+        aggregator += "{:<12}{:<35}{}\n".format(
+            t.symbol if t else str(h.ticker_id),
+            t.name if t else "---",
+            weight_str,
+        )
+    aggregator += "\n"
+
     if not results.changes:
-        aggregator += "No changes\n\n\n"
+        aggregator += "No changes\n\n"
     else:
         aggregator += "{:<12}{:<15}{:<12}{:<15}{:<10}{}\n".format(
             "Direction", "Date", "Ranking", "Appearances", "Symbol", "Name"
@@ -126,6 +142,41 @@ def results_to_string(results: FundChangesResult) -> str:
 
 # ── Core computation ─────────────────────────────────────────────────────────
 
+def resolve_canonical_ticker_ids(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Adds a `canonical_ticker_id` column. All cross-listings of the same company
+    (matched by normalised name) are mapped to one canonical ticker_id.
+    Selection priority: highest market_cap > US-listed > lowest ticker_id.
+    Rows with no name keep canonical_ticker_id == ticker_id.
+    """
+    if df.empty or 'name' not in df.columns:
+        return df.assign(canonical_ticker_id=df['ticker_id'])
+
+    norm_name = df['name'].str.strip().str.lower()
+    has_name  = norm_name.notna() & (norm_name != '')
+
+    ticker_attrs = (
+        df[has_name][['ticker_id', 'country', 'market_cap']]
+        .assign(_norm=norm_name[has_name])
+        .drop_duplicates(subset='ticker_id')
+    )
+
+    def pick_canonical(group):
+        group = group.copy()
+        group['_is_us'] = (group['country'] == 'US').astype(int)
+        return group.sort_values(
+            ['market_cap', '_is_us', 'ticker_id'],
+            ascending=[False, False, True],
+        )['ticker_id'].iloc[0]
+
+    canonical_map = ticker_attrs.groupby('_norm').apply(pick_canonical)
+
+    df = df.copy()
+    df['canonical_ticker_id'] = df['ticker_id']
+    df.loc[has_name, 'canonical_ticker_id'] = norm_name[has_name].map(canonical_map).astype(int)
+    return df
+
+
 def _filter_and_aggregate(
     df: pd.DataFrame,
     provider_etf_ids: list[int],
@@ -142,7 +193,7 @@ def _filter_and_aggregate(
     latest date per ticker, best ranking on that date, appearances/max_delta/
     source_etf_id all relative to this fund's ETF list.
     """
-    key = 'ticker_id'
+    key = 'canonical_ticker_id'
     etf_set = set(provider_etf_ids)
 
     CAP_LARGE_THRESHOLD = 10_000_000_000
@@ -167,15 +218,15 @@ def _filter_and_aggregate(
 
     filtered = df[mask].copy()
 
-    empty = pd.DataFrame(columns=[key, 'ranking', 'appearances', 'max_delta', 'source_etf_id', 'all_provider_ids'])
+    empty = pd.DataFrame(columns=['ticker_id', 'ranking', 'appearances', 'max_delta', 'source_etf_id', 'all_provider_ids'])
     if filtered.empty:
         return empty
 
-    # Per ticker: keep only rows from its latest date (mirrors symbol_latest_date CTE)
+    # Per company: keep only rows from its latest date (mirrors symbol_latest_date CTE)
     ticker_max_date = filtered.groupby(key)['value_date'].transform('max')
     filtered = filtered[filtered['value_date'] == ticker_max_date]
 
-    # Per ticker on its latest date: keep only its best ranking (mirrors symbol_targets CTE)
+    # Per company on its latest date: keep only its best ranking (mirrors symbol_targets CTE)
     ticker_best_rank = filtered.groupby(key)['ranking'].transform('min')
     filtered = filtered[filtered['ranking'] == ticker_best_rank]
 
@@ -184,7 +235,7 @@ def _filter_and_aggregate(
     if filtered.empty:
         return empty
 
-    # source_etf_id = ETF with highest delta per ticker
+    # source_etf_id = ETF with highest delta per company
     source_idx = filtered.groupby(key)['delta'].idxmax()
     source_etf = filtered.loc[source_idx].set_index(key)['provider_etf_id']
 
@@ -197,10 +248,11 @@ def _filter_and_aggregate(
 
     agg['source_etf_id'] = agg[key].map(source_etf).astype(int)
 
-    return agg.sort_values(
-        ['ranking', 'appearances', 'max_delta'],
-        ascending=[True, False, False],
-    ).reset_index(drop=True)
+    return (
+        agg.rename(columns={key: 'ticker_id'})
+           .sort_values(['ranking', 'appearances', 'max_delta'], ascending=[True, False, False])
+           .reset_index(drop=True)
+    )
 
 
 def _df_to_ranked(df: pd.DataFrame) -> list[best_idea.BestIdeaRanked]:
