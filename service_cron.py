@@ -57,7 +57,7 @@ if __name__ == '__main__':
             message_actions += f"ESG tickers refreshed: {total_esg}\n"
             message_actions += BREAKER_LINE
 
-        if 1 <= weekday <= 5: # Tuesday through Saturday
+        if weekday == 2: # Wednesday
             try:
                 etfs_processed, generated_etfs, problems = best_ideas_generator.run()
             except Exception as e:
