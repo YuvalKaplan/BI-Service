@@ -6,6 +6,23 @@ from modules.bt.actions import stocks_categorize as bt_categorize_tickers, stock
 from modules.bt.calc.model_fund import getStrategyFromJson
 from modules.bt.calc import classification
 
+CALC_PERIOD_WEEKLY    = "WEEKLY"     # every Wednesday
+CALC_PERIOD_MONTHLY   = "MONTHLY"    # 15th of every month
+CALC_PERIOD_QUARTERLY = "QUARTERLY"  # 15th of Jan / Apr / Jul / Oct
+
+# --- Configuration ---
+START_DATE  = date(2022, 1, 1)
+END_DATE    = date(2025, 12, 31)
+CALC_PERIOD = CALC_PERIOD_QUARTERLY  # CALC_PERIOD_WEEKLY | CALC_PERIOD_MONTHLY | CALC_PERIOD_QUARTERLY
+# ---------------------
+
+def _is_calc_date(d: date, calc_period: str) -> bool:
+    if calc_period == CALC_PERIOD_WEEKLY:
+        return d.weekday() == 2  # Wednesday
+    if calc_period == CALC_PERIOD_QUARTERLY:
+        return d.day == 15 and d.month in (1, 4, 7, 10)
+    return d.day == 15  # MONTHLY (default)
+
 
 def distinct_provider_etfs(accounts) -> list[int]:
     distinct_etfs = set()
@@ -21,7 +38,7 @@ def distinct_provider_etfs(accounts) -> list[int]:
 
     return list(distinct_etfs)
 
-def run(start_date: date, end_date: date):
+def run():
     accounts = account.fetch_all()
     etf_ids = distinct_provider_etfs(accounts)
     
@@ -36,7 +53,7 @@ def run(start_date: date, end_date: date):
         symbols = provider_etf_holding.fetch_tickers_for_etfs(etf_ids)
 
         # Download all stock information (prices, market cap and dividends)
-        stocks_download.run(symbols, start_date - timedelta(days=15), end_date + timedelta(days=15))
+        stocks_download.run(symbols, START_DATE - timedelta(days=15), END_DATE + timedelta(days=15))
 
         bt_categorize_tickers.download_data()
 
@@ -44,26 +61,26 @@ def run(start_date: date, end_date: date):
         classifier = classification.get_classifier(categorized_tickers)
         ticker.mark_style(classifier)
 
-        # ticker.mark_split_invalid(symbols, start_date - timedelta(days=5), end_date + timedelta(days=5))
+        # ticker.mark_split_invalid(symbols, START_DATE - timedelta(days=5), END_DATE + timedelta(days=5))
 
     # Identify the lateset best ideas per ETF.
     if do_best_ideas:
         best_idea.reset()
 
-        current_sim_date = start_date
-        while current_sim_date <= end_date:
-            if current_sim_date.day == 15:
+        current_sim_date = START_DATE
+        while current_sim_date <= END_DATE:
+            if _is_calc_date(current_sim_date, CALC_PERIOD):
                 print(f"Identifying best ideas per ETF on: {current_sim_date.strftime("%A, %d-%m-%Y")}")
                 best_ideas_generator.run(etf_ids, current_sim_date)
             current_sim_date += timedelta(days=1)
 
-    # Construct todays target fund holdings. 
+    # Construct todays target fund holdings.
     if do_target_fund:
         fund.reset_funds()
 
-        current_sim_date = start_date
-        while current_sim_date <= end_date:
-            if current_sim_date.day == 15:
+        current_sim_date = START_DATE
+        while current_sim_date <= END_DATE:
+            if _is_calc_date(current_sim_date, CALC_PERIOD):
                 print(f"Constructing target funds holdings on: {current_sim_date.strftime("%A, %d-%m-%Y")}")
                 funds_update.run(current_sim_date)
             current_sim_date += timedelta(days=1)
@@ -72,8 +89,8 @@ def run(start_date: date, end_date: date):
     if do_accounts:
         account.reset_accounts()
 
-        current_sim_date = start_date
-        while current_sim_date <= end_date:
+        current_sim_date = START_DATE
+        while current_sim_date <= END_DATE:
             print(f"Generating account activity on: {current_sim_date.strftime("%A, %d-%m-%Y")}")
             for current_account in accounts:
                 account_update.daily_actions(current_account, current_sim_date)
