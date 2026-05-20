@@ -6,8 +6,6 @@ from modules.bt.actions import stocks_categorize as bt_categorize_tickers, stock
 from modules.bt.calc.model_fund import getStrategyFromJson
 from modules.bt.calc import classification
 
-# Strategy frequency: 7 for weekly, 14 for bi-weekly
-STRATEGY_RUN_INTERVAL_DAYS = 7
 
 def distinct_provider_etfs(accounts) -> list[int]:
     distinct_etfs = set()
@@ -52,31 +50,22 @@ def run(start_date: date, end_date: date):
     if do_best_ideas:
         best_idea.reset()
 
-        # Run on interval (weekly or bi-weekly based on STRATEGY_RUN_INTERVAL_DAYS)
-        last_run_date = None
         current_sim_date = start_date
         while current_sim_date <= end_date:
-            if current_sim_date.weekday() == 2:  # Tuesday
-                if last_run_date is None or (current_sim_date - last_run_date).days >= STRATEGY_RUN_INTERVAL_DAYS:
-                    print(f"Identifying best ideas per ETF on: {current_sim_date.strftime("%A, %d-%m-%Y")}")
-                    best_ideas_generator.run(etf_ids, current_sim_date)
-                    last_run_date = current_sim_date
-
+            if current_sim_date.day == 15:
+                print(f"Identifying best ideas per ETF on: {current_sim_date.strftime("%A, %d-%m-%Y")}")
+                best_ideas_generator.run(etf_ids, current_sim_date)
             current_sim_date += timedelta(days=1)
 
     # Construct todays target fund holdings. 
     if do_target_fund:
         fund.reset_funds()
 
-        # Run on interval (weekly or bi-weekly based on STRATEGY_RUN_INTERVAL_DAYS)
-        last_run_date = None
         current_sim_date = start_date
         while current_sim_date <= end_date:
-            if current_sim_date.weekday() == 2: # Tuesday
-                if last_run_date is None or (current_sim_date - last_run_date).days >= STRATEGY_RUN_INTERVAL_DAYS:
-                    print(f"Constructing target funds holdings on: {current_sim_date.strftime("%A, %d-%m-%Y")}")
-                    funds_update.run(current_sim_date)
-                    last_run_date = current_sim_date
+            if current_sim_date.day == 15:
+                print(f"Constructing target funds holdings on: {current_sim_date.strftime("%A, %d-%m-%Y")}")
+                funds_update.run(current_sim_date)
             current_sim_date += timedelta(days=1)
 
     # Update account based on daily activity (interest, dividends, transactions, performance)

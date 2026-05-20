@@ -80,6 +80,28 @@ def fetch_ticker_dates_available_past_period(provider_etf_id: int, end_date: dat
     except Error as e:
         raise Exception(f"Error retrieving the list of ticker value dates available in the past {look_back_days} days for ETF {provider_etf_id}: {e}")
     
+def fetch_latest_nonzero_price(symbol: str, as_of_date: date) -> Optional[float]:
+    """Returns the most recent positive stock_price on or before as_of_date."""
+    try:
+        with db_pool_instance_bt.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT stock_price
+                    FROM public.ticker_value
+                    WHERE symbol = %s
+                      AND value_date <= %s
+                      AND stock_price > 0
+                    ORDER BY value_date DESC
+                    LIMIT 1
+                    """,
+                    (symbol, as_of_date),
+                )
+                result = cur.fetchone()
+                return float(result[0]) if result and result[0] is not None else None
+    except Error:
+        return None
+
 def fetch_ticker_on_date(symbol: str, for_date: date) -> Optional[TickerValue]:
     """
     Retrieves the absolute latest date for which a price exists for a given ticker.

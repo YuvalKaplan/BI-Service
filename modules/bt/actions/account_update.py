@@ -188,6 +188,8 @@ def execute_minimal_rebalance(
     eval_date: date,
     account_holdings: List[ah.AccountHolding],
     symbol_weights: dict[str, float],
+    rebalance_mode: str = 'on_change',
+    is_fund_update_day: bool = False,
 ) -> List[at.AccountTrade]:
 
     if not candidates:
@@ -210,22 +212,24 @@ def execute_minimal_rebalance(
         else:
             # 2. NEW BUY: Only needs the latest available price date
             sync_date = ticker_value.fetch_latest_price_date_for_ticker(symbol, eval_date)
-        
+
+        price = 0.0
+        qty = 0.0
+
         if sync_date:
             tv = ticker_value.fetch_ticker_on_date(symbol, sync_date)
-            # Only fetch holding if it's an existing position
             holding_at_date = ah.fetch_account_holding_on_date(account_id, symbol, sync_date) if is_held else None
-            
-            if tv and tv.stock_price:
-                prices[symbol] = float(tv.stock_price)
-                quantities[symbol] = float(holding_at_date.quantity) if holding_at_date else 0.0
-                sync_dates[symbol] = sync_date
-                continue
 
-        # Fallback if no date or price found
-        prices[symbol] = 0.0
-        quantities[symbol] = 0.0
-        sync_dates[symbol] = None
+            if tv and tv.stock_price and float(tv.stock_price) > 0:
+                price = float(tv.stock_price)
+            qty = float(holding_at_date.quantity) if holding_at_date else 0.0
+
+        if price <= 0:
+            price = ticker_value.fetch_latest_nonzero_price(symbol, eval_date) or 0.0
+
+        prices[symbol] = price
+        quantities[symbol] = qty
+        sync_dates[symbol] = sync_date
 
     # --- BUILD DATAFRAME ---
     df = pd.DataFrame({'symbol': all_syms})
@@ -355,42 +359,43 @@ def execute_minimal_rebalance(
 
     # --- DRIFT REBALANCE ---
 
-    #Firstly, only do rebalancing if we had a change in position candidates on the day.
-    if any(c.action in ('ENTER', 'EXIT') for c in candidates):
+    has_composition_change = any(c.action in ('ENTER', 'EXIT') for c in candidates)
+    do_full_rebalance = (rebalance_mode == 'full' and is_fund_update_day)
+    run_drift = rebalance_mode != 'none' and (has_composition_change or do_full_rebalance)
 
-        df_drift = df[
-            (~df['symbol'].isin(candidate_map.keys())) &
-            (df['drift_pct'] > DRIFT_THRESHOLD)
-        ]
+    if run_drift:
+
+        if do_full_rebalance:
+            df_drift = df[~df['symbol'].isin(candidate_map.keys())]
+        else:
+            df_drift = df[
+                (~df['symbol'].isin(candidate_map.keys())) &
+                (df['drift_pct'] > DRIFT_THRESHOLD)
+            ]
 
         if not df_drift.empty:
 
             df_drift = df_drift.sort_values('abs_delta', ascending=False)
 
-            # SELL overweight if negative cash
-            if local_cash < Decimal('0'):
+            # SELL overweight positions
+            if do_full_rebalance or local_cash < Decimal('0'):
 
                 for _, row in df_drift[df_drift['delta'] > 0].iterrows():
 
-                    if local_cash >= Decimal('0'):
-                        break
-
                     price = to_price(row['price'])
-                    deficit = abs(local_cash)
-                    # 1. Calculate how much you are OVERWEIGHT (the surplus)
-                    # delta = current_val - target_val. If delta > 0, it's the $ amount you can sell.
                     surplus_val = Decimal(str(row['delta']))
 
-                    # 2. Convert that surplus $ into a maximum quantity you're allowed to sell
-                    max_qty_to_rebalance = (surplus_val / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+                    if do_full_rebalance:
+                        # Sell the entire surplus down to target weight
+                        qty = (surplus_val / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+                    else:
+                        if local_cash >= Decimal('0'):
+                            break
+                        deficit = abs(local_cash)
+                        max_qty_to_rebalance = (surplus_val / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
+                        qty_needed_for_cash = (deficit / price).quantize(Decimal('1'), rounding=ROUND_UP)
+                        qty = min(max_qty_to_rebalance, qty_needed_for_cash)
 
-                    # 3. Determine how many units you NEED to sell to cover the cash deficit
-                    qty_needed_for_cash = (deficit / price).quantize(Decimal('1'), rounding=ROUND_UP)
-
-                    # 4. Final qty is the lesser of: what you NEED vs what you are ALLOWED to sell
-                    qty = min(max_qty_to_rebalance, qty_needed_for_cash)
-
-                    # 5. Safety check: never sell more than you actually own
                     held_qty = Decimal(str(row['qty_held'])).quantize(Decimal('1'), rounding=ROUND_DOWN)
                     qty = max(Decimal('0'), min(qty, held_qty))
 
@@ -407,8 +412,8 @@ def execute_minimal_rebalance(
                         f"Drift rebalance SELL {qty} {row['symbol']}"
                     )
 
-            # BUY underweight if excess cash
-            elif local_cash > Decimal('1000'):
+            # BUY underweight positions
+            elif do_full_rebalance or local_cash > Decimal('1000'):
 
                 for _, row in df_drift[df_drift['delta'] < 0].iterrows():
 
@@ -417,23 +422,17 @@ def execute_minimal_rebalance(
 
                     price = to_price(row['price'])
                     target_gap = Decimal(str(abs(row['delta'])))
-                    
-                    # 1. Max we can afford based on current cash
+
                     max_affordable = (local_cash - Decimal('1.00')) / Decimal('1.001')
-                    
-                    # 2. Our "Gross Target" is the smaller of what we need vs what we have
                     gross_target_value = min(target_gap, max_affordable)
-                    
-                    # 3. Apply your methodology
+
                     gross_qty = (gross_target_value / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
                     commission = calculate_commission(gross_qty)
-                    
                     net_target_value = gross_target_value - commission
-                    
-                    # 4. Final safety check: ensure net value is still positive
+
                     if net_target_value > 0:
                         qty = (net_target_value / price).quantize(Decimal('1'), rounding=ROUND_DOWN)
-                        
+
                         if qty > 0:
                             local_cash = execute_trade(
                                 account_id,
@@ -616,8 +615,9 @@ def create_daily_snapshot(
 
     return daily_return, snapshots
 
-def benchmark_comparison(account_id: int, fund_id: int, eval_date: date, daily_return: Decimal, snapshots: List[ah.AccountHolding]):
-    fund_data = fund.fetch_fund(fund_id) # Using your existing fetch_fund
+def benchmark_comparison(account_id: int, fund_id: int, eval_date: date, daily_return: Decimal, snapshots: List[ah.AccountHolding], fund_data=None):
+    if fund_data is None:
+        fund_data = fund.fetch_fund(fund_id)
 
     if (fund_data is None):
         raise Exception("Account has not been assoicated a fund strategy")
@@ -682,6 +682,15 @@ def daily_actions(account: account.Account, sim_date: date):
         target_fund_holdings = fund_holding.fetch_funds_holdings(fund_id=account.strategy_fund_id, eval_date=sim_date)
         symbol_weights = {h.symbol: h.weight for h in target_fund_holdings if h.weight is not None}
 
+        fund_data = fund.fetch_fund(account.strategy_fund_id)
+        strategy = getStrategyFromJson(fund_data.strategy)
+        rebalance_mode = strategy.allocation_rebalance
+        is_fund_update_day = (
+            rebalance_mode == 'full'
+            and bool(target_fund_holdings)
+            and target_fund_holdings[0].holding_date == sim_date
+        )
+
         candidates = identify_position_change_needs(
             account_id=account.id,
             target_fund_holdings=target_fund_holdings,
@@ -695,13 +704,15 @@ def daily_actions(account: account.Account, sim_date: date):
             eval_date=sim_date,
             account_holdings=account_holdings,
             symbol_weights=symbol_weights,
+            rebalance_mode=rebalance_mode,
+            is_fund_update_day=is_fund_update_day,
         )
 
         # Create Today's Snapshot
         daily_return, snapshots = create_daily_snapshot(account_id=account.id, eval_date=sim_date, previous_holdings=account_holdings, today_trades=today_trades)
 
         # Record Performance
-        benchmark_comparison(account_id=account.id, fund_id=account.strategy_fund_id, eval_date=sim_date, daily_return=daily_return, snapshots=snapshots)
+        benchmark_comparison(account_id=account.id, fund_id=account.strategy_fund_id, eval_date=sim_date, daily_return=daily_return, snapshots=snapshots, fund_data=fund_data)
  
     # Update interest on end of day cash 
     process_daily_interest(account_id=account.id, eval_date=sim_date)    

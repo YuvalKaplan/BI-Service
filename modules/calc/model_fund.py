@@ -28,6 +28,7 @@ class Region(BaseModel):
 
 class Strategy(BaseModel):
     allocation: str
+    allocation_rebalance: str = 'on_change'  # 'none' | 'on_change' | 'full'
     holdings: int
     cap: Cap
     style: Style
