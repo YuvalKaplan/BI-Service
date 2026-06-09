@@ -8,12 +8,13 @@ from modules.bt.calc import classification
 
 CALC_PERIOD_WEEKLY    = "WEEKLY"     # every Wednesday
 CALC_PERIOD_MONTHLY   = "MONTHLY"    # 15th of every month
+CALC_PERIOD_BIMONTHLY = "BIMONTHLY"  # 15th of every odd month (Jan, Mar, May, Jul, Sep, Nov)
 CALC_PERIOD_QUARTERLY = "QUARTERLY"  # 15th of Jan / Apr / Jul / Oct
 
 # --- Configuration ---
 START_DATE  = date(2022, 1, 1)
 END_DATE    = date(2025, 12, 31)
-CALC_PERIOD = CALC_PERIOD_QUARTERLY  # CALC_PERIOD_WEEKLY | CALC_PERIOD_MONTHLY | CALC_PERIOD_QUARTERLY
+CALC_PERIOD = CALC_PERIOD_MONTHLY  # CALC_PERIOD_WEEKLY | CALC_PERIOD_MONTHLY | CALC_PERIOD_BIMONTHLY | CALC_PERIOD_QUARTERLY
 # ---------------------
 
 def _is_calc_date(d: date, calc_period: str) -> bool:
@@ -21,6 +22,8 @@ def _is_calc_date(d: date, calc_period: str) -> bool:
         return d.weekday() == 2  # Wednesday
     if calc_period == CALC_PERIOD_QUARTERLY:
         return d.day == 15 and d.month in (1, 4, 7, 10)
+    if calc_period == CALC_PERIOD_BIMONTHLY:
+        return d.day == 15 and d.month % 2 == 1
     return d.day == 15  # MONTHLY (default)
 
 

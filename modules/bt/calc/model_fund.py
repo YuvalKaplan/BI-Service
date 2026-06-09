@@ -92,6 +92,9 @@ class FundChangesResult:
 USE_RANKING_HIGH = 1
 USE_RANKING_LOW = 1
 
+MARKET_CAP_DROP_DELTA = 5
+EQUAL_DROP_DELTA = 2
+
 MC_WEIGHT_ALPHA = 0.5   # power-law exponent: 1.0 = pure market-cap, 0.0 = equal-weight
 MC_WEIGHT_CAP   = 0.10  # maximum weight per holding
 MC_WEIGHT_FLOOR = 0.01  # minimum weight per holding
@@ -274,7 +277,7 @@ def _fetch_and_select_by_style(
     `fetched` — all retrieved ideas (used by caller for ranking-drop detection).
     """
     exchanges = strategy.exchanges or []
-    ranking_level = USE_RANKING_LOW + (5 if strategy.allocation == 'market_cap' else 2)
+    ranking_level = USE_RANKING_LOW + (MARKET_CAP_DROP_DELTA if strategy.allocation == 'market_cap' else EQUAL_DROP_DELTA)
 
     if (
         strategy.style.name == "blend"
