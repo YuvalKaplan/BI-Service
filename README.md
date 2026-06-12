@@ -57,7 +57,7 @@ All of the following should be done in pgAdmin:
 2. Truncate all the tables in the development database in pgAdmin:
     > call truncate_all_tables();
 3. Back in the CMD window, retore the database:
-    > psql -h localhost -p 5433 -U admin -d best_ideas -f C:\Users\Yuval\Downloads\db_backup_data_only.sql
+    > psql -h localhost -p 5432 -U admin -d best_ideas -f C:\Users\Yuval\Downloads\db_backup_data_only.sql
     - You will need the admin password
 
 ## Playwright

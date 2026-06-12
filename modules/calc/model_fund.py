@@ -38,6 +38,8 @@ class Strategy(BaseModel):
     provider_etfs: Optional[list[int]] = None
     exchanges: Optional[list[str]] = None
     esg_only: bool = False
+    ranking_from: int = 1
+    ranking_to: int = 1
 
 def getStrategyFromJson(data: dict) -> Strategy:
     return Strategy.model_validate(data)
@@ -89,9 +91,6 @@ class FundChangesResult:
 
 
 # ── Constants ────────────────────────────────────────────────────────────────
-
-USE_RANKING_HIGH = 1
-USE_RANKING_LOW = 1
 
 MC_WEIGHT_ALPHA = 0.5   # power-law exponent: 1.0 = pure market-cap, 0.0 = equal-weight
 MC_WEIGHT_CAP   = 0.10  # maximum weight per holding
@@ -166,15 +165,13 @@ def resolve_canonical_ticker_ids(df: pd.DataFrame) -> pd.DataFrame:
         .drop_duplicates(subset='ticker_id')
     )
 
-    def pick_canonical(group):
-        group = group.copy()
-        group['_is_us'] = (group['country'] == 'US').astype(int)
-        return group.sort_values(
-            ['market_cap', '_is_us', 'ticker_id'],
-            ascending=[False, False, True],
-        )['ticker_id'].iloc[0]
-
-    canonical_map = ticker_attrs.groupby('_norm').apply(pick_canonical)
+    canonical_map = (
+        ticker_attrs
+        .assign(_is_us=(ticker_attrs['country'] == 'US').astype(int))
+        .sort_values(['market_cap', '_is_us', 'ticker_id'], ascending=[False, False, True])
+        .groupby('_norm')['ticker_id']
+        .first()
+    )
 
     df = df.copy()
     df['canonical_ticker_id'] = df['ticker_id']
@@ -191,6 +188,7 @@ def _filter_and_aggregate(
     exchanges: list[str],
     esg_only: bool,
     ranking_level: int,
+    exclude_ticker_ids: set[int] | None = None,
 ) -> pd.DataFrame:
     """
     Filter the global best-ideas DataFrame for a specific fund configuration
@@ -206,22 +204,27 @@ def _filter_and_aggregate(
     mask = pd.Series(True, index=df.index)
     if etf_set:
         mask &= df['provider_etf_id'].isin(etf_set)
-    if style_type != 'blend':
+    if style_type not in (None, 'core', 'blend'):
         mask &= df['style_type'] == style_type
     if cap_type == 'large':
         mask &= df['market_cap'] >= CAP_LARGE_THRESHOLD
     elif cap_type == 'mid_small':
         mask &= df['market_cap'] < CAP_LARGE_THRESHOLD
     if country_type == 'US':
-        mask &= df['country'] == 'US'
+        mask &= df['etf_region'] == 'US'
     elif country_type == 'Non-US':
-        mask &= df['country'] != 'US'
+        mask &= df['etf_region'] == 'International'
     if exchanges:
         mask &= df['exchange'].isin(exchanges)
     if esg_only:
         mask &= df['esg_qualified'] == True
 
     filtered = df[mask].copy()
+    if exclude_ticker_ids:
+        filtered = filtered[~filtered[key].isin(exclude_ticker_ids)]
+
+    # Printout full list to CSV for debugging
+    # filtered.sort_values(['provider_etf_id', 'ranking']).to_csv('debug_filtered.csv', index=False)
 
     empty = pd.DataFrame(columns=['ticker_id', 'ranking', 'appearances', 'max_delta', 'source_etf_id', 'all_provider_ids'])
     if filtered.empty:
@@ -279,6 +282,7 @@ def _fetch_and_select_by_style(
     strategy: Strategy,
     all_best_ideas_df: pd.DataFrame,
     country_type: str = 'all',
+    exclude_ticker_ids: set[int] | None = None,
 ) -> tuple[list, list]:
     """
     Returns (ideal, fetched).
@@ -287,7 +291,7 @@ def _fetch_and_select_by_style(
     """
     etf_ids = strategy.provider_etfs or []
     exchanges = strategy.exchanges or []
-    ranking_level = USE_RANKING_LOW + (5 if strategy.allocation == 'market_cap' else 2)
+    ranking_level = strategy.ranking_to + (5 if strategy.allocation == 'market_cap' else 2)
 
     if (
         strategy.style.name == "blend"
@@ -296,20 +300,20 @@ def _fetch_and_select_by_style(
     ):
         fetched_growth = _df_to_ranked(_filter_and_aggregate(
             all_best_ideas_df, etf_ids, 'growth', strategy.cap.name,
-            country_type, exchanges, strategy.esg_only, ranking_level,
+            country_type, exchanges, strategy.esg_only, ranking_level, exclude_ticker_ids,
         ))
         fetched_value = _df_to_ranked(_filter_and_aggregate(
             all_best_ideas_df, etf_ids, 'value', strategy.cap.name,
-            country_type, exchanges, strategy.esg_only, ranking_level,
+            country_type, exchanges, strategy.esg_only, ranking_level, exclude_ticker_ids,
         ))
 
-        if USE_RANKING_HIGH != 1:
-            fetched_growth = [i for i in fetched_growth if USE_RANKING_HIGH <= i.ranking]
-            fetched_value  = [i for i in fetched_value  if USE_RANKING_HIGH <= i.ranking]
+        if strategy.ranking_from != 1:
+            fetched_growth = [i for i in fetched_growth if strategy.ranking_from <= i.ranking]
+            fetched_value  = [i for i in fetched_value  if strategy.ranking_from <= i.ranking]
 
         fetched = fetched_growth + fetched_value
-        growth_in_range = [i for i in fetched_growth if i.ranking <= USE_RANKING_LOW]
-        value_in_range  = [i for i in fetched_value  if i.ranking <= USE_RANKING_LOW]
+        growth_in_range = [i for i in fetched_growth if i.ranking <= strategy.ranking_to]
+        value_in_range  = [i for i in fetched_value  if i.ranking <= strategy.ranking_to]
 
         growth_count = min(len(growth_in_range), round(n_holdings * strategy.style.growth / 100))
         value_count  = min(len(value_in_range),  n_holdings - growth_count)
@@ -317,13 +321,13 @@ def _fetch_and_select_by_style(
     else:
         fetched = _df_to_ranked(_filter_and_aggregate(
             all_best_ideas_df, etf_ids, strategy.style.name, strategy.cap.name,
-            country_type, exchanges, strategy.esg_only, ranking_level,
+            country_type, exchanges, strategy.esg_only, ranking_level, exclude_ticker_ids,
         ))
 
-        if USE_RANKING_HIGH != 1:
-            fetched = [i for i in fetched if USE_RANKING_HIGH <= i.ranking]
+        if strategy.ranking_from != 1:
+            fetched = [i for i in fetched if strategy.ranking_from <= i.ranking]
 
-        in_range = [i for i in fetched if i.ranking <= USE_RANKING_LOW]
+        in_range = [i for i in fetched if i.ranking <= strategy.ranking_to]
         ideal = in_range[:n_holdings]
 
     return ideal, fetched
@@ -347,8 +351,9 @@ def _fetch_and_select_by_region(
         and region_split.us is not None
         and region_split.non_us is not None
     ):
-        us_ideal,   us_fetched   = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type='US')
         intl_ideal, intl_fetched = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type='Non-US')
+        intl_ticker_ids = {i.ticker_id for i in intl_fetched}
+        us_ideal,   us_fetched   = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type='US', exclude_ticker_ids=intl_ticker_ids)
 
         us_n_target   = round(strategy.holdings * region_split.us / 100)
         intl_n_target = strategy.holdings - us_n_target

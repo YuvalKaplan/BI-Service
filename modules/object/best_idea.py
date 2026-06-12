@@ -75,54 +75,63 @@ def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: s
     except Error as e:
         raise Exception(f"Error fetching the BestIdeaResult from the DB: {e}")
 
-def fetch_all_as_df(as_of_date: date, ranking_level: int) -> pd.DataFrame:
+def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
     """
     Load one row per (provider_etf_id, ticker_id) for all best ideas within
     the lookback window, including ticker attributes needed for per-fund filtering.
     Returned DataFrame columns: provider_etf_id, ticker_id, value_date, ranking,
-    delta, style_type, exchange, country, esg_qualified, market_cap.
+    delta, style_type, exchange, country, esg_qualified, name, market_cap, etf_region.
     """
     sql = """
-        WITH latest_per_etf_ticker AS (
-            SELECT DISTINCT ON (bi.provider_etf_id, bi.ticker_id)
+        WITH latest_date_per_etf AS (
+            SELECT provider_etf_id, MAX(value_date) AS latest_date
+            FROM best_idea
+            WHERE value_date BETWEEN %(date)s - INTERVAL '10 days' AND %(date)s
+            GROUP BY provider_etf_id
+        ),
+        latest_ideas AS (
+            SELECT
                 bi.provider_etf_id,
                 bi.ticker_id,
                 bi.value_date,
                 bi.ranking,
                 bi.delta
             FROM best_idea bi
-            WHERE bi.value_date BETWEEN %(date)s - INTERVAL '10 days' AND %(date)s
-              AND bi.ranking <= %(ranking)s
-            ORDER BY bi.provider_etf_id, bi.ticker_id, bi.value_date DESC, bi.ranking ASC
+            JOIN latest_date_per_etf ld
+                ON bi.provider_etf_id = ld.provider_etf_id
+               AND bi.value_date = ld.latest_date
         )
         SELECT
-            lpet.provider_etf_id,
-            lpet.ticker_id,
-            lpet.value_date,
-            lpet.ranking,
-            lpet.delta,
+            li.provider_etf_id,
+            li.ticker_id,
+            li.value_date,
+            li.ranking,
+            li.delta,
             t.style_type,
             t.exchange,
             t.country,
             t.esg_qualified,
             t.name,
-            tv.market_cap
-        FROM latest_per_etf_ticker lpet
-        JOIN ticker t ON t.id = lpet.ticker_id
+            tv.market_cap,
+            pe.region AS etf_region
+        FROM latest_ideas li
+        JOIN ticker t ON t.id = li.ticker_id
+        JOIN provider_etf pe ON pe.id = li.provider_etf_id
         LEFT JOIN LATERAL (
             SELECT market_cap
             FROM ticker_value
-            WHERE ticker_id = lpet.ticker_id
+            WHERE ticker_id = li.ticker_id
               AND value_date BETWEEN %(date)s - INTERVAL '10 days' AND %(date)s
             ORDER BY value_date DESC
             LIMIT 1
         ) tv ON TRUE
         WHERE t.invalid IS NULL
+        ORDER BY li.provider_etf_id, li.ranking ASC
     """
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, {'date': as_of_date, 'ranking': ranking_level})
+                cur.execute(sql, {'date': as_of_date})
                 rows = cur.fetchall()
                 cols = [desc[0] for desc in cur.description] if cur.description else []
         return pd.DataFrame(rows, columns=cols)

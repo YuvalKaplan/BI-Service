@@ -12,8 +12,8 @@ OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', '.downloads')
 
 if __name__ == '__main__':
     try:
-        provider_etf_id = 65
-        filename = 'cggr_download_report_daily - 2026-05-19.xlsx'
+        provider_etf_id = 156
+        filename = 'NBCR-06_08_2026.xlsx'
 
         etf = provider_etf.fetch_by_id(provider_etf_id)
         p = provider.fetch_by_id(etf.provider_id)

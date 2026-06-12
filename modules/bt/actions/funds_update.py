@@ -12,8 +12,7 @@ def run(today: date) -> List[model_fund.FundChangesResult]:
 
         yesterday = today - timedelta(days=1)
 
-        max_ranking = model_fund.USE_RANKING_LOW + max(5, 2)
-        all_best_ideas_df = best_idea.fetch_all_as_df(as_of_date=today, ranking_level=max_ranking)
+        all_best_ideas_df = best_idea.fetch_all_as_df(as_of_date=today)
         all_best_ideas_df = model_fund.resolve_canonical_symbols(all_best_ideas_df)
         # log.record_status(
         #     f"Best ideas loaded for fund generation ({len(all_best_ideas_df)} rows):\n"
