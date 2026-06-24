@@ -31,6 +31,7 @@ class ProviderEtf:
     mapping: dict | None
     file_format: str | None
     last_downloaded: datetime | None
+    benchmark_id: int | None = None
 
 @dataclass
 class EtfDownload:

@@ -1,5 +1,6 @@
 .vscode/
 .claude/
+.mcp.json
 .env_google_creds.json
 
 # Byte-compiled / optimized / DLL files

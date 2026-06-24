@@ -4,7 +4,7 @@ from modules.object import batch_run, batch_run_log
 from modules.object import provider, provider_etf
 from modules.object.provider_etf_holding import fetch_latest_holdings_for_etf
 from modules.object.ticker_value import fetch_latest_market_caps_within_window
-from modules.object import best_idea
+from modules.object import best_idea, benchmark
 
 DAYS_NO_MARKET_CAP = 5
 MIN_HOLDINGS_WITH_PRICES_PCT = 0.95
@@ -13,7 +13,12 @@ MAX_BEST_IDEAS_PER_FUND = 10
 HOLDING_DELTA_LIMIT_DROP_OFF = 0.20
 
 
-def _find_best_ideas(holdings: list, market_cap_values: list, limit: int | None = None) -> pd.DataFrame:
+def _find_best_ideas(
+    holdings: list,
+    market_cap_values: list,
+    limit: int | None = None,
+    benchmark_weights: dict[int, float] | None = None,
+) -> pd.DataFrame:
     df_holdings = pd.DataFrame(
         {"ticker_id": h.ticker_id, "market_value": h.market_value}
         for h in holdings
@@ -34,8 +39,13 @@ def _find_best_ideas(holdings: list, market_cap_values: list, limit: int | None 
     total_etf_value = df["market_value"].sum()
     df["etf_weight"] = df["market_value"] / total_etf_value
 
-    total_market_cap = df["market_cap"].sum()
-    df["benchmark_weight"] = df["market_cap"] / total_market_cap
+    if benchmark_weights:
+        # full_universe: each stock's weight in the external large-cap universe
+        df["benchmark_weight"] = df["ticker_id"].map(benchmark_weights).fillna(0.0)
+    else:
+        # self: market-cap weight within the ETF's own holdings
+        total_market_cap = df["market_cap"].sum()
+        df["benchmark_weight"] = df["market_cap"] / total_market_cap
 
     df["delta"] = df["etf_weight"] - df["benchmark_weight"]
 
@@ -74,6 +84,10 @@ def run() -> tuple[int, int, list[str]]:
         generated_etfs = 0
         problem_etfs: list[str] = []
 
+        # Build a cache of {benchmark_id: {ticker_id: weight}} for all ETFs that have one.
+        # Fetched once per unique benchmark_id across all providers.
+        _bm_cache: dict[int, dict[int, float]] = {}
+
         for p in providers:
             pe_list = provider_etf.fetch_by_provider_id(p.id)
             total_etfs += len(pe_list)
@@ -89,8 +103,8 @@ def run() -> tuple[int, int, list[str]]:
 
                     holding_date = raw_holdings[0].holding_date
 
-                    # 2. Fetch latest market caps within +/- 5 days of the holding date. 
-                    # Going a few days after the holding is useful if we have a new ticker that was just added to the 
+                    # 2. Fetch latest market caps within +/- 5 days of the holding date.
+                    # Going a few days after the holding is useful if we have a new ticker that was just added to the
                     # holdings as the first market_cap downloaded using the profile API may be a day or two after the holding date..
                     ticker_ids = [h.ticker_id for h in raw_holdings if h.ticker_id]
                     market_cap_values = fetch_latest_market_caps_within_window(ticker_ids, holding_date, DAYS_NO_MARKET_CAP)
@@ -109,11 +123,22 @@ def run() -> tuple[int, int, list[str]]:
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Insufficient market cap coverage", message=msg, problem_etfs=problem_etfs)
                         continue
 
-                    # 5. Generate and insert
                     final_holdings = [h for h in raw_holdings if h.ticker_id in priced_ids]
-                    best_ideas_df = _find_best_ideas(final_holdings, market_cap_values, MAX_BEST_IDEAS_PER_FUND)
-                    rows = best_idea.df_to_rows(best_ideas_df, provider_etf_id=pe.id, value_date=holding_date)
-                    best_idea.insert_bulk(rows)
+
+                    # 5a. Always generate self-benchmark best ideas
+                    self_df = _find_best_ideas(final_holdings, market_cap_values, MAX_BEST_IDEAS_PER_FUND)
+                    best_idea.insert_bulk(best_idea.df_to_rows(self_df, provider_etf_id=pe.id, value_date=holding_date, benchmark_mode='self'))
+
+                    # 5b. If this ETF has a benchmark configured, also generate full_universe best ideas
+                    if pe.benchmark_id:
+                        if pe.benchmark_id not in _bm_cache:
+                            bm_holdings = benchmark.fetch_latest_holdings(pe.benchmark_id, LOOK_BACK_WINDOW)
+                            _bm_cache[pe.benchmark_id] = {h.ticker_id: h.weight for h in bm_holdings if h.ticker_id}
+                        bm_weights = _bm_cache.get(pe.benchmark_id)
+                        if bm_weights:
+                            universe_df = _find_best_ideas(final_holdings, market_cap_values, MAX_BEST_IDEAS_PER_FUND, benchmark_weights=bm_weights)
+                            best_idea.insert_bulk(best_idea.df_to_rows(universe_df, provider_etf_id=pe.id, value_date=holding_date, benchmark_mode='full_universe'))
+
                     generated_etfs += 1
 
                 except Exception as e:

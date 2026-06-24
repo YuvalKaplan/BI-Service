@@ -32,11 +32,15 @@ def run() -> List[model_fund.FundChangesResult]:
 
         all_results: List[model_fund.FundChangesResult] = []
         for f in funds:
+            strategy = model_fund.getStrategyFromJson(f.strategy)
+            fund_ideas_df = all_best_ideas_df[
+                all_best_ideas_df['benchmark_mode'] == strategy.benchmark
+            ]
             results = model_fund.generate(
                 today=today,
                 fund=f,
                 previous_holdings=fund_holding.fetch_funds_holdings(f.id, yesterday),
-                all_best_ideas_df=all_best_ideas_df,
+                all_best_ideas_df=fund_ideas_df,
                 mc_map=mc_map,
             )
 

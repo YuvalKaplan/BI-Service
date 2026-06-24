@@ -40,6 +40,7 @@ class Strategy(BaseModel):
     esg_only: bool = False
     ranking_from: int = 1
     ranking_to: int = 1
+    benchmark: str = 'full_universe'  # 'full_universe' | 'self'
 
 def getStrategyFromJson(data: dict) -> Strategy:
     return Strategy.model_validate(data)

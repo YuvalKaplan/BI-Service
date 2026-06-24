@@ -356,3 +356,29 @@ def fetch_esg_data(symbol: str) -> tuple[Dict, Dict]:
         log.record_error(f"Failed to get ESG data for {symbol}: {e}")
         return {}, {}
 
+
+SCREENER_PAGE_LIMIT = 1000
+SCREENER_MAX_PAGES = 20
+
+def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = SCREENER_PAGE_LIMIT) -> list[dict]:
+    """
+    Paged call to FMP /stable/company-screener filtered by minimum market cap.
+    Returns the list of company dicts, or [] on error or when the last page is reached.
+    Expected fields per item: symbol, marketCap, country, exchangeShortName, companyName.
+    """
+    try:
+        throttle_api_calls()
+        apikey = os.getenv('SECRET_MARKET_DATA_API_KEY')
+        url = (
+            f"{FMP_API_URL}/company-screener"
+            f"?marketCapMoreThan={market_cap_more_than}&limit={limit}&page={page}&apikey={apikey}"
+        )
+        result = get_jsonparsed_data(url)
+        if not isinstance(result, list):
+            log.record_notice(f"Unexpected screener response on page {page}: {type(result)}")
+            return []
+        return result
+    except Exception as e:
+        log.record_notice(f"Failed to fetch company screener page {page}: {e}")
+        return []
+

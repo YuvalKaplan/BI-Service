@@ -15,15 +15,21 @@ class BestIdea:
     benchmark_weight: float | None
     delta: float | None
     ranking: int | None
+    benchmark_mode: str = 'self'
 
 def df_to_rows(
     best_ideas: pd.DataFrame,
     provider_etf_id: int,
-    value_date: date
+    value_date: date,
+    benchmark_mode: str = 'self',
 ) -> list[tuple]:
     rows = []
     for rank, (_, row) in enumerate(best_ideas.iterrows(), start=1):
-        rows.append((provider_etf_id, int(row["ticker_id"]), value_date, float(row["etf_weight"]), float(row["benchmark_weight"]), float(row["delta"]), rank))
+        rows.append((
+            provider_etf_id, int(row["ticker_id"]), value_date,
+            float(row["etf_weight"]), float(row["benchmark_weight"]), float(row["delta"]),
+            rank, benchmark_mode,
+        ))
     return rows
 
 def insert_bulk(rows: list[tuple]) -> None:
@@ -32,9 +38,9 @@ def insert_bulk(rows: list[tuple]) -> None:
 
     query = """
         INSERT INTO best_idea
-            (provider_etf_id, ticker_id, value_date, etf_weight, benchmark_weight, delta, ranking)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (provider_etf_id, ticker_id, value_date)
+            (provider_etf_id, ticker_id, value_date, etf_weight, benchmark_weight, delta, ranking, benchmark_mode)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (provider_etf_id, ticker_id, value_date, benchmark_mode)
         DO UPDATE
         SET
             etf_weight = EXCLUDED.etf_weight,
@@ -77,10 +83,12 @@ def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: s
 
 def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
     """
-    Load one row per (provider_etf_id, ticker_id) for all best ideas within
-    the lookback window, including ticker attributes needed for per-fund filtering.
+    Load all best ideas within the lookback window for all benchmark modes,
+    including ticker attributes needed for per-fund filtering.
     Returned DataFrame columns: provider_etf_id, ticker_id, value_date, ranking,
-    delta, style_type, exchange, country, esg_qualified, name, market_cap, etf_region.
+    delta, benchmark_mode, style_type, exchange, country, esg_qualified, name,
+    market_cap, etf_region.
+    Callers should filter by benchmark_mode to match each fund's strategy.
     """
     sql = """
         WITH latest_date_per_etf AS (
@@ -95,7 +103,8 @@ def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
                 bi.ticker_id,
                 bi.value_date,
                 bi.ranking,
-                bi.delta
+                bi.delta,
+                bi.benchmark_mode
             FROM best_idea bi
             JOIN latest_date_per_etf ld
                 ON bi.provider_etf_id = ld.provider_etf_id
@@ -107,6 +116,7 @@ def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
             li.value_date,
             li.ranking,
             li.delta,
+            li.benchmark_mode,
             t.style_type,
             t.exchange,
             t.country,

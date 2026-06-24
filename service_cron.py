@@ -6,7 +6,7 @@ from modules.object.exit import cleanup
 from modules.core.db import db_pool_instance
 from modules.core import sender
 from modules.calc.model_fund import results_to_string
-from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, esg_update
+from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, esg_update, benchmark_generator
 
 SEPERATOR_LINE = "-" * 20 + "\n"
 BREAKER_LINE = "=" * 20 + "\n\n"
@@ -40,6 +40,15 @@ if __name__ == '__main__':
 
         if weekday == 6:  # Sunday
             try:
+                benchmark_generator.run_blend_holdings()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed in benchmark blend holdings with error:\n{e}\n\n")
+                raise e
+
+            message_actions += "Benchmark blend holdings refreshed\n"
+            message_actions += BREAKER_LINE
+
+            try:
                 total_etfs = categorize_downloader.run()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed in categorize ETF download with error:\n{e}\n\n")
@@ -55,6 +64,15 @@ if __name__ == '__main__':
                 raise e
 
             message_actions += f"ESG tickers refreshed: {total_esg}\n"
+            message_actions += BREAKER_LINE
+
+            try:
+                benchmark_generator.run_style_holdings()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed in benchmark style holdings with error:\n{e}\n\n")
+                raise e
+
+            message_actions += "Benchmark style holdings refreshed\n"
             message_actions += BREAKER_LINE
 
         if weekday == 2: # Wednesday
