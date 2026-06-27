@@ -1,6 +1,7 @@
 .vscode/
 .claude/
 .mcp.json
+mcp/mcp-postgres-rw/node_modules/
 .env_google_creds.json
 
 # Byte-compiled / optimized / DLL files

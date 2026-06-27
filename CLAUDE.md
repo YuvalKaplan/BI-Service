@@ -37,16 +37,33 @@ Each pipeline has its own PostgreSQL database (`best_ideas` and `best_ideas_bt`)
 ### Live Pipeline Flow
 
 ```
-etf_downloader     → scrapes provider websites (Playwright) → provider_etf_holding
-stocks_downloader  → FinancialModelingPrep API              → ticker, ticker_value
-stocks_categorize  → scrapes style/ESG ETFs                 → ticker (style_type, esg_qualified)
-best_ideas_generator → active weight algorithm              → best_idea
-funds_update        → fund strategy composition             → fund_holding
+etf_downloader       → scrapes provider websites (Playwright) → provider_etf_holding
+stocks_downloader    → FinancialModelingPrep API              → ticker, ticker_value
+stocks_categorize    → scrapes style/ESG ETFs                 → ticker (style_type, esg_qualified)
+benchmark_generator  → FMP screener API                       → benchmark_holding
+best_ideas_generator → active weight algorithm                → best_idea (self + full_universe modes)
+funds_update         → fund strategy composition              → fund_holding
 ```
 
 **Cron schedule** (weekday 0=Monday):
 - Tue–Sat: ETF holdings download, stock data download, categorization
-- Tue–Thu: Best ideas generation, fund updates
+- Sun: Benchmark blend holdings refresh (`benchmark_generator.run_blend_holdings()`), categorization ETFs, ESG update
+- Wed: Best ideas generation, fund updates
+
+### Benchmarks
+
+Two synthetic large-cap benchmarks (market cap ≥ $10B) are built from the FMP company screener API and stored in dedicated `benchmark` and `benchmark_holding` tables — separate from provider ETF data.
+
+| Benchmark | Region | Coverage |
+|-----------|--------|----------|
+| US Large Cap Blend | US | All large-cap US stocks |
+| Intl Large Cap Blend | International | All large-cap non-US stocks |
+
+`benchmark_generator.run_blend_holdings()` runs every Sunday: paginates the FMP screener, upserts any new tickers into the `ticker` table, then stores market-cap-weighted holdings for both benchmarks.
+
+Each `provider_etf` row has an optional `benchmark_id` FK pointing to the appropriate benchmark. When set, `best_ideas_generator` computes best ideas twice per ETF — once using the ETF's own holdings as the benchmark (`benchmark_mode = 'self'`) and once using the external benchmark universe (`benchmark_mode = 'full_universe'`). Both sets are stored in `best_idea`.
+
+`fund.strategy.benchmark` (`'full_universe'` | `'self'`, default `'full_universe'`) controls which mode `funds_update` selects when building each fund's model portfolio.
 
 ### Key Modules
 
@@ -57,9 +74,11 @@ funds_update        → fund strategy composition             → fund_holding
 | `modules/core/sender.py` | Admin email notifications via Mailgun |
 | `modules/calc/best_ideas.py` | Core algorithm: active weight = ETF% − benchmark market-cap% |
 | `modules/calc/classification.py` | Scikit-learn GradientBoosting style classifier — **BT only** |
-| `modules/calc/model_fund.py` | Fund strategy parsing and composition logic |
+| `modules/calc/model_fund.py` | Fund strategy parsing and composition logic; `Strategy.benchmark` selects best-idea mode |
 | `modules/parse/url.py` | Playwright scraper with anti-detection; replays recorded event sequences |
 | `modules/parse/convert.py` | Excel/CSV parsing using provider `Mapping` config from DB |
+| `modules/object/benchmark.py` | Dataclasses and CRUD for `benchmark` and `benchmark_holding` tables |
+| `modules/cron/benchmark_generator.py` | FMP screener fetch, ticker upsert, blend benchmark holding storage |
 | `modules/object/_db_schema.sql` | Authoritative PostgreSQL schema |
 
 ### DB Access Pattern

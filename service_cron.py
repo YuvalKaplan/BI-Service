@@ -66,15 +66,6 @@ if __name__ == '__main__':
             message_actions += f"ESG tickers refreshed: {total_esg}\n"
             message_actions += BREAKER_LINE
 
-            try:
-                benchmark_generator.run_style_holdings()
-            except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed in benchmark style holdings with error:\n{e}\n\n")
-                raise e
-
-            message_actions += "Benchmark style holdings refreshed\n"
-            message_actions += BREAKER_LINE
-
         if weekday == 2: # Wednesday
             try:
                 etfs_processed, generated_etfs, problems = best_ideas_generator.run()

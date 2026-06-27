@@ -51,7 +51,7 @@ def _resolve_tickers(screener_results: list[dict]) -> dict[str, tuple[int, str, 
                 exchange=exchange,
                 name=name,
                 country=country,
-                source='FMP',
+                source='fmp',
                 is_actively_trading=True,
             )
             try:
@@ -130,49 +130,3 @@ def run_blend_holdings() -> None:
         raise
 
 
-def run_style_holdings() -> None:
-    """
-    Stage 2 (run AFTER categorize_downloader):
-    Read US Blend holdings, split by ticker.style_type, and populate
-    the US Growth and US Value benchmarks.
-    """
-    batch_run_id = batch_run.insert(batch_run.BatchRun(process='benchmark_generator_style', activation='auto'))
-    log.record_status(f"Starting Benchmark Generator (style) batch job ID {batch_run_id}")
-    try:
-        us_blend = benchmark.fetch_by_region_and_style('US', 'blend')
-        if not us_blend:
-            log.record_notice("US Blend benchmark not found — skipping style holdings.")
-            batch_run.update_completed_at(batch_run_id)
-            return
-
-        holding_date = date.today()
-        blend_holdings = benchmark.fetch_latest_holdings_for_date(us_blend.id, holding_date)
-        if not blend_holdings:
-            log.record_notice(f"No US Blend holdings found for {holding_date} — skipping style holdings.")
-            batch_run.update_completed_at(batch_run_id)
-            return
-
-        log.record_status(f"Loaded {len(blend_holdings)} US Blend holdings for {holding_date}.")
-
-        ticker_ids = [h.ticker_id for h in blend_holdings]
-        tickers = ticker.fetch_by_ids(ticker_ids)
-        style_map: dict[int, str | None] = {t.id: t.style_type for t in tickers}
-
-        growth_items = [(h.ticker_id, h.market_cap) for h in blend_holdings if style_map.get(h.ticker_id) == 'growth']
-        value_items  = [(h.ticker_id, h.market_cap) for h in blend_holdings if style_map.get(h.ticker_id) == 'value']
-        log.record_status(f"Style split: {len(growth_items)} growth, {len(value_items)} value.")
-
-        us_growth = benchmark.fetch_by_region_and_style('US', 'growth')
-        us_value  = benchmark.fetch_by_region_and_style('US', 'value')
-
-        if us_growth:
-            _build_and_store(us_growth.id, growth_items, holding_date)
-        if us_value:
-            _build_and_store(us_value.id, value_items, holding_date)
-
-        batch_run.update_completed_at(batch_run_id)
-        log.record_status("Benchmark Generator (style) completed.\n")
-
-    except Exception as e:
-        log.record_error(f"Error in benchmark_generator style: {e}")
-        raise
