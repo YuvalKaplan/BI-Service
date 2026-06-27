@@ -1,4 +1,5 @@
 import log
+import re
 from datetime import date
 from modules.core import api_stocks
 from modules.object import batch_run, ticker, ticker_value, benchmark
@@ -33,14 +34,18 @@ def _resolve_tickers(screener_results: list[dict]) -> dict[str, tuple[int, str, 
     today = date.today()
 
     for company in screener_results:
-        symbol = company.get('symbol')
+        raw_symbol = company.get('symbol')
         market_cap = company.get('marketCap')
         country = company.get('country') or ''
         exchange = company.get('exchangeShortName') or ''
         name = company.get('companyName') or ''
 
-        if not symbol or not market_cap or market_cap <= 0:
+        if not raw_symbol or not market_cap or market_cap <= 0:
             continue
+
+        # Strip exchange suffix (e.g. TD.TO → TD, SHOP.TO → SHOP) to match
+        # how TickerResolver stores symbols in the ticker table.
+        symbol = re.split(r'[\s.]', raw_symbol)[0]
 
         ticker_id = symbol_cache.get(symbol)
 

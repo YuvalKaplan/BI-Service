@@ -371,7 +371,8 @@ def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = SC
         apikey = os.getenv('SECRET_MARKET_DATA_API_KEY')
         url = (
             f"{FMP_API_URL}/company-screener"
-            f"?marketCapMoreThan={market_cap_more_than}&limit={limit}&page={page}&apikey={apikey}"
+            f"?marketCapMoreThan={market_cap_more_than}&limit={limit}&page={page}"
+            f"&isEtf=false&isFund=false&isActivelyTrading=true&apikey={apikey}"
         )
         result = get_jsonparsed_data(url)
         if not isinstance(result, list):
