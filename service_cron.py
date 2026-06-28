@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
         if weekday == 6:  # Sunday
             try:
-                benchmark_generator.run_blend_holdings()
+                benchmark_generator.run()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed in benchmark blend holdings with error:\n{e}\n\n")
                 raise e

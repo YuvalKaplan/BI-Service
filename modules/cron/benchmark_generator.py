@@ -99,13 +99,13 @@ def _build_and_store(
     log.record_status(f"  benchmark_id={benchmark_id}: {len(rows)} holdings, total market cap ${total/1e12:.2f}T")
 
 
-def run_blend_holdings() -> None:
+def run() -> None:
     """
     Stage 1 (run BEFORE categorize_downloader):
     Fetch full large-cap universe from FMP screener, register all tickers,
     and populate the US Blend and Intl Blend benchmarks.
     """
-    batch_run_id = batch_run.insert(batch_run.BatchRun(process='benchmark_generator_blend', activation='auto'))
+    batch_run_id = batch_run.insert(batch_run.BatchRun(process='benchmark_generator', activation='auto'))
     log.record_status(f"Starting Benchmark Generator (blend) batch job ID {batch_run_id}")
     try:
         screener_results = _fetch_all_screener_results()
