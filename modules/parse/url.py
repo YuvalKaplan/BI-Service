@@ -1,6 +1,7 @@
 import os
 import log
 import re
+import sys
 import tempfile
 import time
 from datetime import date
@@ -16,7 +17,7 @@ from modules.core.protocols import CategorizeEtfProtocol
 
 
 
-ENV_TYPE = os.environ.get("ENV_TYPE")
+HEADLESS = '--headed' not in sys.argv
 
 SCRAPE_MAX_RETRIES = 3
 SCRAPE_RETRY_DELAY_SECONDS = 3
@@ -205,16 +206,21 @@ def scrape_provider(cp: Provider) -> List[EtfDownload]:
     downloads: List[EtfDownload] = []
 
     with Stealth().use_sync(sync_playwright()) as p:
-        browser = p.chromium.launch(headless=True, args=CHROME_LAUNCH_ARGS)
+        browser = p.chromium.launch(
+            headless=HEADLESS,
+            args=CHROME_LAUNCH_ARGS,
+        )
         context = browser.new_context(
             user_agent=REAL_USER_AGENT,
             viewport={'width': 1920, 'height': 1080},
             accept_downloads=True
         )
         page = context.new_page()
-
+    
         if not open_page(page=page, url=cp.url_start, wait_pre_events=cp.wait_pre_events, wait_post_events=cp.wait_post_events, events=cp.events):
             raise Exception(f"Failed to open provider start URL: {cp.url_start}")
+
+        print(f"Current Scraper IP Location: {page.text_content('body')}")
 
         for etf in etf_list:
             last_error = None
@@ -266,7 +272,7 @@ def scrape_provider_etf(cp: Provider, etf: ProviderEtf) -> EtfDownload:
         raise Exception('Missing URL or trigger_download for provider ETF.')
 
     with Stealth().use_sync(sync_playwright()) as p:
-        browser = p.chromium.launch(headless=True, args=CHROME_LAUNCH_ARGS)
+        browser = p.chromium.launch(headless=HEADLESS, args=CHROME_LAUNCH_ARGS)
         context = browser.new_context(
             user_agent=REAL_USER_AGENT,
             viewport={'width': 1920, 'height': 1080},
@@ -308,7 +314,7 @@ def scrape_categorizer(etf: CategorizeEtfProtocol) -> CategorizeEtfDownload:
             open_browser: OpenBrowser = OpenBrowser(browser=None, context=None, page=None)
 
             with Stealth().use_sync(sync_playwright()) as p:
-                open_browser.browser = p.chromium.launch(headless=True, args=CHROME_LAUNCH_ARGS)
+                open_browser.browser = p.chromium.launch(headless=HEADLESS, args=CHROME_LAUNCH_ARGS)
                 open_browser.context = open_browser.browser.new_context(
                     user_agent=REAL_USER_AGENT,
                     viewport={'width': 1920, 'height': 1080},

@@ -25,6 +25,23 @@ pip freeze > requirements.txt
 
 No automated test suite exists. Validation is done by running the cron or BT pipelines directly.
 
+### Dev/Prod DB switching
+
+`service_cron.py` and every script in `scripts/` default to the **development** database (`db_pool_instance`, live pipeline only). Pass `--prod` to point that same pool at production instead, or `--dev` to force development even if `ENV_TYPE=production` is set in the environment:
+
+```bash
+python service_cron.py --prod
+python scripts/_single_provider.py --prod
+```
+
+The resolved environment is printed at startup (`[db] Resolved database environment: ...`) and logged via `log.record_status`. This flag only affects the live pool — `db_pool_instance_bt` (backtesting) always uses the development database regardless.
+
+Pass `--headed` to run Playwright with a visible browser window instead of headless (useful together with `--prod` for debugging scraping issues against production data):
+
+```bash
+python scripts/_single_provider.py --prod --headed
+```
+
 ## Architecture
 
 **Two separate pipelines share a codebase:**
@@ -109,7 +126,7 @@ BT has its own parallel set of dataclasses under `modules/bt/object/` that mirro
 
 Playwright with `playwright-stealth`. Provider/ETF scraping config (URL, CSS selectors, event sequences) is stored in the database `provider` and `provider_etf` tables. Events are recorded with the [Playwright CRX Chrome plugin](https://chromewebstore.google.com/detail/jambeljnbnfbkcpnoiaedcabbgmnnlcd) and stored as JSON arrays.
 
-Set `headless=False` in `url.py` when debugging scraping issues.
+Pass `--headed` on the command line to run with a visible browser window when debugging scraping issues (see Dev/Prod DB switching above).
 
 ### DB Schema Migrations
 
@@ -118,13 +135,20 @@ Column additions follow the `x_d_shift_columns_template` pattern (5-step shift):
 ## Environment Variables
 
 ```
-ENV_TYPE=development|production
-SECRET_DATABASE_USER=
+ENV_TYPE=development|production   # fallback when no --prod/--dev flag is passed
+SECRET_DATABASE_USER=             # development (default)
 SECRET_DATABASE_PASSWORD=
 SECRET_DATABASE_HOST=
 SECRET_DATABASE_PORT=
 SECRET_DATABASE_NAME=best_ideas
-SECRET_DATABASE_NAME_BT=best_ideas_bt
+SECRET_DATABASE_NAME_BT=best_ideas_bt   # backtesting DB — always dev, unaffected by --prod
+
+SECRET_DATABASE_PROD_USER=        # production (used only with --prod)
+SECRET_DATABASE_PROD_PASSWORD=
+SECRET_DATABASE_PROD_HOST=
+SECRET_DATABASE_PROD_PORT=
+SECRET_DATABASE_PROD_NAME=
+
 SECRET_MAILGUN_ENDPOINT=
 SECRET_MAILGUN_API_KEY=
 SECRET_MARKET_DATA_API_KEY=   # FinancialModelingPrep

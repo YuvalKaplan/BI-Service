@@ -1,9 +1,8 @@
 import atexit
 import log
-import os
 from datetime import datetime, timezone
 from modules.object.exit import cleanup
-from modules.core.db import db_pool_instance
+from modules.core.db import db_pool_instance, ENVIRONMENT
 from modules.core import sender
 from modules.calc.model_fund import results_to_string
 from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, esg_update, benchmark_generator
@@ -18,9 +17,7 @@ if __name__ == '__main__':
         print("Starting cron service")
         print(f"DB connection pool started with {db_pool_instance.get_max_connections()} connections.")
         
-        ENV_TYPE = os.environ.get("ENV_TYPE")
-        environment = ENV_TYPE if ENV_TYPE is not None and ENV_TYPE == 'production' else 'development'
-        log.record_status(f"Starting cron service in Environment: {environment}")
+        log.record_status(f"Starting cron service in Environment: {ENVIRONMENT}")
 
         start_time = datetime.now(timezone.utc)
         weekday = start_time.weekday() # 0 = Monday, 4 = Friday, 6 = Sunday
