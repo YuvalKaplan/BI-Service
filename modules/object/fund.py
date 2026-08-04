@@ -14,6 +14,16 @@ class Fund:
     active: bool
 
 
+def fetch_by_id(id: int) -> Fund | None:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Fund)) as cur:
+                cur.execute("SELECT * FROM fund WHERE id = %s;", (id,))
+                return cur.fetchone()
+    except Error as e:
+        raise Exception(f"Error fetching the Fund from the DB: {e}")
+
+
 def fetch_all() -> list[Fund]:
     try:
         with db_pool_instance.get_connection() as conn:

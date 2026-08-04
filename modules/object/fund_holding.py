@@ -25,6 +25,16 @@ def fetch_funds_holdings(fund_id: int, eval_date: date) -> List[FundHolding]:
         raise Exception(f"Error fetching the Fund Holdings from the DB: {e}")
 
 
+def delete_all_for_fund(fund_id: int) -> None:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM fund_holding WHERE fund_id = %s;", (fund_id,))
+            conn.commit()
+    except Error as e:
+        raise Exception(f"Error deleting fund holdings for fund {fund_id}: {e}")
+
+
 def insert_fund_holding(items: List[FundHolding]) -> None:
     if not items:
         return

@@ -4,6 +4,7 @@ from datetime import date
 from typing import Any, List, Optional
 from dataclasses import dataclass
 from pydantic import BaseModel, Field
+from modules.const import LARGE_CAP_THRESHOLD
 from modules.object import best_idea, ticker
 
 
@@ -190,6 +191,7 @@ def _filter_and_aggregate(
     esg_only: bool,
     ranking_level: int,
     exclude_ticker_ids: set[int] | None = None,
+    held_ticker_ids: set[int] | None = None,
 ) -> pd.DataFrame:
     """
     Filter the global best-ideas DataFrame for a specific fund configuration
@@ -200,17 +202,23 @@ def _filter_and_aggregate(
     key = 'canonical_ticker_id'
     etf_set = set(provider_etf_ids)
 
-    CAP_LARGE_THRESHOLD = 10_000_000_000
-
     mask = pd.Series(True, index=df.index)
     if etf_set:
         mask &= df['provider_etf_id'].isin(etf_set)
     if style_type not in (None, 'core', 'blend'):
         mask &= df['style_type'] == style_type
     if cap_type == 'large':
-        mask &= df['market_cap'] >= CAP_LARGE_THRESHOLD
+        # A stock that has dropped below the large-cap threshold since it was bought is still
+        # let through here if it's already one of this fund's current holdings (held_ticker_ids),
+        # so it stays eligible to be ranked/kept rather than being force-sold purely for falling
+        # below the threshold — it will still be sold once its ranking genuinely drops out. This
+        # only ever widens the pool for a fund that already holds the ticker; funds that don't
+        # already hold it still can't pick it up as a fresh buy. See the matching comment in
+        # best_ideas_generator._find_best_ideas for why the full_universe benchmark_weight
+        # defaults to 0.0 for these instead of dropping the row outright.
+        mask &= (df['market_cap'] >= LARGE_CAP_THRESHOLD) | df[key].isin(held_ticker_ids or set())
     elif cap_type == 'mid_small':
-        mask &= df['market_cap'] < CAP_LARGE_THRESHOLD
+        mask &= df['market_cap'] < LARGE_CAP_THRESHOLD
     if country_type == 'US':
         mask &= df['etf_region'] == 'US'
     elif country_type == 'Non-US':
@@ -284,6 +292,7 @@ def _fetch_and_select_by_style(
     all_best_ideas_df: pd.DataFrame,
     country_type: str = 'all',
     exclude_ticker_ids: set[int] | None = None,
+    held_ticker_ids: set[int] | None = None,
 ) -> tuple[list, list]:
     """
     Returns (ideal, fetched).
@@ -302,10 +311,12 @@ def _fetch_and_select_by_style(
         fetched_growth = _df_to_ranked(_filter_and_aggregate(
             all_best_ideas_df, etf_ids, 'growth', strategy.cap.name,
             country_type, exchanges, strategy.esg_only, ranking_level, exclude_ticker_ids,
+            held_ticker_ids,
         ))
         fetched_value = _df_to_ranked(_filter_and_aggregate(
             all_best_ideas_df, etf_ids, 'value', strategy.cap.name,
             country_type, exchanges, strategy.esg_only, ranking_level, exclude_ticker_ids,
+            held_ticker_ids,
         ))
 
         if strategy.ranking_from != 1:
@@ -323,6 +334,7 @@ def _fetch_and_select_by_style(
         fetched = _df_to_ranked(_filter_and_aggregate(
             all_best_ideas_df, etf_ids, strategy.style.name, strategy.cap.name,
             country_type, exchanges, strategy.esg_only, ranking_level, exclude_ticker_ids,
+            held_ticker_ids,
         ))
 
         if strategy.ranking_from != 1:
@@ -337,6 +349,7 @@ def _fetch_and_select_by_style(
 def _fetch_and_select_by_region(
     strategy: Strategy,
     all_best_ideas_df: pd.DataFrame,
+    held_ticker_ids: set[int] | None = None,
 ) -> tuple[list, list]:
     """
     Returns (ideal, fetched).
@@ -352,9 +365,9 @@ def _fetch_and_select_by_region(
         and region_split.us is not None
         and region_split.non_us is not None
     ):
-        intl_ideal, intl_fetched = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type='Non-US')
+        intl_ideal, intl_fetched = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type='Non-US', held_ticker_ids=held_ticker_ids)
         intl_ticker_ids = {i.ticker_id for i in intl_fetched}
-        us_ideal,   us_fetched   = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type='US', exclude_ticker_ids=intl_ticker_ids)
+        us_ideal,   us_fetched   = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type='US', exclude_ticker_ids=intl_ticker_ids, held_ticker_ids=held_ticker_ids)
 
         us_n_target   = round(strategy.holdings * region_split.us / 100)
         intl_n_target = strategy.holdings - us_n_target
@@ -370,7 +383,7 @@ def _fetch_and_select_by_region(
         elif region.name == 'International':
             country_type = 'Non-US'
 
-    return _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type=country_type)
+    return _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type=country_type, held_ticker_ids=held_ticker_ids)
 
 
 def generate(
@@ -388,7 +401,11 @@ def generate(
     strategy = getStrategyFromJson(fund.strategy)
     ranking_gap_drop = 5 if strategy.allocation == "market_cap" else 2
 
-    ideal_holdings, fetched = _fetch_and_select_by_region(strategy, all_best_ideas_df)
+    # Pass this fund's current holdings through the 'large' cap filter (see the comment in
+    # _filter_and_aggregate) so one dropping below the large-cap threshold isn't force-sold
+    # for that reason alone — it's still evaluated on ranking like any other candidate.
+    held_ticker_ids = {ph.ticker_id for ph in previous_holdings}
+    ideal_holdings, fetched = _fetch_and_select_by_region(strategy, all_best_ideas_df, held_ticker_ids)
 
     holdings_changed: List[FundHoldingChange] = []
     todays_holdings: List[FundHolding] = []

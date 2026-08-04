@@ -220,8 +220,6 @@ def scrape_provider(cp: Provider) -> List[EtfDownload]:
         if not open_page(page=page, url=cp.url_start, wait_pre_events=cp.wait_pre_events, wait_post_events=cp.wait_post_events, events=cp.events):
             raise Exception(f"Failed to open provider start URL: {cp.url_start}")
 
-        print(f"Current Scraper IP Location: {page.text_content('body')}")
-
         for etf in etf_list:
             last_error = None
             for attempt in range(SCRAPE_MAX_RETRIES):

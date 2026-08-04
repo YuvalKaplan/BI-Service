@@ -6,6 +6,23 @@ from psycopg.rows import class_row
 from dataclasses import dataclass
 from modules.core.db import db_pool_instance
 
+US_EXCHANGES = {'NYSE', 'NASDAQ'}
+
+
+def is_preferred_exchange(candidate_exchange: str | None, current_exchange: str | None) -> bool:
+    """
+    True if candidate_exchange should replace current_exchange as the canonical listing
+    for a symbol that has rows on multiple exchanges: NYSE/NASDAQ always wins over a
+    non-US exchange; if neither (or both) are US-listed, the candidate — assumed to be
+    the more recently seen one — wins.
+    """
+    if current_exchange is None:
+        return True
+    if candidate_exchange in US_EXCHANGES:
+        return True
+    return current_exchange not in US_EXCHANGES
+
+
 @dataclass
 class Ticker:
     symbol: str
@@ -42,15 +59,31 @@ def fetch_by_symbol(symbol: str) -> Ticker | None:
     except Error as e:
         raise Exception(f"Error fetching the Ticker from the DB: {e}")
 
-def fetch_all_for_symbol_cache() -> dict[str, int | None]:
-    """Return {symbol: id} for valid tickers and {symbol: None} for invalid ones."""
+def fetch_all_for_symbol_cache() -> dict[str, tuple[int, str] | None]:
+    """
+    Return {symbol: (ticker_id, exchange)} for valid tickers, {symbol: None} for symbols
+    whose only rows are invalid. When a symbol has multiple rows (cross-listed on several
+    exchanges), the NYSE/NASDAQ-listed row is kept as canonical; if none of the duplicates
+    is US-listed, the most recently created row wins.
+    """
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute('SELECT symbol, id, invalid FROM ticker;')
-                return {row[0]: None if row[2] else row[1] for row in cur.fetchall()}
+                cur.execute('SELECT symbol, id, invalid, exchange, created_at FROM ticker ORDER BY created_at;')
+                rows = cur.fetchall()
     except Error as e:
         raise Exception(f"Error fetching all tickers for cache: {e}")
+
+    cache: dict[str, tuple[int, str] | None] = {}
+    for symbol, ticker_id, invalid, exchange, _created_at in rows:
+        if invalid:
+            cache.setdefault(symbol, None)
+            continue
+        current = cache.get(symbol)
+        current_exchange = current[1] if current else None
+        if is_preferred_exchange(exchange, current_exchange):
+            cache[symbol] = (ticker_id, exchange or '')
+    return cache
 
 def fetch_all_for_isin_cache() -> dict[str, int | None]:
     """Return {isin: id} for valid tickers and {isin: None} for invalid ones."""

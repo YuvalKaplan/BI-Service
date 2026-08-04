@@ -51,24 +51,41 @@ def fetch_by_region_and_style(region: str, style_type: str) -> Benchmark | None:
         raise Exception(f"Error fetching benchmark by region/style: {e}")
 
 
-def fetch_latest_holdings(benchmark_id: int, look_back_days: int) -> List[BenchmarkHolding]:
+def fetch_latest_holdings(benchmark_id: int, look_back_days: int, up_to_date: date | None = None) -> List[BenchmarkHolding]:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(BenchmarkHolding)) as cur:
-                cur.execute(
-                    """
-                    SELECT *
-                    FROM public.benchmark_holding
-                    WHERE benchmark_id = %s
-                      AND holding_date = (
-                          SELECT MAX(holding_date)
-                          FROM public.benchmark_holding
-                          WHERE benchmark_id = %s
-                            AND holding_date > CURRENT_DATE - (%s * INTERVAL '1 day')
-                      )
-                    """,
-                    (benchmark_id, benchmark_id, look_back_days)
-                )
+                if up_to_date is None:
+                    cur.execute(
+                        """
+                        SELECT *
+                        FROM public.benchmark_holding
+                        WHERE benchmark_id = %s
+                          AND holding_date = (
+                              SELECT MAX(holding_date)
+                              FROM public.benchmark_holding
+                              WHERE benchmark_id = %s
+                                AND holding_date > CURRENT_DATE - (%s * INTERVAL '1 day')
+                          )
+                        """,
+                        (benchmark_id, benchmark_id, look_back_days)
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT *
+                        FROM public.benchmark_holding
+                        WHERE benchmark_id = %s
+                          AND holding_date = (
+                              SELECT MAX(holding_date)
+                              FROM public.benchmark_holding
+                              WHERE benchmark_id = %s
+                                AND holding_date <= %s
+                                AND holding_date > %s - (%s * INTERVAL '1 day')
+                          )
+                        """,
+                        (benchmark_id, benchmark_id, up_to_date, up_to_date, look_back_days)
+                    )
                 return cur.fetchall()
     except Error as e:
         raise Exception(f"Error fetching latest holdings for benchmark {benchmark_id}: {e}")

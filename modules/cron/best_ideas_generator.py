@@ -1,5 +1,7 @@
 import log
+from collections import Counter
 import pandas as pd
+from datetime import date
 from modules.object import batch_run, batch_run_log
 from modules.object import provider, provider_etf
 from modules.object.provider_etf_holding import fetch_latest_holdings_for_etf
@@ -11,6 +13,21 @@ MIN_HOLDINGS_WITH_PRICES_PCT = 0.95
 LOOK_BACK_WINDOW = 7
 MAX_BEST_IDEAS_PER_FUND = 10
 HOLDING_DELTA_LIMIT_DROP_OFF = 0.20
+
+
+def _dedupe_by_ticker_id(holdings: list) -> list:
+    """Keeps only the first occurrence of each ticker_id — provider holdings data can
+    occasionally list the same ticker more than once, which would otherwise violate
+    best_idea's  primary key."""
+    seen: set[int] = set()
+    deduped = []
+    for h in holdings:
+        if h.ticker_id is not None:
+            if h.ticker_id in seen:
+                continue
+            seen.add(h.ticker_id)
+        deduped.append(h)
+    return deduped
 
 
 def _find_best_ideas(
@@ -40,6 +57,16 @@ def _find_best_ideas(
     df["etf_weight"] = df["market_value"] / total_etf_value
 
     if benchmark_weights:
+        # full_universe: the benchmark only covers stocks >= the large-cap threshold, so a
+        # holding that has since dropped below it has no real weight to look up. Rather than
+        # building a fund-specific benchmark for this rare/borderline case, we assume such a
+        # stock's true weight in the large-cap universe would be negligible anyway and default
+        # it to 0.0. This inflates its delta to its full ETF weight, which — on its own — would
+        # make it look like a top idea to any fund that doesn't already hold it. That false
+        # positive is prevented downstream in model_fund._filter_and_aggregate, which only lets
+        # a below-threshold ticker through a 'large' cap fund's candidate pool when it's already
+        # one of that specific fund's existing holdings (held_ticker_ids), so it can still be kept
+        # until it genuinely falls out of ranking, without ever surfacing as a fresh buy.
         # full_universe: each stock's weight in the external large-cap universe
         df["benchmark_weight"] = df["ticker_id"].map(benchmark_weights).fillna(0.0)
     else:
@@ -71,14 +98,20 @@ def record_problem(batch_run_id: int, provider: provider.Provider, etf: provider
     batch_run_log.insert(batch_run_log.BatchRunLog(batch_run_id=batch_run_id, note=record))
     problem_etfs.append(record)
 
-def run() -> tuple[int, int, list[str]]:
+def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
+    """
+    Generates best ideas for every active provider ETF. When as_of_date is None (live),
+    holdings and the full_universe benchmark are resolved as of "now". When given (sim),
+    they're resolved as of that historical date instead — both fetches already support
+    this natively via their up_to_date param.
+    """
+    process_name = 'best_ideas_generator' if as_of_date is None else 'sim_best_ideas_gen'
+    log_prefix = '' if as_of_date is None else f'[sim {as_of_date}] '
     try:
-        batch_run_id = None
-        if batch_run_id is None:
-            batch_run_id = batch_run.insert(batch_run.BatchRun(process='best_ideas_generator', activation='auto'))
+        batch_run_id = batch_run.insert(batch_run.BatchRun(process=process_name, activation='auto'))
 
         providers = provider.fetch_active_providers()
-        log.record_status(f"Running Best Ideas Generator batch job ID {batch_run_id} - will proccess {len(providers)} providers.")
+        log.record_status(f"{log_prefix}Running Best Ideas Generator batch job ID {batch_run_id} - will proccess {len(providers)} providers.")
 
         total_etfs = 0
         generated_etfs = 0
@@ -96,10 +129,19 @@ def run() -> tuple[int, int, list[str]]:
             for pe in pe_list:
                 try:
                     # 1. Fetch holdings for the latest holding date within the look-back window
-                    raw_holdings = fetch_latest_holdings_for_etf(pe.id, LOOK_BACK_WINDOW)
+                    raw_holdings = fetch_latest_holdings_for_etf(pe.id, LOOK_BACK_WINDOW, up_to_date=as_of_date)
                     if not raw_holdings:
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"No holdings have been downloaded for the past {LOOK_BACK_WINDOW} days", message=None, problem_etfs=problem_etfs)
                         continue
+
+                    # 1b. Provider holdings can occasionally list the same ticker more 
+                    # than once. This happens in international ETFs where the holdings may be of more that one exchange.
+                    # Keep only the first occurrence so it doesn't later violate best_idea's primary key.
+                    ticker_counts = Counter(h.ticker_id for h in raw_holdings if h.ticker_id is not None)
+                    duplicate_ids = [tid for tid, count in ticker_counts.items() if count > 1]
+                    if duplicate_ids:
+                        log.record_status(f"{log_prefix}ETF id={pe.id} name={pe.name}: found {len(duplicate_ids)} duplicate ticker_id(s) in holdings, keeping first occurrence: {duplicate_ids}")
+                        raw_holdings = _dedupe_by_ticker_id(raw_holdings)
 
                     holding_date = raw_holdings[0].holding_date
 
@@ -127,17 +169,17 @@ def run() -> tuple[int, int, list[str]]:
 
                     # 5a. Always generate self-benchmark best ideas
                     self_df = _find_best_ideas(final_holdings, market_cap_values, MAX_BEST_IDEAS_PER_FUND)
-                    best_idea.insert_bulk(best_idea.df_to_rows(self_df, provider_etf_id=pe.id, value_date=holding_date, benchmark_mode='self'))
+                    best_idea.insert_bulk(pe.id, holding_date, 'self', best_idea.df_to_rows(self_df, provider_etf_id=pe.id, value_date=holding_date, benchmark_mode='self'))
 
                     # 5b. If this ETF has a benchmark configured, also generate full_universe best ideas
                     if pe.benchmark_id:
                         if pe.benchmark_id not in _bm_cache:
-                            bm_holdings = benchmark.fetch_latest_holdings(pe.benchmark_id, LOOK_BACK_WINDOW)
+                            bm_holdings = benchmark.fetch_latest_holdings(pe.benchmark_id, LOOK_BACK_WINDOW, up_to_date=as_of_date)
                             _bm_cache[pe.benchmark_id] = {h.ticker_id: h.weight for h in bm_holdings if h.ticker_id}
                         bm_weights = _bm_cache.get(pe.benchmark_id)
                         if bm_weights:
                             universe_df = _find_best_ideas(final_holdings, market_cap_values, MAX_BEST_IDEAS_PER_FUND, benchmark_weights=bm_weights)
-                            best_idea.insert_bulk(best_idea.df_to_rows(universe_df, provider_etf_id=pe.id, value_date=holding_date, benchmark_mode='full_universe'))
+                            best_idea.insert_bulk(pe.id, holding_date, 'full_universe', best_idea.df_to_rows(universe_df, provider_etf_id=pe.id, value_date=holding_date, benchmark_mode='full_universe'))
 
                     generated_etfs += 1
 
@@ -147,9 +189,9 @@ def run() -> tuple[int, int, list[str]]:
             log.record_status(f"Completed processing provider {p.name}")
 
         batch_run.update_completed_at(batch_run_id)
-        log.record_status(f"Finished Best Ideas Generator batch run on {total_etfs} etfs.\n")
+        log.record_status(f"{log_prefix}Finished Best Ideas Generator batch run on {total_etfs} etfs.\n")
         return total_etfs, generated_etfs, problem_etfs
 
     except Exception as e:
-        log.record_error(f"Error in best ideas generator batch run: {e}")
+        log.record_error(f"{log_prefix}Error in best ideas generator batch run: {e}")
         raise e

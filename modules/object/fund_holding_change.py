@@ -8,6 +8,16 @@ from modules.calc.model_fund import FundHoldingChange  # noqa: F401
 def normalize_ids(ids: list[int] | None) -> list[int] | None:
     return ids if ids else None
 
+def delete_all_for_fund(fund_id: int) -> None:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM fund_holding_change WHERE fund_id = %s;", (fund_id,))
+            conn.commit()
+    except Error as e:
+        raise Exception(f"Error deleting fund holding changes for fund {fund_id}: {e}")
+
+
 def insert_fund_changes(items: List[FundHoldingChange]) -> None:
     if not items:
         return

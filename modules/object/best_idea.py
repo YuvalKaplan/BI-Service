@@ -32,32 +32,27 @@ def df_to_rows(
         ))
     return rows
 
-def insert_bulk(rows: list[tuple]) -> None:
-    if not rows:
-        return
-
+def insert_bulk(provider_etf_id: int, value_date: date, benchmark_mode: str, rows: list[tuple]) -> None:
+    """
+    Replaces all best_idea rows for (provider_etf_id, value_date, benchmark_mode) with `rows`.
+    Deletes first (even if `rows` is empty) so a rerun never leaves stale tickers behind
+    that no longer qualify under the current ranking/eligibility logic.
+    """
     query = """
         INSERT INTO best_idea
             (provider_etf_id, ticker_id, value_date, etf_weight, benchmark_weight, delta, ranking, benchmark_mode)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (provider_etf_id, ticker_id, value_date, benchmark_mode)
-        DO UPDATE
-        SET
-            etf_weight = EXCLUDED.etf_weight,
-            benchmark_weight = EXCLUDED.benchmark_weight,
-            delta = EXCLUDED.delta,
-            ranking = EXCLUDED.ranking
-        WHERE
-            best_idea.etf_weight IS DISTINCT FROM EXCLUDED.etf_weight
-            OR best_idea.benchmark_weight IS DISTINCT FROM EXCLUDED.benchmark_weight
-            OR best_idea.delta IS DISTINCT FROM EXCLUDED.delta
-            OR best_idea.ranking IS DISTINCT FROM EXCLUDED.ranking;
     """
 
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.executemany(query, rows)
+                cur.execute(
+                    'DELETE FROM best_idea WHERE provider_etf_id = %s AND value_date = %s AND benchmark_mode = %s',
+                    (provider_etf_id, value_date, benchmark_mode),
+                )
+                if rows:
+                    cur.executemany(query, rows)
     except Error as e:
         raise Exception(f"Error inserting Best Ideas in bulk: {e}")
 
