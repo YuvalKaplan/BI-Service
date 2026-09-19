@@ -35,16 +35,31 @@ def activate_fund(
     as_of_date: date,
     all_best_ideas_df: pd.DataFrame,
     mc_map: dict,
-) -> model_fund.FundChangesResult:
-    """Updates a single fund's holdings for as_of_date and persists the result."""
+) -> model_fund.FundChangesResult | None:
+    """
+    Updates a single fund's holdings for as_of_date and persists the result.
+    Returns None if the fund's strategy.recalc_frequency_days hasn't elapsed
+    since its last recalculation (the fund's holdings are left untouched).
+    """
     f = fund.fetch_by_id(fund_id)
     if f is None:
         raise Exception(f"Fund not found: fund_id={fund_id}")
 
     fund_protocol = model_fund.to_fund_protocol(f)
     previous_eval_date = as_of_date - timedelta(days=1)
-
     strategy = model_fund.getStrategyFromJson(fund_protocol.strategy)
+
+    previous_holdings = fund_holding.fetch_funds_holdings(fund_id, previous_eval_date)
+
+    if previous_holdings:
+        days_since_recalc = (as_of_date - previous_holdings[0].holding_date).days
+        if days_since_recalc < strategy.recalc_frequency_days:
+            log.record_status(
+                f"[funds_update] Skipping '{f.name}' — {days_since_recalc}d since last recalculation, "
+                f"frequency is {strategy.recalc_frequency_days}d."
+            )
+            return None
+
     fund_ideas_df = all_best_ideas_df[
         all_best_ideas_df['benchmark_mode'] == strategy.benchmark
     ]
@@ -52,7 +67,7 @@ def activate_fund(
     results = model_fund.generate(
         today=as_of_date,
         fund=fund_protocol,
-        previous_holdings=fund_holding.fetch_funds_holdings(fund_id, previous_eval_date),
+        previous_holdings=previous_holdings,
         all_best_ideas_df=fund_ideas_df,
         mc_map=mc_map,
     )
@@ -74,7 +89,10 @@ def run() -> List[model_fund.FundChangesResult]:
         today = date.today()
         all_best_ideas_df, mc_map = build_shared_context(today)
 
-        all_results = [activate_fund(f.id, today, all_best_ideas_df, mc_map) for f in funds]
+        all_results = [
+            r for r in (activate_fund(f.id, today, all_best_ideas_df, mc_map) for f in funds)
+            if r is not None
+        ]
 
         batch_run.update_completed_at(batch_run_id)
         log.record_status("Finished Fund Update batch run.\n")

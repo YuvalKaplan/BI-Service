@@ -42,6 +42,7 @@ class Strategy(BaseModel):
     ranking_from: int = 1
     ranking_to: int = 1
     benchmark: str = 'full_universe'  # 'full_universe' | 'self'
+    recalc_frequency_days: int = 7
 
 def getStrategyFromJson(data: dict) -> Strategy:
     return Strategy.model_validate(data)
@@ -101,7 +102,7 @@ MC_WEIGHT_FLOOR = 0.01  # minimum weight per holding
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def results_to_string(results: FundChangesResult) -> str:
+def results_to_string(results: FundChangesResult, include_header: bool = True, include_holdings: bool = True) -> str:
     aggregator = ""
     all_ids: list[int] = list({
         *{h.ticker_id for h in results.holdings},
@@ -110,19 +111,21 @@ def results_to_string(results: FundChangesResult) -> str:
     tickers = ticker.fetch_by_ids(all_ids)
     ticker_by_id = {t.id: t for t in tickers}
 
-    aggregator += f"{results.fund.name}\n" + "=" * 20 + "\n"
+    if include_header:
+        aggregator += f"{results.fund.name}\n" + "=" * 20 + "\n"
 
-    aggregator += f"Holdings ({len(results.holdings)}):\n"
-    aggregator += "{:<12}{:<35}{}\n".format("Symbol", "Name", "Weight")
-    for h in sorted(results.holdings, key=lambda h: h.weight or 0, reverse=True):
-        t = ticker_by_id.get(h.ticker_id)
-        weight_str = f"{h.weight * 100:.2f}%" if h.weight is not None else "---"
-        aggregator += "{:<12}{:<35}{}\n".format(
-            t.symbol if t else str(h.ticker_id),
-            t.name if t else "---",
-            weight_str,
-        )
-    aggregator += "\n"
+    if include_holdings:
+        aggregator += f"Holdings ({len(results.holdings)}):\n"
+        aggregator += "{:<12}{:<35}{}\n".format("Symbol", "Name", "Weight")
+        for h in sorted(results.holdings, key=lambda h: h.weight or 0, reverse=True):
+            t = ticker_by_id.get(h.ticker_id)
+            weight_str = f"{h.weight * 100:.2f}%" if h.weight is not None else "---"
+            aggregator += "{:<12}{:<35}{}\n".format(
+                t.symbol if t else str(h.ticker_id),
+                t.name if t else "---",
+                weight_str,
+            )
+        aggregator += "\n"
 
     if not results.changes:
         aggregator += "No changes\n\n"
@@ -220,9 +223,9 @@ def _filter_and_aggregate(
     elif cap_type == 'mid_small':
         mask &= df['market_cap'] < LARGE_CAP_THRESHOLD
     if country_type == 'US':
-        mask &= df['etf_region'] == 'US'
+        mask &= (df['etf_region'] == 'US') & (df['country'] == 'US')
     elif country_type == 'Non-US':
-        mask &= df['etf_region'] == 'International'
+        mask &= (df['etf_region'] == 'International') & df['country'].notna() & (df['country'] != 'US')
     if exchanges:
         mask &= df['exchange'].isin(exchanges)
     if esg_only:

@@ -42,6 +42,56 @@ def fetch_latest_market_caps_within_window(ticker_ids: List[int], as_of_date: da
         raise Exception(f"Error fetching latest market caps within window: {e}")
 
 
+def fetch_values_for_ticker(ticker_id: int, start: date, end: date) -> List[TickerValue]:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(TickerValue)) as cur:
+                cur.execute("""
+                    SELECT ticker_id, value_date, stock_price, market_cap
+                    FROM ticker_value
+                    WHERE ticker_id = %s AND value_date BETWEEN %s AND %s
+                    ORDER BY value_date;
+                """, (ticker_id, start, end))
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching ticker_value rows for ticker_id {ticker_id}: {e}")
+
+
+def fetch_latest_value_date(ticker_id: int) -> date | None:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT MAX(value_date) FROM ticker_value WHERE ticker_id = %s;", (ticker_id,))
+                row = cur.fetchone()
+                return row[0] if row else None
+    except Error as e:
+        raise Exception(f"Error fetching latest value_date for ticker_id {ticker_id}: {e}")
+
+
+def replace_range(ticker_id: int, start: date, end: date, items: List[TickerValue], dry_run: bool = False) -> None:
+    """Deletes existing rows for `ticker_id` in [start, end] and bulk-inserts `items` in their
+    place, as a single transaction so the range is never left partially cleared. With
+    dry_run=True, runs the same statements but rolls back instead of committing."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM ticker_value WHERE ticker_id = %s AND value_date BETWEEN %s AND %s;",
+                    (ticker_id, start, end),
+                )
+                if items:
+                    cur.executemany("""
+                        INSERT INTO ticker_value (ticker_id, value_date, stock_price, market_cap)
+                        VALUES (%s, %s, %s, %s);
+                    """, [(i.ticker_id, i.value_date, i.stock_price, i.market_cap) for i in items])
+            if dry_run:
+                conn.rollback()
+            else:
+                conn.commit()
+    except Error as e:
+        raise Exception(f"Error replacing ticker_value range for ticker_id {ticker_id}: {e}")
+
+
 def upsert(item: TickerValue) -> None:
     try:
         with db_pool_instance.get_connection() as conn:

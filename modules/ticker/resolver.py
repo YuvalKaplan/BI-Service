@@ -6,8 +6,8 @@ from zoneinfo import ZoneInfo
 
 from modules.core import api_stocks
 from modules.ticker import util as tu
+from modules.ticker import pricing
 from modules.object.ticker import Ticker, upsert_by_symbol, update_invalid, update_esg_data
-from modules.object.ticker_value import TickerValue, upsert as _upsert_tv
 from modules.object import categorize_ticker as _cat_ticker
 from modules.calc import esg as _esg
 
@@ -228,19 +228,8 @@ class TickerResolver:
         })
 
     def _store_ticker_value(self, ticker_id: int, profile: dict) -> None:
-        try:
-            price = profile.get('price')
-            market_cap = profile.get('marketCap')
-            now_et = datetime.now(ZoneInfo("America/New_York"))
-            value_date = (now_et - timedelta(days=1) if now_et.hour < _VALUE_DATE_CUT_OFF_HOUR else now_et).date()
-
-            if price and market_cap:
-                _upsert_tv(TickerValue(
-                    ticker_id=ticker_id,
-                    value_date=value_date,
-                    stock_price=float(price),
-                    market_cap=float(market_cap),
-                ))
-        except Exception as e:
-            log.record_notice(f"Failed to store ticker_value for ticker_id={ticker_id}: {e}")
+        full_symbol = profile.get('symbol')
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        value_date = (now_et - timedelta(days=1) if now_et.hour < _VALUE_DATE_CUT_OFF_HOUR else now_et).date()
+        pricing.store_validated_ticker_value(ticker_id, full_symbol, value_date)
 

@@ -3,9 +3,9 @@ import re
 from datetime import date
 from modules.const import LARGE_CAP_THRESHOLD
 from modules.core import api_stocks
-from modules.object import batch_run, ticker, ticker_value, benchmark
+from modules.object import batch_run, ticker, benchmark
 from modules.object.ticker import Ticker
-from modules.object.ticker_value import TickerValue
+from modules.ticker import pricing
 
 US_EXCHANGES = ticker.US_EXCHANGES  # region classification is exchange-based, not ticker.country
 
@@ -99,21 +99,15 @@ def _resolve_tickers(screener_results: list[dict]) -> dict[str, tuple[int, str, 
                 if ticker.is_preferred_exchange(exchange, cached_exchange):
                     symbol_cache[symbol] = (ticker_id, exchange)
 
-        # Upsert today's market cap
-        try:
-            ticker_value.upsert(TickerValue(
-                ticker_id=ticker_id,
-                value_date=today,
-                stock_price=company.get('price'),
-                market_cap=float(market_cap),
-            ))
-        except Exception as e:
-            log.record_notice(f"Failed to upsert market cap for {symbol}: {e}")
+        # Validate today's market cap against FMP history before trusting it.
+        validated = pricing.store_validated_ticker_value(ticker_id, raw_symbol, today)
+        if validated is None:
+            continue  # withheld (grace period) or flagged invalid - exclude from this week's benchmark
 
         existing = resolved.get(symbol)
         existing_exchange = existing[1] if existing else None
         if ticker.is_preferred_exchange(exchange, existing_exchange):
-            resolved[symbol] = (ticker_id, exchange, float(market_cap))
+            resolved[symbol] = (ticker_id, exchange, validated.market_cap)
 
     return resolved
 
