@@ -27,10 +27,10 @@ modules/core/db.py's single-environment pool singleton, which can only represent
 per process). The production connection is set to a read-only session as a safety net.
 
 Usage:
-    python scripts/_sync_holdings_from_prod.py                        # asks to confirm before committing
-    python scripts/_sync_holdings_from_prod.py --yes                  # commit without prompting
-    python scripts/_sync_holdings_from_prod.py --dry-run               # run everything, always roll back
-    python scripts/_sync_holdings_from_prod.py --provider-etf-id 123   # limit to one ETF, for testing
+    python scripts/db_sync_dev_from_prod.py                        # asks to confirm before committing
+    python scripts/db_sync_dev_from_prod.py --yes                  # commit without prompting
+    python scripts/db_sync_dev_from_prod.py --dry-run               # run everything, always roll back
+    python scripts/db_sync_dev_from_prod.py --provider-etf-id 123   # limit to one ETF, for testing
 """
 import argparse
 import os

@@ -9,10 +9,10 @@ A ticker is only touched if FMP's historical endpoints return usable data for it
 fails, that ticker's existing data is left untouched (never cleared without a replacement).
 
 Usage:
-    python scripts/_resync_ticker_value.py                    # all valid tickers, asks to confirm
-    python scripts/_resync_ticker_value.py --yes               # skip the confirmation prompt
-    python scripts/_resync_ticker_value.py --dry-run           # run everything, always roll back
-    python scripts/_resync_ticker_value.py --symbol AVGO       # limit to one ticker, for testing
+    python scripts/resync_ticker_value.py                    # all valid tickers, asks to confirm
+    python scripts/resync_ticker_value.py --yes               # skip the confirmation prompt
+    python scripts/resync_ticker_value.py --dry-run           # run everything, always roll back
+    python scripts/resync_ticker_value.py --symbol AVGO       # limit to one ticker, for testing
 """
 import argparse
 import atexit
@@ -28,7 +28,7 @@ from modules.ticker import pricing
 
 atexit.register(cleanup)
 
-INCEPTION_DATE = date(2026, 1, 1)  # matches scripts/_fill_ticker_value_gaps.py::FILL_START_DATE
+INCEPTION_DATE = date(2026, 1, 1)  # matches scripts/fill_ticker_value_gaps.py::FILL_START_DATE
 
 
 def resync_ticker(t: Ticker, resolver: TickerResolver, end_date: date, dry_run: bool):
