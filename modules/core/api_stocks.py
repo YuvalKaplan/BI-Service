@@ -128,7 +128,7 @@ def fetch_available_exchanges() -> list[dict]:
         log.record_notice(f"Failed to fetch available exchanges: {e}")
         return []
 
-def get_stock_historic_prices(symbol: str, start: date, end: date) -> list[dict[str,str]] | str:
+def get_symbol_historic_prices(symbol: str, start: date, end: date) -> list[dict[str,str]] | str:
     try:
         throttle_api_calls()
         url = (f"{FMP_API_URL}/historical-price-eod/light?symbol={symbol}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
@@ -199,6 +199,18 @@ def get_stock_historic_market_cap(symbol: str, start: date, end: date) -> list[d
         message = f"Failed to get historic market cap price for {symbol}. Response from service provider: {e}"
         log.record_error(message)
         return message
+
+def get_historic_fx_rates(from_currency: str, to_currency: str, start: date, end: date) -> list[dict[str, str]] | str:
+    """
+    Historical daily FX rate for from_currency->to_currency over [start, end]. FMP serves
+    forex pairs (e.g. symbol 'KRWUSD') through the same historical-price-eod/light endpoint
+    used for stocks, so this is a thin, clearly-named wrapper rather than a separate
+    implementation — callers should use this (not get_fx_rate, which is spot-only) whenever
+    converting a value that isn't for literally today, since rates move meaningfully over time
+    (e.g. KRWUSD moved ~6% between 2026-01-01 and 2026-09-23).
+    """
+    return get_symbol_historic_prices(f"{from_currency}{to_currency}", start, end)
+
 
 def get_fx_rate(from_currency: str, to_currency: str = 'USD') -> float | str:
     """
@@ -360,9 +372,14 @@ def fetch_esg_data(symbol: str) -> tuple[Dict, Dict]:
 SCREENER_PAGE_LIMIT = 1000
 SCREENER_MAX_PAGES = 20
 
-def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = SCREENER_PAGE_LIMIT) -> list[dict]:
+def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = SCREENER_PAGE_LIMIT, exchange: str | None = None) -> list[dict]:
     """
-    Paged call to FMP /stable/company-screener filtered by minimum market cap.
+    Paged call to FMP /stable/company-screener filtered by minimum market cap, optionally
+    also filtered to a single exchange. FMP's unfiltered screener results are heavily
+    US/Canada-biased and don't meaningfully surface most other exchanges at all (confirmed
+    empirically: an unfiltered call returns a handful of XETRA-listed companies, while an
+    explicit exchange=XETRA call returns the full ~300-company German large-cap universe) —
+    callers that want broad international coverage need to loop this over a list of exchanges.
     Returns the list of company dicts, or [] on error or when the last page is reached.
     Expected fields per item: symbol, marketCap, country, exchangeShortName, companyName.
     """
@@ -372,14 +389,17 @@ def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = SC
         url = (
             f"{FMP_API_URL}/company-screener"
             f"?marketCapMoreThan={market_cap_more_than}&limit={limit}&page={page}"
-            f"&isEtf=false&isFund=false&isActivelyTrading=true&apikey={apikey}"
+            f"&isEtf=false&isFund=false&isActivelyTrading=true"
         )
+        if exchange:
+            url += f"&exchange={exchange}"
+        url += f"&apikey={apikey}"
         result = get_jsonparsed_data(url)
         if not isinstance(result, list):
-            log.record_notice(f"Unexpected screener response on page {page}: {type(result)}")
+            log.record_notice(f"Unexpected screener response on page {page} (exchange={exchange}): {type(result)}")
             return []
         return result
     except Exception as e:
-        log.record_notice(f"Failed to fetch company screener page {page}: {e}")
+        log.record_notice(f"Failed to fetch company screener page {page} (exchange={exchange}): {e}")
         return []
 

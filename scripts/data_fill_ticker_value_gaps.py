@@ -5,7 +5,9 @@ from modules.object.provider_etf_holding import fetch_valid_ticker_ids_in_holdin
 from modules.object.ticker import fetch_by_ids
 from modules.object.ticker_value import TickerValue, upsert_bulk
 from modules.ticker.resolver import TickerResolver
-from modules.core.api_stocks import get_stock_historic_prices, get_stock_historic_market_cap
+from modules.ticker.pricing import fetch_historic_usd_rates, closest_value_for_date
+from modules.ticker.util import currency_for_exchange
+from modules.core.api_stocks import get_symbol_historic_prices, get_stock_historic_market_cap
 from modules.core.db import db_pool_instance
 from psycopg.errors import Error
 
@@ -57,8 +59,8 @@ def find_gaps(existing: set[date], start: date, end: date) -> list[tuple[date, d
     return gaps
 
 
-def fill_gap(ticker_id: int, fmp_symbol: str, gap_start: date, gap_end: date) -> int:
-    prices_raw = get_stock_historic_prices(fmp_symbol, gap_start, gap_end)
+def fill_gap(ticker_id: int, fmp_symbol: str, gap_start: date, gap_end: date, exchange: str | None = None) -> int:
+    prices_raw = get_symbol_historic_prices(fmp_symbol, gap_start, gap_end)
     if isinstance(prices_raw, str):
         print(f"  [{fmp_symbol}] prices unavailable for {gap_start}–{gap_end}: {prices_raw}")
         return 0
@@ -68,8 +70,26 @@ def fill_gap(ticker_id: int, fmp_symbol: str, gap_start: date, gap_end: date) ->
         print(f"  [{fmp_symbol}] market cap unavailable for {gap_start}–{gap_end}: {mc_raw}")
         return 0
 
+    # FMP reports market cap in the security's native currency — convert to USD using that
+    # date's own historical FX rate (not a single blanket rate, since a gap can span months),
+    # same as the live/pricing.py path, so ticker_value.market_cap is always uniformly USD.
+    currency = currency_for_exchange(exchange)
+    fx_rates = fetch_historic_usd_rates(currency, gap_start, gap_end)
+    if isinstance(fx_rates, str):
+        print(f"  [{fmp_symbol}] FX rates unavailable for {currency} — skipping.")
+        return 0
+
     price_by_date = {date.fromisoformat(row["date"]): float(row["price"]) for row in prices_raw}
-    mc_by_date = {date.fromisoformat(row["date"]): float(row["marketCap"]) for row in mc_raw}
+    mc_by_date: dict[date, float] = {}
+    for row in mc_raw:
+        d = date.fromisoformat(row["date"])
+        raw_mc = float(row["marketCap"])
+        if not fx_rates:  # currency is None/USD - no conversion needed
+            mc_by_date[d] = raw_mc
+            continue
+        rate = closest_value_for_date(fx_rates, d)
+        if rate is not None:
+            mc_by_date[d] = raw_mc * rate
 
     common_dates = price_by_date.keys() & mc_by_date.keys()
     items = [
@@ -109,7 +129,7 @@ if __name__ == "__main__":
         ticker_filled = 0
         for gap_start, gap_end in gaps:
             print(f"  {gap_start} → {gap_end} ({(gap_end - gap_start).days + 1} days)")
-            filled = fill_gap(ticker.id, full_symbol, gap_start, gap_end)
+            filled = fill_gap(ticker.id, full_symbol, gap_start, gap_end, exchange=ticker.exchange)
             ticker_filled += filled
             print(f"  Filled {filled} rows.")
 

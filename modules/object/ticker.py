@@ -28,6 +28,7 @@ class Ticker:
     symbol: str
     id: Optional[int] = None
     created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     source: str | None = None
     style_type: str | None = None
     cap_type: str | None = None
@@ -46,6 +47,8 @@ class Ticker:
     esg_qualified: bool | None = None
     is_actively_trading: bool | None = None
     invalid: str | None = None
+    master_ticker_id: int | None = None
+    accumulated_market_cap: float | None = None
 
 
 # ── DB read ──────────────────────────────────────────────────────────────────
@@ -114,6 +117,33 @@ def fetch_all_valid() -> list['Ticker']:
         raise Exception(f"Error fetching all valid tickers: {e}")
 
 
+def fetch_stale_tickers(include_invalid: bool = False) -> list['Ticker']:
+    """
+    Every ticker whose profile hasn't been refreshed via the FMP profile API within the last
+    week (or ever) — the single shared candidate pool for any ticker-profile-refresh flow
+    (scripts/data_fill_ticker_profile.py, scripts/sim_prep_data.py, the live Tue-Sat cron
+    step), so they all go over the same list instead of each having their own variant query.
+    Excludes tickers already marked invalid unless include_invalid=True (retry them too).
+    """
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                if include_invalid:
+                    cur.execute("""
+                        SELECT * FROM ticker
+                        WHERE updated_at IS NULL OR updated_at < NOW() - INTERVAL '7 days';
+                    """)
+                else:
+                    cur.execute("""
+                        SELECT * FROM ticker
+                        WHERE invalid IS NULL
+                          AND (updated_at IS NULL OR updated_at < NOW() - INTERVAL '7 days');
+                    """)
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching stale tickers: {e}")
+
+
 def fetch_by_ids(ids: list[int]) -> list[Ticker]:
     try:
         with db_pool_instance.get_connection() as conn:
@@ -157,9 +187,9 @@ def upsert_by_symbol(item: Ticker) -> tuple[int, bool]:
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (symbol, exchange)
                     DO UPDATE
-                    SET isin = EXCLUDED.isin,
-                        cusip = EXCLUDED.cusip,
-                        cik = EXCLUDED.cik,
+                    SET isin = COALESCE(EXCLUDED.isin, ticker.isin),
+                        cusip = COALESCE(EXCLUDED.cusip, ticker.cusip),
+                        cik = COALESCE(EXCLUDED.cik, ticker.cik),
                         name = EXCLUDED.name,
                         exchange = EXCLUDED.exchange,
                         industry = EXCLUDED.industry,
@@ -196,7 +226,8 @@ def update(item: Ticker) -> None:
                         currency             = %s,
                         source               = %s,
                         type_from            = %s,
-                        is_actively_trading  = %s
+                        is_actively_trading  = %s,
+                        updated_at           = NOW()
                     WHERE id = %s;
                 """, (item.isin, item.cusip, item.cik, item.name, item.exchange,
                       item.industry, item.sector, item.country, item.currency, item.source, item.type_from,
@@ -375,3 +406,102 @@ def update_style_factors_failed_at_bulk(ticker_ids: list[int]) -> None:
                 )
     except Error as e:
         raise Exception(f"Error bulk-updating style_factors_failed_at: {e}")
+
+
+# ── Multi-ticker (share-class) company consolidation ────────────────────────
+
+def fetch_cik_groups() -> list[tuple[str, list[int]]]:
+    """Returns (cik, member_ids) for every CIK shared by 2+ valid tickers."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT cik, array_agg(id ORDER BY id)
+                    FROM ticker
+                    WHERE cik IS NOT NULL AND cik <> '' AND invalid IS NULL
+                    GROUP BY cik
+                    HAVING COUNT(*) > 1;
+                """)
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching cik groups: {e}")
+
+
+def fetch_no_cik_tickers() -> list['Ticker']:
+    """Tickers with no cik (whether or not a master is already assigned — an existing
+    master must still be visible here so name-based grouping can detect and freeze it),
+    candidates for the name-matching fallback pass."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                cur.execute("""
+                    SELECT * FROM ticker
+                    WHERE (cik IS NULL OR cik = '')
+                      AND invalid IS NULL
+                      AND name IS NOT NULL AND name <> '';
+                """)
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching no-cik tickers: {e}")
+
+
+def update_master_ticker_bulk(pairs: list[tuple[int, int]]) -> None:
+    """pairs: [(ticker_id, master_ticker_id), ...]"""
+    if not pairs:
+        return
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "UPDATE ticker SET master_ticker_id = %s WHERE id = %s",
+                    [(master_id, tid) for tid, master_id in pairs]
+                )
+    except Error as e:
+        raise Exception(f"Error bulk-updating master_ticker_id: {e}")
+
+
+def fetch_master_groups() -> list[tuple[int, list[int]]]:
+    """Returns (master_ticker_id, sibling_ids) for every currently-established master."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT master_ticker_id, array_agg(id)
+                    FROM ticker
+                    WHERE master_ticker_id IS NOT NULL
+                    GROUP BY master_ticker_id;
+                """)
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching master groups: {e}")
+
+
+def update_accumulated_market_cap_bulk(pairs: list[tuple[int, float]]) -> None:
+    """pairs: [(master_ticker_id, accumulated_market_cap), ...]"""
+    if not pairs:
+        return
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "UPDATE ticker SET accumulated_market_cap = %s WHERE id = %s",
+                    [(cap, tid) for tid, cap in pairs]
+                )
+    except Error as e:
+        raise Exception(f"Error bulk-updating accumulated_market_cap: {e}")
+
+
+def fetch_master_info_by_ids(ticker_ids: list[int]) -> dict[int, tuple[int | None, float | None]]:
+    """Returns {ticker_id: (master_ticker_id, accumulated_market_cap)}."""
+    if not ticker_ids:
+        return {}
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, master_ticker_id, accumulated_market_cap FROM ticker WHERE id = ANY(%s);",
+                    (ticker_ids,)
+                )
+                return {row[0]: (row[1], row[2]) for row in cur.fetchall()}
+    except Error as e:
+        raise Exception(f"Error fetching master info by ids: {e}")

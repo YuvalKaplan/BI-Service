@@ -15,9 +15,8 @@ python service_cron.py
 python modules/bt/run.py
 
 # Run individual scripts (ad-hoc / debugging)
-python scripts/_categorization.py
-python scripts/_single_provider.py
-python scripts/_stock_info.py
+python scripts/current_categorize_tickers.py
+python scripts/single_provider.py
 
 # Update requirements
 pip freeze > requirements.txt
@@ -31,7 +30,7 @@ No automated test suite exists. Validation is done by running the cron or BT pip
 
 ```bash
 python service_cron.py --prod
-python scripts/_single_provider.py --prod
+python scripts/single_provider.py --prod
 ```
 
 The resolved environment is printed at startup (`[db] Resolved database environment: ...`) and logged via `log.record_status`. This flag only affects the live pool — `db_pool_instance_bt` (backtesting) always uses the development database regardless.
@@ -39,7 +38,7 @@ The resolved environment is printed at startup (`[db] Resolved database environm
 Pass `--headed` to run Playwright with a visible browser window instead of headless (useful together with `--prod` for debugging scraping issues against production data):
 
 ```bash
-python scripts/_single_provider.py --prod --headed
+python scripts/single_provider.py --prod --headed
 ```
 
 ## Architecture
@@ -63,9 +62,11 @@ funds_update         → fund strategy composition              → fund_holding
 ```
 
 **Cron schedule** (weekday 0=Monday):
-- Tue–Sat: ETF holdings download, stock data download, categorization
-- Sun: Benchmark blend holdings refresh (`benchmark_generator.run_blend_holdings()`), categorization ETFs, ESG update
-- Wed: Best ideas generation, fund updates
+- Tue–Sat: ETF holdings download, stock data download, categorization, ticker profile refresh
+- Sun: Categorization ETFs, ESG update
+- Wed: Master ticker sync (`modules/ticker/master.py`), accumulated market cap refresh, benchmark blend holdings refresh (`benchmark_generator.run()`), best ideas generation, fund updates
+
+Benchmark generation runs on Wednesday (moved from Sunday) so it's built the same day best ideas/fund generation consume it, rather than sitting stale for several days beforehand.
 
 ### Benchmarks
 
@@ -76,11 +77,19 @@ Two synthetic large-cap benchmarks (market cap ≥ $10B) are built from the FMP 
 | US Large Cap Blend | US | All large-cap US stocks |
 | Intl Large Cap Blend | International | All large-cap non-US stocks |
 
-`benchmark_generator.run_blend_holdings()` runs every Sunday: paginates the FMP screener, upserts any new tickers into the `ticker` table, then stores market-cap-weighted holdings for both benchmarks.
+`benchmark_generator.run()` runs every Wednesday (right before `best_ideas_generator`/`funds_update`): paginates the FMP screener, upserts any new tickers into the `ticker` table, then stores market-cap-weighted holdings for both benchmarks.
 
 Each `provider_etf` row has an optional `benchmark_id` FK pointing to the appropriate benchmark. When set, `best_ideas_generator` computes best ideas twice per ETF — once using the ETF's own holdings as the benchmark (`benchmark_mode = 'self'`) and once using the external benchmark universe (`benchmark_mode = 'full_universe'`). Both sets are stored in `best_idea`.
 
 `fund.strategy.benchmark` (`'full_universe'` | `'self'`, default `'full_universe'`) controls which mode `funds_update` selects when building each fund's model portfolio.
+
+#### Multi-ticker (share-class) company consolidation
+
+A company can trade as more than one independently-listed ticker (e.g. Alphabet as `GOOGL`/`GOOG`). `ticker.master_ticker_id` groups these: `NULL` on the master row, pointing at the master's `id` on every sibling. `ticker.accumulated_market_cap` is populated only on the master, as the sum of the latest known market cap across it and all its siblings.
+
+Detection (`modules/ticker/master.py::sync_master_tickers()`, run every Wednesday before `benchmark_generator`): primary match is `ticker.cik` (SEC Central Index Key, shared across a US company's share classes); tickers with no CIK (typically international listings) fall back to normalized-company-name matching. Either way, the master is elected once — highest market cap at election time, tie-broken by US-exchange preference then lowest id — and **frozen permanently**; a group that already has an established master never re-elects, regardless of how market caps move afterward.
+
+Both `benchmark_generator` (building `benchmark_holding`) and `best_ideas_generator` (computing `etf_weight`/`benchmark_weight`) redirect a sibling ticker to its master and use `accumulated_market_cap` in place of the sibling's own market cap, so a company with multiple share classes is weighted once, at the company level, instead of being split across each listing. `modules/calc/model_fund.py::resolve_canonical_ticker_ids` is a thin `COALESCE(master_ticker_id, ticker_id)` lookup over this same persisted assignment. Live pipeline only — BT has no `full_universe`/`benchmark_holding` concept and isn't affected.
 
 ### Key Modules
 
@@ -96,6 +105,7 @@ Each `provider_etf` row has an optional `benchmark_id` FK pointing to the approp
 | `modules/parse/convert.py` | Excel/CSV parsing using provider `Mapping` config from DB |
 | `modules/object/benchmark.py` | Dataclasses and CRUD for `benchmark` and `benchmark_holding` tables |
 | `modules/cron/benchmark_generator.py` | FMP screener fetch, ticker upsert, blend benchmark holding storage |
+| `modules/ticker/master.py` | Ticker profile refresh (cik/isin/name/etc.), master-ticker election/freeze, accumulated market cap refresh |
 | `modules/object/_db_schema.sql` | Authoritative PostgreSQL schema |
 
 ### DB Access Pattern

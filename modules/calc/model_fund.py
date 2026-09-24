@@ -153,35 +153,20 @@ def results_to_string(results: FundChangesResult, include_header: bool = True, i
 
 def resolve_canonical_ticker_ids(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Adds a `canonical_ticker_id` column. All cross-listings of the same company
-    (matched by normalised name) are mapped to one canonical ticker_id.
-    Selection priority: highest market_cap > US-listed > lowest ticker_id.
-    Rows with no name keep canonical_ticker_id == ticker_id.
+    Adds a `canonical_ticker_id` column = COALESCE(master_ticker_id, ticker_id). Share-class/
+    cross-listing grouping is no longer computed here — it's done once, persistently, by
+    modules.ticker.master.sync_master_tickers() (CIK match, falling back to normalized-name
+    match for tickers with no CIK) and frozen on ticker.master_ticker_id, so it can't flip
+    week to week as market caps move. Tickers with no master keep canonical_ticker_id == ticker_id.
     """
-    if df.empty or 'name' not in df.columns:
+    if df.empty or 'master_ticker_id' not in df.columns:
         return df.assign(canonical_ticker_id=df['ticker_id'])
-
-    norm_name = df['name'].str.strip().str.lower()
-    has_name  = norm_name.notna() & (norm_name != '')
-
-    ticker_attrs = (
-        df[has_name][['ticker_id', 'country', 'market_cap']]
-        .assign(_norm=norm_name[has_name])
-        .drop_duplicates(subset='ticker_id')
-    )
-
-    canonical_map = (
-        ticker_attrs
-        .assign(_is_us=(ticker_attrs['country'] == 'US').astype(int))
-        .sort_values(['market_cap', '_is_us', 'ticker_id'], ascending=[False, False, True])
-        .groupby('_norm')['ticker_id']
-        .first()
-    )
-
-    df = df.copy()
-    df['canonical_ticker_id'] = df['ticker_id']
-    df.loc[has_name, 'canonical_ticker_id'] = norm_name[has_name].map(canonical_map).astype(int)
-    return df
+    # A mixed None/int DB column comes back from pandas as float64 with NaN standing in for
+    # None — and NaN is truthy in Python, so `m or t` would wrongly keep NaN instead of falling
+    # back to t. pd.isna() is the dtype-safe way to detect "no master" here (this also sidesteps
+    # pandas' fillna-downcast FutureWarning on a mixed-dtype object column).
+    canonical = [t if pd.isna(m) else m for m, t in zip(df['master_ticker_id'], df['ticker_id'])]
+    return df.assign(canonical_ticker_id=pd.array(canonical, dtype='int64'))
 
 
 def _filter_and_aggregate(

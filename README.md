@@ -60,6 +60,38 @@ All of the following should be done in pgAdmin:
     > psql -h localhost -p 5432 -U admin -d best_ideas -f C:\Users\Yuval\Downloads\db_backup_data_only.sql
     - You will need the admin password
 
+### Multi-Ticker (Share-Class) Consolidation
+
+A company can trade as more than one independently-listed ticker (e.g. Alphabet as `GOOGL`/`GOOG`). `ticker.master_ticker_id` groups these (`NULL` on the master row, pointing at the master's `id` on every sibling), and `ticker.accumulated_market_cap` holds the combined market cap, populated only on the master row.
+
+#### One-time schema migrations
+Run each one-shot migration file against dev, then prod, in psql/pgAdmin, in order:
+```
+modules/object/_migration_7_ticker_master_ticker.sql
+modules/object/_migration_8_ticker_updated_at.sql
+```
+Delete each file once it's been applied to both environments, per the usual convention for files under `modules/object/_migration_*.sql`.
+
+#### Populating master tickers for the first time (live)
+After the migrations have been applied to an environment, run these against it in order (pass `--dev` or `--prod`):
+```
+python scripts/data_fill_ticker_profile.py --dev       # refreshes cik (and full profile) for every stale ticker
+python scripts/data_fill_master_tickers.py --dev       # elect masters + compute accumulated_market_cap
+python scripts/current_benchmark_generator.py --dev    # today's live benchmark snapshot, now consolidated
+```
+`current_benchmark_generator.py` only *reads* `master_ticker_id` — it doesn't create it, so `data_fill_master_tickers.py` must be run at least once first or nothing will be consolidated.
+
+`data_fill_ticker_profile.py` asks at a prompt whether to also retry tickers already marked invalid; answering no (the default) only checks tickers that are either brand new or haven't been checked in over a week (`ticker.updated_at`).
+
+Ongoing maintenance runs automatically: ticker profile refresh on the Tue–Sat cron step, master sync + accumulated cap refresh on Wednesday before benchmark/best-ideas generation (see `service_cron.py`).
+
+#### Preparing data for a historical simulation (sim)
+`scripts/sim_prep_data.py` combines all three prerequisite steps above plus the historical benchmark backfill into one call (edit `inception_date` in the file first; it asks the same retry-invalid prompt as `data_fill_ticker_profile.py`, since it goes over the exact same ticker list):
+```
+python scripts/sim_prep_data.py --dev
+```
+Run this before `sim_fund.py`. The ticker profile refresh and master sync steps are idempotent, so it's safe to re-run even if the live steps above already populated them.
+
 ## Playwright
 We are using this library to simulate activity in a web browser. We are using the [headless version](https://playwright.dev/python/docs/browsers).
 

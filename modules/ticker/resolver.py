@@ -231,5 +231,5 @@ class TickerResolver:
         full_symbol = profile.get('symbol')
         now_et = datetime.now(ZoneInfo("America/New_York"))
         value_date = (now_et - timedelta(days=1) if now_et.hour < _VALUE_DATE_CUT_OFF_HOUR else now_et).date()
-        pricing.store_validated_ticker_value(ticker_id, full_symbol, value_date)
+        pricing.store_validated_ticker_value(ticker_id, full_symbol, value_date, exchange=profile.get('exchange'))
 

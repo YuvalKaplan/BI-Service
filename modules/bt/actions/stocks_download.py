@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import List
 from datetime import date, timedelta
 from concurrent.futures import ThreadPoolExecutor
-from modules.core.api_stocks import get_stock_profile, get_stock_historic_prices, get_stock_historic_dividend, get_stock_historic_splits, get_stock_historic_market_cap, fetch_esg_data
+from modules.core.api_stocks import get_stock_profile, get_symbol_historic_prices, get_stock_historic_dividend, get_stock_historic_splits, get_stock_historic_market_cap, fetch_esg_data
 from modules.calc import esg
 
 from modules.bt.object import account, ticker_split_history
@@ -83,7 +83,7 @@ def process_symbol(s: str, start_date: date, end_date: date) -> tuple[bool, str,
 
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {
-                'prices':    executor.submit(get_stock_historic_prices, s, start_date, end_date),
+                'prices':    executor.submit(get_symbol_historic_prices, s, start_date, end_date),
                 'market_cap': executor.submit(get_stock_historic_market_cap, s, start_date, end_date),
                 'dividends': executor.submit(get_stock_historic_dividend, s),
                 'splits':    executor.submit(get_stock_historic_splits, s),

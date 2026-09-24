@@ -82,7 +82,7 @@ def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
     including ticker attributes needed for per-fund filtering.
     Returned DataFrame columns: provider_etf_id, ticker_id, value_date, ranking,
     delta, benchmark_mode, style_type, exchange, country, esg_qualified, name,
-    market_cap, etf_region.
+    master_ticker_id, market_cap, etf_region.
     Callers should filter by benchmark_mode to match each fund's strategy.
     """
     sql = """
@@ -117,6 +117,7 @@ def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
             t.country,
             t.esg_qualified,
             t.name,
+            t.master_ticker_id,
             tv.market_cap,
             pe.region AS etf_region
         FROM latest_ideas li

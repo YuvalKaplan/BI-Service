@@ -3,7 +3,7 @@ from collections import Counter
 import pandas as pd
 from datetime import date
 from modules.object import batch_run, batch_run_log
-from modules.object import provider, provider_etf
+from modules.object import provider, provider_etf, ticker
 from modules.object.provider_etf_holding import fetch_latest_holdings_for_etf
 from modules.object.ticker_value import fetch_latest_market_caps_within_window
 from modules.object import best_idea, benchmark
@@ -33,6 +33,7 @@ def _dedupe_by_ticker_id(holdings: list) -> list:
 def _find_best_ideas(
     holdings: list,
     market_cap_values: list,
+    master_info: dict[int, tuple[int | None, float | None]],
     limit: int | None = None,
     benchmark_weights: dict[int, float] | None = None,
 ) -> pd.DataFrame:
@@ -53,8 +54,30 @@ def _find_best_ideas(
     if df.empty:
         raise ValueError("No overlapping ticker_ids between holdings and market caps")
 
-    total_etf_value = df["market_value"].sum()
-    df["etf_weight"] = df["market_value"] / total_etf_value
+    # Redirect share-class siblings (e.g. GOOGL/GOOG) onto their master ticker so both the
+    # ETF's exposure and the company's market cap are counted once, at the company level,
+    # instead of being split across each individually-listed share class. Ticker ids are
+    # always positive, so `or t` safely falls back to the ticker's own id when it has no
+    # master (avoids pandas' fillna on a mixed None/int object column, which triggers a
+    # downcast FutureWarning).
+    df["effective_ticker_id"] = df["ticker_id"].map(lambda t: master_info.get(t, (None, None))[0] or t).astype(int)
+    df["accumulated_market_cap"] = df["effective_ticker_id"].map(lambda t: master_info.get(t, (None, None))[1])
+    df["effective_market_cap"] = df.apply(
+        lambda row: row["accumulated_market_cap"] if pd.notna(row["accumulated_market_cap"]) else row["market_cap"],
+        axis=1,
+    )
+
+    # Company-level aggregation: sum the ETF's actual $ exposure across share classes of the
+    # same company, producing one row per effective company rather than one per share class.
+    grouped = (
+        df.groupby("effective_ticker_id")
+          .agg(market_value=("market_value", "sum"), market_cap=("effective_market_cap", "first"))
+          .reset_index()
+          .rename(columns={"effective_ticker_id": "ticker_id"})
+    )
+
+    total_etf_value = grouped["market_value"].sum()
+    grouped["etf_weight"] = grouped["market_value"] / total_etf_value
 
     if benchmark_weights:
         # full_universe: the benchmark only covers stocks >= the large-cap threshold, so a
@@ -67,16 +90,18 @@ def _find_best_ideas(
         # a below-threshold ticker through a 'large' cap fund's candidate pool when it's already
         # one of that specific fund's existing holdings (held_ticker_ids), so it can still be kept
         # until it genuinely falls out of ranking, without ever surfacing as a fresh buy.
-        # full_universe: each stock's weight in the external large-cap universe
-        df["benchmark_weight"] = df["ticker_id"].map(benchmark_weights).fillna(0.0)
+        # full_universe: each company's weight in the external large-cap universe. Sibling rows
+        # are deliberately absent from benchmark_holding (only the master is stored there), so
+        # the lookup key here must already be the effective (master) id.
+        grouped["benchmark_weight"] = grouped["ticker_id"].map(benchmark_weights).fillna(0.0)
     else:
-        # self: market-cap weight within the ETF's own holdings
-        total_market_cap = df["market_cap"].sum()
-        df["benchmark_weight"] = df["market_cap"] / total_market_cap
+        # self: market-cap weight within the ETF's own holdings, one row per company already.
+        total_market_cap = grouped["market_cap"].sum()
+        grouped["benchmark_weight"] = grouped["market_cap"] / total_market_cap
 
-    df["delta"] = df["etf_weight"] - df["benchmark_weight"]
+    grouped["delta"] = grouped["etf_weight"] - grouped["benchmark_weight"]
 
-    best_ideas = df[df["delta"] > 0].sort_values("delta", ascending=False)
+    best_ideas = grouped[grouped["delta"] > 0].sort_values("delta", ascending=False)
 
     dropped = best_ideas[best_ideas["delta"] > HOLDING_DELTA_LIMIT_DROP_OFF]
     if not dropped.empty:
@@ -151,6 +176,17 @@ def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
                     ticker_ids = [h.ticker_id for h in raw_holdings if h.ticker_id]
                     market_cap_values = fetch_latest_market_caps_within_window(ticker_ids, holding_date, DAYS_NO_MARKET_CAP)
 
+                    # 2b. Master-ticker info for held tickers, plus a second hop for any master
+                    # not itself among the holdings (e.g. an ETF holding only GOOG still needs
+                    # GOOGL's accumulated_market_cap to compute the true combined company weight).
+                    master_info = ticker.fetch_master_info_by_ids(ticker_ids)
+                    extra_master_ids = [
+                        mid for mid, _cap in master_info.values()
+                        if mid is not None and mid not in master_info
+                    ]
+                    if extra_master_ids:
+                        master_info.update(ticker.fetch_master_info_by_ids(extra_master_ids))
+
                     # 3. Identify and report stale tickers (no market cap within window)
                     priced_ids = {v.ticker_id for v in market_cap_values}
                     for h in raw_holdings:
@@ -168,7 +204,7 @@ def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
                     final_holdings = [h for h in raw_holdings if h.ticker_id in priced_ids]
 
                     # 5a. Always generate self-benchmark best ideas
-                    self_df = _find_best_ideas(final_holdings, market_cap_values, MAX_BEST_IDEAS_PER_FUND)
+                    self_df = _find_best_ideas(final_holdings, market_cap_values, master_info, MAX_BEST_IDEAS_PER_FUND)
                     best_idea.insert_bulk(pe.id, holding_date, 'self', best_idea.df_to_rows(self_df, provider_etf_id=pe.id, value_date=holding_date, benchmark_mode='self'))
 
                     # 5b. If this ETF has a benchmark configured, also generate full_universe best ideas
@@ -178,7 +214,7 @@ def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
                             _bm_cache[pe.benchmark_id] = {h.ticker_id: h.weight for h in bm_holdings if h.ticker_id}
                         bm_weights = _bm_cache.get(pe.benchmark_id)
                         if bm_weights:
-                            universe_df = _find_best_ideas(final_holdings, market_cap_values, MAX_BEST_IDEAS_PER_FUND, benchmark_weights=bm_weights)
+                            universe_df = _find_best_ideas(final_holdings, market_cap_values, master_info, MAX_BEST_IDEAS_PER_FUND, benchmark_weights=bm_weights)
                             best_idea.insert_bulk(pe.id, holding_date, 'full_universe', best_idea.df_to_rows(universe_df, provider_etf_id=pe.id, value_date=holding_date, benchmark_mode='full_universe'))
 
                     generated_etfs += 1

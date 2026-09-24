@@ -9,14 +9,18 @@ A ticker is only touched if FMP's historical endpoints return usable data for it
 fails, that ticker's existing data is left untouched (never cleared without a replacement).
 
 Usage:
-    python scripts/resync_ticker_value.py                    # all valid tickers, asks to confirm
-    python scripts/resync_ticker_value.py --yes               # skip the confirmation prompt
-    python scripts/resync_ticker_value.py --dry-run           # run everything, always roll back
-    python scripts/resync_ticker_value.py --symbol AVGO       # limit to one ticker, for testing
+    python scripts/data_fill_ticker_value_refresh.py                    # all valid tickers, asks to confirm
+    python scripts/data_fill_ticker_value_refresh.py --yes               # skip the confirmation prompt
+    python scripts/data_fill_ticker_value_refresh.py --dry-run           # run everything, always roll back
+    python scripts/data_fill_ticker_value_refresh.py --symbol AVGO       # limit to one ticker, for testing
+
+Writes a report (summary counts, tickers with mismatches, skipped tickers) to
+.downloads/data_fill_ticker_value_refresh_report.md.
 """
 import argparse
 import atexit
-from datetime import date
+import os
+from datetime import date, datetime
 from concurrent.futures import ThreadPoolExecutor
 
 from modules.object.exit import cleanup
@@ -25,10 +29,12 @@ from modules.object.ticker import Ticker
 from modules.object.ticker_value import TickerValue, fetch_values_for_ticker, replace_range
 from modules.ticker.resolver import TickerResolver
 from modules.ticker import pricing
+from modules.ticker import util as tu
 
 atexit.register(cleanup)
 
-INCEPTION_DATE = date(2026, 1, 1)  # matches scripts/fill_ticker_value_gaps.py::FILL_START_DATE
+INCEPTION_DATE = date(2026, 1, 1)  # matches scripts/data_fill_ticker_value_gaps.py::FILL_START_DATE
+REPORT_PATH = os.path.join(os.path.dirname(__file__), '..', '.downloads', 'data_fill_ticker_value_refresh_report.md')
 
 
 def resync_ticker(t: Ticker, resolver: TickerResolver, end_date: date, dry_run: bool):
@@ -36,7 +42,9 @@ def resync_ticker(t: Ticker, resolver: TickerResolver, end_date: date, dry_run: 
     assert t.id is not None
 
     full_symbol = resolver.get_full_symbol(t)
-    fetched = pricing.fetch_price_and_market_cap_history(full_symbol, INCEPTION_DATE, end_date)
+    fetched = pricing.fetch_price_and_market_cap_history(
+        full_symbol, INCEPTION_DATE, end_date, currency=tu.currency_for_exchange(t.exchange),
+    )
     if isinstance(fetched, str):
         return full_symbol, 0, [], fetched
 
@@ -89,6 +97,8 @@ def main() -> None:
     skipped = 0
     total_rows = 0
     tickers_with_diffs = 0
+    mismatch_lines: list[str] = []
+    skipped_lines: list[str] = []
 
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(resync_ticker, t, resolver, end_date, args.dry_run): t for t in tickers}
@@ -99,11 +109,13 @@ def main() -> None:
             except Exception as e:
                 print(f"[{i}/{len(tickers)}] {t.symbol}: error - {e}")
                 skipped += 1
+                skipped_lines.append(f"- {t.symbol}: error - {e}")
                 continue
 
             if error:
                 print(f"[{i}/{len(tickers)}] {symbol}: skipped - {error}")
                 skipped += 1
+                skipped_lines.append(f"- {symbol}: {error}")
                 continue
 
             processed += 1
@@ -116,6 +128,11 @@ def main() -> None:
                     f"prior data by >tolerance (worst: {worst.value_date}, {worst.field} "
                     f"{worst.stored_value:.4g} -> {worst.fetched_value:.4g})"
                 )
+                mismatch_lines.append(
+                    f"- {symbol}: {rows} rows replaced, {len(mismatches)} differed from prior data by "
+                    f">tolerance (worst: {worst.value_date}, {worst.field} "
+                    f"{worst.stored_value:.4g} -> {worst.fetched_value:.4g})"
+                )
             else:
                 print(f"[{i}/{len(tickers)}] {symbol}: {rows} rows replaced")
 
@@ -123,6 +140,31 @@ def main() -> None:
         f"\nDone. Processed {processed} ticker(s), skipped {skipped} (no data available), "
         f"{total_rows} total rows replaced, {tickers_with_diffs} ticker(s) had at least one meaningful diff."
     )
+
+    report_lines = [
+        "# Ticker Value Refresh Report",
+        "",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Range: {INCEPTION_DATE} to {end_date}" + (" (DRY RUN)" if args.dry_run else ""),
+        f"Scope: {'symbol=' + args.symbol if args.symbol else 'all valid tickers'}",
+        "",
+        "## Summary",
+        "",
+        f"Processed: {processed} | Skipped: {skipped} | Rows written: {total_rows} | "
+        f"Tickers with mismatches: {tickers_with_diffs}",
+        "",
+        f"## Tickers with mismatches ({len(mismatch_lines)}) — worth reviewing",
+        "",
+    ] + (mismatch_lines or ["None."]) + [
+        "",
+        f"## Skipped tickers ({len(skipped_lines)}) — no usable data",
+        "",
+    ] + (skipped_lines or ["None."])
+
+    os.makedirs(os.path.dirname(REPORT_PATH), exist_ok=True)
+    with open(REPORT_PATH, 'w', encoding='utf-8') as f:
+        f.write("\n".join(report_lines))
+    print(f"Report written to: {REPORT_PATH}")
 
 
 if __name__ == '__main__':

@@ -6,6 +6,7 @@ from modules.core.db import db_pool_instance, ENVIRONMENT
 from modules.core import sender
 from modules.calc.model_fund import results_to_string
 from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, esg_update, benchmark_generator
+from modules.ticker import master as ticker_master
 
 SEPERATOR_LINE = "-" * 20 + "\n"
 BREAKER_LINE = "=" * 20 + "\n\n"
@@ -29,22 +30,22 @@ if __name__ == '__main__':
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
                 raise e
-            
+
             message_actions += f"Holdings Download\n" + SEPERATOR_LINE
             message_actions += f"{stats_downloader}\n" + SEPERATOR_LINE
             message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
             message_actions += BREAKER_LINE
 
-        if weekday == 6:  # Sunday
             try:
-                benchmark_generator.run()
+                profiles_checked, profiles_updated, profiles_marked_invalid = ticker_master.refresh_ticker_profiles()
             except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed in benchmark blend holdings with error:\n{e}\n\n")
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on ticker profile refresh with error:\n{e}\n")
                 raise e
 
-            message_actions += "Benchmark blend holdings refreshed\n"
+            message_actions += f"Ticker profiles refreshed: {profiles_updated} updated, {profiles_marked_invalid} marked invalid, out of {profiles_checked} checked\n"
             message_actions += BREAKER_LINE
 
+        if weekday == 6:  # Sunday
             try:
                 total_etfs = categorize_downloader.run()
             except Exception as e:
@@ -65,11 +66,29 @@ if __name__ == '__main__':
 
         if weekday == 2: # Wednesday
             try:
+                masters_updated, caps_updated = ticker_master.sync_masters_and_accumulated_caps()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on ticker master/accumulated-cap sync with error:\n{e}\n\n")
+                raise e
+
+            message_actions += f"Ticker master sync: {masters_updated} link(s), {caps_updated} accumulated cap(s) refreshed\n"
+            message_actions += BREAKER_LINE
+
+            try:
+                benchmark_generator.run()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed in benchmark blend holdings with error:\n{e}\n\n")
+                raise e
+
+            message_actions += "Benchmark blend holdings refreshed\n"
+            message_actions += BREAKER_LINE
+
+            try:
                 etfs_processed, generated_etfs, problems = best_ideas_generator.run()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on best ideas processing with error:\n{e}\n\n")
                 raise e
-            
+
             message_actions += f"Total ETFs available: {etfs_processed}\n"
             message_actions += f"ETFS with best ideas: {generated_etfs}\n"
             message_actions += f"ETFS with problems: {len(problems)}\n" + SEPERATOR_LINE
