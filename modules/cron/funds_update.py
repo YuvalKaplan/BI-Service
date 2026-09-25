@@ -3,8 +3,9 @@ import pandas as pd
 from datetime import date, timedelta
 from typing import List
 from modules.object import batch_run
-from modules.object import best_idea, fund, fund_holding, fund_holding_change
+from modules.object import best_idea, fund, fund_analysis, fund_holding, fund_holding_change, provider_etf
 from modules.calc import model_fund
+from modules.cron import best_ideas_generator
 
 
 def build_shared_context(as_of_date: date) -> tuple[pd.DataFrame, dict]:
@@ -74,9 +75,62 @@ def activate_fund(
 
     fund_holding.insert_fund_holding(results.holdings)
     fund_holding_change.insert_fund_changes(results.changes)
+    _record_fund_analysis(fund_id, as_of_date, strategy, fund_ideas_df)
 
     log.record_status(model_fund.results_to_string(results))
     return results
+
+
+def _record_fund_analysis(
+    fund_id: int,
+    as_of_date: date,
+    strategy: model_fund.Strategy,
+    fund_ideas_df: pd.DataFrame,
+) -> None:
+    """
+    Snapshots, into fund_analysis, the full active-weight calculation of every ETF this fund
+    drew its best ideas from on as_of_date — every company, not only the top-ranked ones — with
+    the benchmark actually applied. Recomputed with the same best_ideas_generator helpers that
+    produced best_idea, from the same holdings date, and cross-checked against it. Failures are
+    logged and never block the fund update itself.
+    """
+    try:
+        bm_cache: dict = {}
+        rows: list[fund_analysis.FundAnalysis] = []
+        for etf_id, value_date in model_fund.etfs_used(strategy, fund_ideas_df).items():
+            pe = provider_etf.fetch_by_id(etf_id)
+            inputs = best_ideas_generator.prepare_etf_inputs(pe, value_date)
+            if inputs is None or inputs.holding_date != value_date:
+                log.record_notice(f"[fund_analysis] fund_id={fund_id}: no holdings for ETF {etf_id} on {value_date} — skipped.")
+                continue
+
+            benchmark_id = benchmark_date = None
+            bm_weights = None
+            if strategy.benchmark == 'full_universe':
+                if not pe.benchmark_id:
+                    continue
+                bm_weights, benchmark_date = best_ideas_generator.get_benchmark_weights(pe.benchmark_id, as_of_date, bm_cache)
+                if not bm_weights:
+                    continue
+                benchmark_id = pe.benchmark_id
+
+            weights = best_ideas_generator.compute_active_weights(inputs, bm_weights)
+            selected = best_ideas_generator.select_best_ideas(weights, best_ideas_generator.MAX_BEST_IDEAS_PER_FUND)
+
+            stored = best_idea.fetch_for_etf_date(etf_id, value_date, strategy.benchmark)
+            if [s.ticker_id for s in stored] != [int(t) for t in selected['ticker_id']] or any(
+                abs((s.delta or 0) - d) > 1e-9 for s, d in zip(stored, selected['delta'])
+            ):
+                log.record_notice(
+                    f"[fund_analysis] fund_id={fund_id}: recomputed best ideas for ETF {etf_id} on {value_date} "
+                    f"differ from stored best_idea ({strategy.benchmark}) — stored snapshot reflects the recomputation."
+                )
+
+            rows += best_ideas_generator.build_analysis_rows(fund_id, as_of_date, inputs, weights, selected, benchmark_id, benchmark_date)
+
+        fund_analysis.replace_for_fund_date(fund_id, as_of_date, rows)
+    except Exception as e:
+        log.record_error(f"[fund_analysis] Failed to record analysis for fund_id={fund_id} on {as_of_date}: {e}")
 
 
 def run() -> List[model_fund.FundChangesResult]:

@@ -18,6 +18,24 @@ def delete_all_for_fund(fund_id: int) -> None:
         raise Exception(f"Error deleting fund holding changes for fund {fund_id}: {e}")
 
 
+def fetch_for_date(fund_id: int, change_date: date) -> List[FundHoldingChange]:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(FundHoldingChange)) as cur:
+                cur.execute(
+                    """
+                    SELECT fund_id, ticker_id, change_date, direction, ranking, appearances, max_delta,
+                           top_delta_provider_etf_id, all_provider_etf_ids, reason
+                    FROM fund_holding_change
+                    WHERE fund_id = %s AND change_date = %s;
+                    """,
+                    (fund_id, change_date),
+                )
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching fund holding changes for fund {fund_id} on {change_date}: {e}")
+
+
 def insert_fund_changes(items: List[FundHoldingChange]) -> None:
     if not items:
         return

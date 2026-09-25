@@ -7,7 +7,7 @@ Run after scripts/sim_prep_data.py (ticker profile refresh + master ticker sync)
 the master_ticker_id links to consolidate share-class siblings, but doesn't create them.
 
 Writes a report (every snapshot created, with its date and holdings count) to
-.downloads/sim_benchmark_report.md.
+.output/sim_benchmark_report.md.
 
 Usage:
     python scripts/sim_benchmark.py --dev
@@ -21,7 +21,7 @@ from modules.sim import benchmark_generator
 
 atexit.register(cleanup)
 
-REPORT_PATH = os.path.join(os.path.dirname(__file__), '..', '.downloads', 'sim_benchmark_report.md')
+REPORT_PATH = os.path.join(os.path.dirname(__file__), '..', '.output', 'sim_benchmark_report.md')
 
 if __name__ == '__main__':
     try:

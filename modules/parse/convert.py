@@ -10,7 +10,7 @@ from modules.core.util import clean_date
 from modules.ticker import util as tu
 from modules.object.provider import Mapping
 
-FILE_FOLDER = "./.downloads/"
+FILE_FOLDER = "./.output/downloads/"
 DECIMAL_PRECISION = 10
 
 def read_xls_from_buffer(file_buffer: bytes, mapping: Mapping) -> list[list[str]]:

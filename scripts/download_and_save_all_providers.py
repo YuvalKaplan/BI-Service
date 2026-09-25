@@ -9,7 +9,7 @@ from modules.parse.download import EtfStats, process_provider
 
 atexit.register(cleanup)
 
-DOWNLOADS_DIR = os.path.join(os.path.dirname(__file__), '..', '.downloads')
+DOWNLOADS_DIR = os.path.join(os.path.dirname(__file__), '..', '.output', 'downloads')
 
 
 def _write_report(lines: list[str], path: str) -> None:

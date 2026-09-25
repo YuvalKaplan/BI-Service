@@ -82,7 +82,8 @@ def fetch_latest_holdings_for_etf(provider_etf_id: int, look_back_days: int, up_
                               FROM provider_etf_holding
                               WHERE provider_etf_id = %s
                                 AND holding_date > NOW() - (%s * INTERVAL '1 day')
-                          );
+                          )
+                        ORDER BY peh.id;
                     """
                     cur.execute(query_str, (provider_etf_id, provider_etf_id, look_back_days))
                 else:
@@ -98,12 +99,83 @@ def fetch_latest_holdings_for_etf(provider_etf_id: int, look_back_days: int, up_
                               WHERE provider_etf_id = %s
                                 AND holding_date <= %s
                                 AND holding_date > %s - (%s * INTERVAL '1 day')
-                          );
+                          )
+                        ORDER BY peh.id;
                     """
                     cur.execute(query_str, (provider_etf_id, provider_etf_id, up_to_date, up_to_date, look_back_days))
                 return cur.fetchall()
     except Error as e:
         raise Exception(f"Error fetching latest holdings for provider ETF {provider_etf_id}: {e}")
+
+
+# Max/min ratio of implied prices (market_value / shares) under which duplicate lines of one
+# ticker are treated as lots of the same security rather than different securities.
+DUP_PRICE_TOLERANCE = 1.02
+
+
+@dataclass
+class QuarantinedHolding:
+    ticker_id: int
+    lines: List[ProviderEtfHolding]
+    implied_prices: List[float | None]
+
+
+def implied_price(h: ProviderEtfHolding) -> float | None:
+    if h.shares and h.market_value and h.shares > 0 and h.market_value > 0:
+        return h.market_value / h.shares
+    return None
+
+
+def aggregate_holdings(raw: List[ProviderEtfHolding]) -> tuple[List[ProviderEtfHolding], List[QuarantinedHolding]]:
+    """
+    Collapses an ETF's holding lines to one holding per ticker_id. Providers sometimes list a
+    ticker on more than one line: when every line implies the same price (within
+    DUP_PRICE_TOLERANCE) they're lots of one security, so shares/market_value/weight are summed
+    into a single holding that keeps the lowest line id. When the implied prices disagree (or
+    can't be computed) the lines are most likely different securities that ticker resolution
+    mapped onto the same ticker — there's no telling which one is right, so all of that
+    ticker's lines are quarantined and returned separately instead of being used.
+    Expects `raw` ordered by id (fetch_latest_holdings_for_etf does this) so output is stable.
+    """
+    groups: dict[int, List[ProviderEtfHolding]] = {}
+    order: List[int] = []
+    passthrough: List[ProviderEtfHolding] = []
+    for h in raw:
+        if h.ticker_id is None:
+            passthrough.append(h)
+            continue
+        if h.ticker_id not in groups:
+            groups[h.ticker_id] = []
+            order.append(h.ticker_id)
+        groups[h.ticker_id].append(h)
+
+    holdings: List[ProviderEtfHolding] = []
+    quarantined: List[QuarantinedHolding] = []
+    for ticker_id in order:
+        lines = groups[ticker_id]
+        if len(lines) == 1:
+            holdings.append(lines[0])
+            continue
+
+        prices = [implied_price(h) for h in lines]
+        valid = [p for p in prices if p is not None]
+        if len(valid) != len(prices) or max(valid) / min(valid) > DUP_PRICE_TOLERANCE:
+            quarantined.append(QuarantinedHolding(ticker_id=ticker_id, lines=lines, implied_prices=prices))
+            continue
+
+        first = min(lines, key=lambda h: h.id)
+        holdings.append(ProviderEtfHolding(
+            id=first.id,
+            created_at=first.created_at,
+            provider_etf_id=first.provider_etf_id,
+            holding_date=first.holding_date,
+            ticker_id=ticker_id,
+            shares=sum(h.shares or 0 for h in lines),
+            market_value=sum(h.market_value or 0 for h in lines),
+            weight=sum(h.weight or 0 for h in lines),
+        ))
+
+    return holdings + passthrough, quarantined
 
 
 def fetch_max_holding_date() -> date | None:

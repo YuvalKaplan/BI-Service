@@ -15,7 +15,7 @@ Usage:
     python scripts/data_fill_ticker_value_refresh.py --symbol AVGO       # limit to one ticker, for testing
 
 Writes a report (summary counts, tickers with mismatches, skipped tickers) to
-.downloads/data_fill_ticker_value_refresh_report.md.
+.output/data_fill_ticker_value_refresh_report.md.
 """
 import argparse
 import atexit
@@ -34,7 +34,7 @@ from modules.ticker import util as tu
 atexit.register(cleanup)
 
 INCEPTION_DATE = date(2026, 1, 1)  # matches scripts/data_fill_ticker_value_gaps.py::FILL_START_DATE
-REPORT_PATH = os.path.join(os.path.dirname(__file__), '..', '.downloads', 'data_fill_ticker_value_refresh_report.md')
+REPORT_PATH = os.path.join(os.path.dirname(__file__), '..', '.output', 'data_fill_ticker_value_refresh_report.md')
 
 
 def resync_ticker(t: Ticker, resolver: TickerResolver, end_date: date, dry_run: bool):

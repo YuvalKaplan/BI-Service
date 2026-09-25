@@ -8,7 +8,7 @@ Ticker profile refresh and master sync are idempotent, so it's safe to re-run th
 live pipeline has already populated them — it'll just pick up anything new/stale since last time.
 
 Writes a combined report (ticker profile refresh summary, master ticker groups) to
-.downloads/sim_prep_data_report.md.
+.output/sim_prep_data_report.md.
 
 Usage:
     python scripts/sim_prep_data.py --dev
@@ -22,7 +22,7 @@ from modules.ticker import master
 
 atexit.register(cleanup)
 
-REPORT_PATH = os.path.join(os.path.dirname(__file__), '..', '.downloads', 'sim_prep_data_report.md')
+REPORT_PATH = os.path.join(os.path.dirname(__file__), '..', '.output', 'sim_prep_data_report.md')
 
 if __name__ == '__main__':
     try:

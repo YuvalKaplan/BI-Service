@@ -38,6 +38,16 @@ def fetch_all() -> List[Benchmark]:
         raise Exception(f"Error fetching benchmarks: {e}")
 
 
+def fetch_by_ids(ids: list[int]) -> List[Benchmark]:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Benchmark)) as cur:
+                cur.execute('SELECT * FROM public.benchmark WHERE id = ANY(%s) ORDER BY id', (ids,))
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching benchmarks by ids: {e}")
+
+
 def fetch_by_region_and_style(region: str, style_type: str) -> Benchmark | None:
     try:
         with db_pool_instance.get_connection() as conn:

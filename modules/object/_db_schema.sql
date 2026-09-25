@@ -43,6 +43,7 @@ BEGIN
 		public.categorize_etf_holding,
 		public.categorize_ticker,
 		public.fund,
+		public.fund_analysis,
 		public.fund_holding,
 		public.fund_holding_change,
 		public.log,
@@ -466,6 +467,30 @@ CREATE TABLE public.fund_holding_change (
 ALTER TABLE public.fund_holding_change OWNER TO admin;
 
 --
+-- Name: fund_analysis; Type: TABLE; Schema: public; Owner: admin
+--
+
+CREATE TABLE public.fund_analysis (
+    fund_id integer NOT NULL,
+    as_of_date date NOT NULL,
+    provider_etf_id integer NOT NULL,
+    holding_date date NOT NULL,
+    ticker_id integer NOT NULL,
+    benchmark_id integer,
+    benchmark_date date,
+    market_cap double precision,
+    master_used boolean DEFAULT false NOT NULL,
+    etf_weight double precision,
+    benchmark_weight double precision,
+    delta double precision,
+    ranking integer,
+    note text NOT NULL
+);
+
+
+ALTER TABLE public.fund_analysis OWNER TO admin;
+
+--
 -- TOC entry 233 (class 1259 OID 16469)
 -- Name: fund_id_seq; Type: SEQUENCE; Schema: public; Owner: admin
 --
@@ -808,6 +833,14 @@ ALTER TABLE ONLY public.categorize_ticker
 
 
 --
+-- Name: fund_analysis fund_analysis_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.fund_analysis
+    ADD CONSTRAINT fund_analysis_pkey PRIMARY KEY (fund_id, as_of_date, provider_etf_id, ticker_id);
+
+
+--
 -- TOC entry 4980 (class 2606 OID 16560)
 -- Name: fund_holding_change fund_holding_change_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
@@ -1061,6 +1094,38 @@ ALTER TABLE ONLY public.categorize_etf_holding
 
 ALTER TABLE ONLY public.categorize_etf_holding
     ADD CONSTRAINT fk_categorize_etf_holding_categorize_ticker_id FOREIGN KEY (categorize_ticker_id) REFERENCES public.categorize_ticker(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: fund_analysis fk_fund_analysis_fund_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.fund_analysis
+    ADD CONSTRAINT fk_fund_analysis_fund_id FOREIGN KEY (fund_id) REFERENCES public.fund(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: fund_analysis fk_fund_analysis_provider_etf_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.fund_analysis
+    ADD CONSTRAINT fk_fund_analysis_provider_etf_id FOREIGN KEY (provider_etf_id) REFERENCES public.provider_etf(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: fund_analysis fk_fund_analysis_ticker_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.fund_analysis
+    ADD CONSTRAINT fk_fund_analysis_ticker_id FOREIGN KEY (ticker_id) REFERENCES public.ticker(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: fund_analysis fk_fund_analysis_benchmark_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.fund_analysis
+    ADD CONSTRAINT fk_fund_analysis_benchmark_id FOREIGN KEY (benchmark_id) REFERENCES public.benchmark(id) ON UPDATE CASCADE ON DELETE SET NULL;
 
 
 --

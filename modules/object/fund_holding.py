@@ -25,6 +25,18 @@ def fetch_funds_holdings(fund_id: int, eval_date: date) -> List[FundHolding]:
         raise Exception(f"Error fetching the Fund Holdings from the DB: {e}")
 
 
+def fetch_first_holding_date(fund_id: int) -> date | None:
+    """The fund's inception date: its earliest fund_holding date."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT MIN(holding_date) FROM fund_holding WHERE fund_id = %s;", (fund_id,))
+                row = cur.fetchone()
+                return row[0] if row else None
+    except Error as e:
+        raise Exception(f"Error fetching first holding date for fund {fund_id}: {e}")
+
+
 def delete_all_for_fund(fund_id: int) -> None:
     try:
         with db_pool_instance.get_connection() as conn:

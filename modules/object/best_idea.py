@@ -57,6 +57,41 @@ def insert_bulk(provider_etf_id: int, value_date: date, benchmark_mode: str, row
         raise Exception(f"Error inserting Best Ideas in bulk: {e}")
 
 
+def fetch_for_etf_date(provider_etf_id: int, value_date: date, benchmark_mode: str) -> List[BestIdea]:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(BestIdea)) as cur:
+                cur.execute(
+                    'SELECT * FROM best_idea WHERE provider_etf_id = %s AND value_date = %s AND benchmark_mode = %s ORDER BY ranking;',
+                    (provider_etf_id, value_date, benchmark_mode),
+                )
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching best ideas for ETF {provider_etf_id} on {value_date}: {e}")
+
+
+def fetch_for_etfs(etf_value_dates: dict[int, date], benchmark_mode: str) -> List[BestIdea]:
+    """Best ideas of each {provider_etf_id: value_date} pair in one benchmark mode."""
+    if not etf_value_dates:
+        return []
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(BestIdea)) as cur:
+                cur.execute(
+                    """
+                    SELECT bi.* FROM best_idea bi
+                    JOIN unnest(%s::int[], %s::date[]) AS e(provider_etf_id, value_date)
+                      ON e.provider_etf_id = bi.provider_etf_id AND e.value_date = bi.value_date
+                    WHERE bi.benchmark_mode = %s
+                    ORDER BY bi.provider_etf_id, bi.ranking;
+                    """,
+                    (list(etf_value_dates.keys()), list(etf_value_dates.values()), benchmark_mode),
+                )
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching best ideas for ETFs: {e}")
+
+
 @dataclass
 class BestIdeaRanked:
     ticker_id: int

@@ -3,7 +3,7 @@ import re
 import log
 from datetime import date, timedelta
 from modules.core.db import ENVIRONMENT
-from modules.object import provider_etf_holding, fund, fund_holding, fund_holding_change
+from modules.object import provider_etf_holding, fund, fund_analysis, fund_holding, fund_holding_change
 from modules.cron import best_ideas_generator, funds_update
 from modules.calc import model_fund
 
@@ -41,9 +41,10 @@ def run(
     else:
         end_date = available_end_date
 
-    log.record_status(f"[sim] Erasing prior fund_holding/fund_holding_change for fund_id={fund_id}")
+    log.record_status(f"[sim] Erasing prior fund_holding/fund_holding_change/fund_analysis for fund_id={fund_id}")
     fund_holding.delete_all_for_fund(fund_id)
     fund_holding_change.delete_all_for_fund(fund_id)
+    fund_analysis.delete_all_for_fund(fund_id)
 
     # First recalculation date: the first Tuesday on/after inception_date.
     days_until_tuesday = (1 - inception_date.weekday()) % 7

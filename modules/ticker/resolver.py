@@ -33,6 +33,7 @@ class TickerResolver:
         self.cap_type: str | None = None
         self._symbol_cache: dict[str, Any] = {}
         self._isin_cache:   dict[str, Any] = {}
+        self._full_symbol_cache: dict[str, Any] = {}
         self._exchange_suffix_map: dict[str, str] = {}
 
     def set_classification(self, style_type: str, cap_type: str) -> None:
@@ -97,21 +98,25 @@ class TickerResolver:
         if not symbol_full:
             self._isin_cache[isin] = None
             return None
-        symbol = re.split(r'[\s.]', symbol_full)[0]
 
-        if symbol in self._symbol_cache:
-            result = self._symbol_cache[symbol]
+        # Keyed by the full FMP symbol (with exchange suffix), not the bare code: a bare code is
+        # shared by unrelated listings on different exchanges, and _symbol_cache is keyed by raw
+        # provider symbols, so reusing it here could hand back another security's ticker_id.
+        if symbol_full in self._full_symbol_cache:
+            result = self._full_symbol_cache[symbol_full]
             self._isin_cache[isin] = result
             return result
 
         profile = api_stocks.get_stock_profile(symbol_full)
         if not isinstance(profile, dict):
-            log.record_notice(f"No stocks data provider profile for symbol '{symbol}' (ISIN '{isin}'): {profile}")
+            log.record_notice(f"No stocks data provider profile for symbol '{symbol_full}' (ISIN '{isin}'): {profile}")
             self._isin_cache[isin] = None
+            self._full_symbol_cache[symbol_full] = None
             return None
 
         result = self._populate(profile)
         self._isin_cache[isin] = result
+        self._full_symbol_cache[symbol_full] = result
         return result
 
     def _resolve_by_symbol_search(self, symbol: str | None, name: str | None = None) -> Any:

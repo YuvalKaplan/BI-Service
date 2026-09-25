@@ -8,7 +8,7 @@ from modules.ticker.resolver import TickerResolver
 
 atexit.register(cleanup)
 
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', '.downloads')
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', '.output', 'downloads')
 
 if __name__ == '__main__':
     try:

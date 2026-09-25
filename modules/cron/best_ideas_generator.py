@@ -1,12 +1,13 @@
 import log
-from collections import Counter
 import pandas as pd
-from datetime import date
+from dataclasses import dataclass, field
+from datetime import date, datetime
 from modules.object import batch_run, batch_run_log
 from modules.object import provider, provider_etf, ticker
-from modules.object.provider_etf_holding import fetch_latest_holdings_for_etf
+from modules.object.provider_etf_holding import ProviderEtfHolding, QuarantinedHolding, fetch_latest_holdings_for_etf, aggregate_holdings
 from modules.object.ticker_value import fetch_latest_market_caps_within_window
 from modules.object import best_idea, benchmark
+from modules.object.fund_analysis import FundAnalysis
 
 DAYS_NO_MARKET_CAP = 5
 MIN_HOLDINGS_WITH_PRICES_PCT = 0.95
@@ -15,40 +16,92 @@ MAX_BEST_IDEAS_PER_FUND = 10
 HOLDING_DELTA_LIMIT_DROP_OFF = 0.20
 
 
-def _dedupe_by_ticker_id(holdings: list) -> list:
-    """Keeps only the first occurrence of each ticker_id — provider holdings data can
-    occasionally list the same ticker more than once, which would otherwise violate
-    best_idea's  primary key."""
-    seen: set[int] = set()
-    deduped = []
-    for h in holdings:
-        if h.ticker_id is not None:
-            if h.ticker_id in seen:
-                continue
-            seen.add(h.ticker_id)
-        deduped.append(h)
-    return deduped
+@dataclass
+class EtfInputs:
+    """Everything the active-weight calculation needs for one ETF on one holding date."""
+    etf: provider_etf.ProviderEtf
+    holding_date: date
+    holdings: list[ProviderEtfHolding]            # one per ticker (duplicate lines summed), priced only
+    market_cap_values: list
+    master_info: dict[int, tuple[int | None, float | None]]
+    unpriced_ticker_ids: list[int] = field(default_factory=list)
+    quarantined: list[QuarantinedHolding] = field(default_factory=list)
+    total_holdings: int = 0                        # after aggregation, excluding quarantined
+
+    @property
+    def coverage_ratio(self) -> float:
+        return len(self.holdings) / self.total_holdings if self.total_holdings else 0.0
 
 
-def _find_best_ideas(
-    holdings: list,
-    market_cap_values: list,
-    master_info: dict[int, tuple[int | None, float | None]],
-    limit: int | None = None,
-    benchmark_weights: dict[int, float] | None = None,
-) -> pd.DataFrame:
+def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = None) -> EtfInputs | None:
+    """
+    Loads an ETF's latest holdings (as of up_to_date, or now) and the market data needed to
+    compute its active weights. Returns None if no holdings were downloaded within
+    LOOK_BACK_WINDOW. Shared by run() and the per-fund analysis snapshot so both see exactly
+    the same inputs.
+    """
+    raw_holdings = fetch_latest_holdings_for_etf(pe.id, LOOK_BACK_WINDOW, up_to_date=up_to_date)
+    if not raw_holdings:
+        return None
+
+    # A ticker listed on several lines is summed when the lines agree on price, and
+    # quarantined (dropped) when they don't — see aggregate_holdings.
+    holdings, quarantined = aggregate_holdings(raw_holdings)
+    # holding_date is a `timestamp` column despite the dataclass typing it as `date`.
+    holding_date = raw_holdings[0].holding_date
+    holding_date = holding_date.date() if isinstance(holding_date, datetime) else holding_date
+
+    # Latest market caps within +/- DAYS_NO_MARKET_CAP of the holding date. Going a few days
+    # after the holding is useful if we have a new ticker that was just added to the holdings,
+    # as the first market_cap downloaded using the profile API may be a day or two after it.
+    ticker_ids = [h.ticker_id for h in holdings if h.ticker_id]
+    market_cap_values = fetch_latest_market_caps_within_window(ticker_ids, holding_date, DAYS_NO_MARKET_CAP)
+
+    # Master-ticker info for held tickers, plus a second hop for any master not itself among
+    # the holdings (e.g. an ETF holding only GOOG still needs GOOGL's accumulated_market_cap to
+    # compute the true combined company weight).
+    master_info = ticker.fetch_master_info_by_ids(ticker_ids)
+    extra_master_ids = [
+        mid for mid, _cap in master_info.values()
+        if mid is not None and mid not in master_info
+    ]
+    if extra_master_ids:
+        master_info.update(ticker.fetch_master_info_by_ids(extra_master_ids))
+
+    priced_ids = {v.ticker_id for v in market_cap_values}
+    return EtfInputs(
+        etf=pe,
+        holding_date=holding_date,
+        holdings=[h for h in holdings if h.ticker_id in priced_ids],
+        market_cap_values=market_cap_values,
+        master_info=master_info,
+        unpriced_ticker_ids=[h.ticker_id for h in holdings if h.ticker_id and h.ticker_id not in priced_ids],
+        quarantined=quarantined,
+        total_holdings=len(holdings),
+    )
+
+
+def compute_active_weights(inputs: EtfInputs, benchmark_weights: dict[int, float] | None = None) -> pd.DataFrame:
+    """
+    Company-level active weights for every holding of the ETF (not only the positive ones).
+    Columns: ticker_id (the ticker used — the master when share classes were consolidated),
+    market_value, market_cap, master_used, etf_weight, benchmark_weight, delta.
+    """
+    master_info = inputs.master_info
     df_holdings = pd.DataFrame(
         {"ticker_id": h.ticker_id, "market_value": h.market_value}
-        for h in holdings
+        for h in inputs.holdings
         if h.ticker_id and h.market_value and h.market_value > 0
     )
 
     df_values = pd.DataFrame(
         {"ticker_id": v.ticker_id, "market_cap": v.market_cap}
-        for v in market_cap_values
+        for v in inputs.market_cap_values
         if v.ticker_id and v.market_cap
     )
 
+    if df_holdings.empty or df_values.empty:
+        raise ValueError("No overlapping ticker_ids between holdings and market caps")
     df = df_holdings.merge(df_values, on="ticker_id", how="inner")
 
     if df.empty:
@@ -66,12 +119,19 @@ def _find_best_ideas(
         lambda row: row["accumulated_market_cap"] if pd.notna(row["accumulated_market_cap"]) else row["market_cap"],
         axis=1,
     )
+    # A master was used when a sibling was redirected onto it, or when the company's combined
+    # (accumulated) market cap stood in for the listing's own.
+    df["master_used"] = (df["effective_ticker_id"] != df["ticker_id"]) | df["accumulated_market_cap"].notna()
 
     # Company-level aggregation: sum the ETF's actual $ exposure across share classes of the
     # same company, producing one row per effective company rather than one per share class.
     grouped = (
         df.groupby("effective_ticker_id")
-          .agg(market_value=("market_value", "sum"), market_cap=("effective_market_cap", "first"))
+          .agg(
+              market_value=("market_value", "sum"),
+              market_cap=("effective_market_cap", "first"),
+              master_used=("master_used", "any"),
+          )
           .reset_index()
           .rename(columns={"effective_ticker_id": "ticker_id"})
     )
@@ -100,8 +160,12 @@ def _find_best_ideas(
         grouped["benchmark_weight"] = grouped["market_cap"] / total_market_cap
 
     grouped["delta"] = grouped["etf_weight"] - grouped["benchmark_weight"]
+    return grouped
 
-    best_ideas = grouped[grouped["delta"] > 0].sort_values("delta", ascending=False)
+
+def select_best_ideas(weights: pd.DataFrame, limit: int | None = None) -> pd.DataFrame:
+    """Picks the best ideas from compute_active_weights' output, ranked by delta (row order = rank)."""
+    best_ideas = weights[weights["delta"] > 0].sort_values("delta", ascending=False)
 
     dropped = best_ideas[best_ideas["delta"] > HOLDING_DELTA_LIMIT_DROP_OFF]
     if not dropped.empty:
@@ -114,6 +178,75 @@ def _find_best_ideas(
         best_ideas = best_ideas.head(limit)
 
     return best_ideas.reset_index(drop=True)
+
+
+def _find_best_ideas(inputs: EtfInputs, limit: int | None = None, benchmark_weights: dict[int, float] | None = None) -> pd.DataFrame:
+    return select_best_ideas(compute_active_weights(inputs, benchmark_weights), limit)
+
+
+def get_benchmark_weights(
+    benchmark_id: int,
+    as_of_date: date | None,
+    cache: dict[int, tuple[dict[int, float], date | None]],
+) -> tuple[dict[int, float], date | None]:
+    """{ticker_id: weight} and holding_date of the benchmark's latest snapshot as of as_of_date
+    (or now), memoized in `cache` so each benchmark is fetched once per run."""
+    if benchmark_id not in cache:
+        bm_holdings = benchmark.fetch_latest_holdings(benchmark_id, LOOK_BACK_WINDOW, up_to_date=as_of_date)
+        weights = {h.ticker_id: h.weight for h in bm_holdings if h.ticker_id}
+        cache[benchmark_id] = (weights, bm_holdings[0].holding_date if bm_holdings else None)
+    return cache[benchmark_id]
+
+
+def build_analysis_rows(
+    fund_id: int,
+    as_of_date: date,
+    inputs: EtfInputs,
+    weights: pd.DataFrame,
+    selected: pd.DataFrame,
+    benchmark_id: int | None,
+    benchmark_date: date | None,
+) -> list[FundAnalysis]:
+    """
+    One fund_analysis row per company in `weights` (noting whether and why it did or didn't
+    become a best idea), plus one per holding left out of the calculation for lack of a market
+    cap or for being quarantined as an inconsistent duplicate.
+    """
+    rank_by_ticker = {int(t): rank for rank, t in enumerate(selected["ticker_id"], start=1)}
+    base = dict(fund_id=fund_id, as_of_date=as_of_date, provider_etf_id=inputs.etf.id, holding_date=inputs.holding_date,
+                benchmark_id=benchmark_id, benchmark_date=benchmark_date)
+
+    rows: list[FundAnalysis] = []
+    for r in weights.to_dict("records"):
+        ticker_id = int(r["ticker_id"])
+        ranking = rank_by_ticker.get(ticker_id)
+        if ranking is not None:
+            note = 'best_idea'
+        elif r["delta"] <= 0:
+            note = 'delta<=0'
+        elif r["delta"] > HOLDING_DELTA_LIMIT_DROP_OFF:
+            note = 'delta>limit'
+        else:
+            note = 'beyond_top_N'
+        rows.append(FundAnalysis(
+            **base, ticker_id=ticker_id, market_cap=float(r["market_cap"]), master_used=bool(r["master_used"]),
+            etf_weight=float(r["etf_weight"]), benchmark_weight=float(r["benchmark_weight"]), delta=float(r["delta"]),
+            ranking=ranking, note=note,
+        ))
+
+    # A left-out ticker can coincide with a company row when it's the master of a sibling that
+    # was used — the company row already accounts for it, so it isn't repeated.
+    seen = {r.ticker_id for r in rows}
+    left_out = [(t, 'no_market_cap') for t in inputs.unpriced_ticker_ids] + [(q.ticker_id, 'quarantined') for q in inputs.quarantined]
+    for ticker_id, note in left_out:
+        if ticker_id in seen:
+            continue
+        seen.add(ticker_id)
+        rows.append(FundAnalysis(
+            **base, ticker_id=ticker_id, market_cap=None, master_used=False,
+            etf_weight=None, benchmark_weight=None, delta=None, ranking=None, note=note,
+        ))
+    return rows
 
 
 def record_problem(batch_run_id: int, provider: provider.Provider, etf: provider_etf.ProviderEtf, error: str, message: str | None, problem_etfs: list[str]) -> None:
@@ -142,9 +275,8 @@ def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
         generated_etfs = 0
         problem_etfs: list[str] = []
 
-        # Build a cache of {benchmark_id: {ticker_id: weight}} for all ETFs that have one.
-        # Fetched once per unique benchmark_id across all providers.
-        _bm_cache: dict[int, dict[int, float]] = {}
+        # {benchmark_id: ({ticker_id: weight}, holding_date)}, fetched once per unique benchmark_id.
+        _bm_cache: dict[int, tuple[dict[int, float], date | None]] = {}
 
         for p in providers:
             pe_list = provider_etf.fetch_by_provider_id(p.id)
@@ -153,69 +285,42 @@ def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
 
             for pe in pe_list:
                 try:
-                    # 1. Fetch holdings for the latest holding date within the look-back window
-                    raw_holdings = fetch_latest_holdings_for_etf(pe.id, LOOK_BACK_WINDOW, up_to_date=as_of_date)
-                    if not raw_holdings:
+                    # 1. Holdings for the latest holding date within the look-back window, with
+                    #    duplicate lines summed or quarantined, plus market caps and master info.
+                    inputs = prepare_etf_inputs(pe, as_of_date)
+                    if inputs is None:
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"No holdings have been downloaded for the past {LOOK_BACK_WINDOW} days", message=None, problem_etfs=problem_etfs)
                         continue
 
-                    # 1b. Provider holdings can occasionally list the same ticker more 
-                    # than once. This happens in international ETFs where the holdings may be of more that one exchange.
-                    # Keep only the first occurrence so it doesn't later violate best_idea's primary key.
-                    ticker_counts = Counter(h.ticker_id for h in raw_holdings if h.ticker_id is not None)
-                    duplicate_ids = [tid for tid, count in ticker_counts.items() if count > 1]
-                    if duplicate_ids:
-                        log.record_status(f"{log_prefix}ETF id={pe.id} name={pe.name}: found {len(duplicate_ids)} duplicate ticker_id(s) in holdings, keeping first occurrence: {duplicate_ids}")
-                        raw_holdings = _dedupe_by_ticker_id(raw_holdings)
-
-                    holding_date = raw_holdings[0].holding_date
-
-                    # 2. Fetch latest market caps within +/- 5 days of the holding date.
-                    # Going a few days after the holding is useful if we have a new ticker that was just added to the
-                    # holdings as the first market_cap downloaded using the profile API may be a day or two after the holding date..
-                    ticker_ids = [h.ticker_id for h in raw_holdings if h.ticker_id]
-                    market_cap_values = fetch_latest_market_caps_within_window(ticker_ids, holding_date, DAYS_NO_MARKET_CAP)
-
-                    # 2b. Master-ticker info for held tickers, plus a second hop for any master
-                    # not itself among the holdings (e.g. an ETF holding only GOOG still needs
-                    # GOOGL's accumulated_market_cap to compute the true combined company weight).
-                    master_info = ticker.fetch_master_info_by_ids(ticker_ids)
-                    extra_master_ids = [
-                        mid for mid, _cap in master_info.values()
-                        if mid is not None and mid not in master_info
-                    ]
-                    if extra_master_ids:
-                        master_info.update(ticker.fetch_master_info_by_ids(extra_master_ids))
+                    # 2. Report quarantined duplicates (one record per ETF, not per ticker)
+                    if inputs.quarantined:
+                        details = "; ".join(
+                            f"ticker_id={q.ticker_id} x{len(q.lines)} @ " + "/".join(f"{p_:.2f}" if p_ else "?" for p_ in q.implied_prices)
+                            for q in inputs.quarantined
+                        )
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="QUARANTINED DUPLICATES", message=f"{len(inputs.quarantined)} ticker(s) listed on several lines with inconsistent prices, excluded: {details}", problem_etfs=problem_etfs)
 
                     # 3. Identify and report stale tickers (no market cap within window)
-                    priced_ids = {v.ticker_id for v in market_cap_values}
-                    for h in raw_holdings:
-                        if h.ticker_id and h.ticker_id not in priced_ids:
-                            record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="STALE HOLDING", message=f"ticker_id={h.ticker_id} has no market cap for over {DAYS_NO_MARKET_CAP} days", problem_etfs=problem_etfs)
+                    for ticker_id in inputs.unpriced_ticker_ids:
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="STALE HOLDING", message=f"ticker_id={ticker_id} has no market cap for over {DAYS_NO_MARKET_CAP} days", problem_etfs=problem_etfs)
 
                     # 4. Coverage check
-                    coverage_ratio = len(market_cap_values) / len(raw_holdings)
-                    if coverage_ratio < MIN_HOLDINGS_WITH_PRICES_PCT:
-                        missing_count = len(raw_holdings) - len(market_cap_values)
-                        msg = f"Coverage {coverage_ratio:.1%}. Missing {missing_count} market caps for holding date {holding_date.strftime('%Y-%m-%d')}"
+                    if inputs.coverage_ratio < MIN_HOLDINGS_WITH_PRICES_PCT:
+                        missing_count = inputs.total_holdings - len(inputs.holdings)
+                        msg = f"Coverage {inputs.coverage_ratio:.1%}. Missing {missing_count} market caps for holding date {inputs.holding_date.strftime('%Y-%m-%d')}"
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Insufficient market cap coverage", message=msg, problem_etfs=problem_etfs)
                         continue
 
-                    final_holdings = [h for h in raw_holdings if h.ticker_id in priced_ids]
-
                     # 5a. Always generate self-benchmark best ideas
-                    self_df = _find_best_ideas(final_holdings, market_cap_values, master_info, MAX_BEST_IDEAS_PER_FUND)
-                    best_idea.insert_bulk(pe.id, holding_date, 'self', best_idea.df_to_rows(self_df, provider_etf_id=pe.id, value_date=holding_date, benchmark_mode='self'))
+                    self_df = _find_best_ideas(inputs, MAX_BEST_IDEAS_PER_FUND)
+                    best_idea.insert_bulk(pe.id, inputs.holding_date, 'self', best_idea.df_to_rows(self_df, provider_etf_id=pe.id, value_date=inputs.holding_date, benchmark_mode='self'))
 
                     # 5b. If this ETF has a benchmark configured, also generate full_universe best ideas
                     if pe.benchmark_id:
-                        if pe.benchmark_id not in _bm_cache:
-                            bm_holdings = benchmark.fetch_latest_holdings(pe.benchmark_id, LOOK_BACK_WINDOW, up_to_date=as_of_date)
-                            _bm_cache[pe.benchmark_id] = {h.ticker_id: h.weight for h in bm_holdings if h.ticker_id}
-                        bm_weights = _bm_cache.get(pe.benchmark_id)
+                        bm_weights, _bm_date = get_benchmark_weights(pe.benchmark_id, as_of_date, _bm_cache)
                         if bm_weights:
-                            universe_df = _find_best_ideas(final_holdings, market_cap_values, master_info, MAX_BEST_IDEAS_PER_FUND, benchmark_weights=bm_weights)
-                            best_idea.insert_bulk(pe.id, holding_date, 'full_universe', best_idea.df_to_rows(universe_df, provider_etf_id=pe.id, value_date=holding_date, benchmark_mode='full_universe'))
+                            universe_df = _find_best_ideas(inputs, MAX_BEST_IDEAS_PER_FUND, benchmark_weights=bm_weights)
+                            best_idea.insert_bulk(pe.id, inputs.holding_date, 'full_universe', best_idea.df_to_rows(universe_df, provider_etf_id=pe.id, value_date=inputs.holding_date, benchmark_mode='full_universe'))
 
                     generated_etfs += 1
 

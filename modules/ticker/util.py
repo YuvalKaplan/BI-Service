@@ -7,7 +7,13 @@ NAME_NOISE: set[str] = {
     'ltd', 'limited', 'llc', 'lp', 'llp',
     'plc', 'ag', 'se', 'sa', 'sas', 'nv', 'bv', 'gmbh', 'spa', 'srl', 'ab',
     'holdings', 'holding', 'group', 'international', 'industries', 'industry',
+    'of', 'and', 'de', 'la', 'del',
+    'common', 'stock', 'shares', 'share', 'ord', 'pref', 'preferred', 'adr', 'gdr', 'reg',
 }
+
+# Pure numbers ("0") and currency/par-value fragments ("krw5000") that providers append to
+# security names ("... COMMON STOCK KRW5000.0") and that never appear in FMP company names.
+_NAME_NOISE_PATTERN = re.compile(r'^(?:\d+|[a-z]{3}\d+)$')
 
 UNWANTED_NAMES = re.compile(r'\b(?:etfs?|funds?|trusts?|indexes?|indices|cryptos?)\b', re.IGNORECASE)
 
@@ -62,7 +68,7 @@ TREASURY_SECURITIES: set[str] = {
 def name_tokens(name: str) -> list[str]:
     """Return meaningful lowercase tokens from a company name, stripping noise words and single chars."""
     raw = re.split(r'[\s.\-,&/()\']', name.lower())
-    return [t for t in raw if len(t) > 1 and t not in NAME_NOISE]
+    return [t for t in raw if len(t) > 1 and t not in NAME_NOISE and not _NAME_NOISE_PATTERN.match(t)]
 
 
 def longest_name_token(name: str) -> str | None:
@@ -71,13 +77,30 @@ def longest_name_token(name: str) -> str | None:
     return max(tokens, key=len) if tokens else None
 
 
+def _tokens_match(a: str, b: str) -> bool:
+    """Equal, or one is a truncation of the other (providers abbreviate: "ELECTR" -> "Electronics")."""
+    if a == b:
+        return True
+    short, long_ = sorted((a, b), key=len)
+    return len(short) >= 4 and long_.startswith(short)
+
+
 def names_match(holding_name: str, api_name: str) -> bool:
-    """Return True if names share at least one meaningful token after stripping noise words."""
+    """
+    Return True if the two names refer to the same company after stripping noise words: every
+    token of the shorter name must match a token of the longer one, and the matches must cover
+    more than half of the longer name. Sharing a word or two is not enough — "Hyundai
+    Corporation" must not match "Hyundai Rotem", nor "Grupo Financiero Banorte" match "Grupo
+    Financiero Galicia". A loose match here maps unrelated holdings onto one ticker, which then
+    shows up as duplicate lines with inconsistent prices.
+    """
     a = set(name_tokens(holding_name))
     b = set(name_tokens(api_name))
     if not a or not b:
         return False
-    return bool(a & b)
+    shorter, longer = sorted((a, b), key=len)
+    matched = sum(1 for s in shorter if any(_tokens_match(s, l) for l in longer))
+    return matched == len(shorter) and matched * 2 > len(longer)
 
 
 def filter_symbol_candidates(results: list[dict], query: str) -> list[dict]:
@@ -136,10 +159,17 @@ def resolve_ticker_from_alt_data(isin: str | None, name: str | None) -> str | No
             return result.get('symbol') or None
 
     if name:
-        token = longest_name_token(name)
-        if token:
-            results = api_stocks.search_by_name(token)
-            if results:
-                return results[0].get('symbol') or None
+        # Search by the cleaned full name first, then by its longest token. Results are only
+        # candidates — accept the first whose name actually matches the holding's, never
+        # results[0] blindly.
+        tokens = name_tokens(name)
+        queries = list(dict.fromkeys(q for q in (" ".join(tokens), longest_name_token(name)) if q))
+        for query in queries:
+            for r in api_stocks.search_by_name(query):
+                api_name = r.get('name')
+                if not api_name or is_unwanted_names(api_name) or r.get('exchange') == 'CRYPTO':
+                    continue
+                if names_match(name, api_name):
+                    return r.get('symbol') or None
 
     return None

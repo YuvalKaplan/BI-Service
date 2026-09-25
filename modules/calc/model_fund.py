@@ -169,6 +169,53 @@ def resolve_canonical_ticker_ids(df: pd.DataFrame) -> pd.DataFrame:
     return df.assign(canonical_ticker_id=pd.array(canonical, dtype='int64'))
 
 
+def _eligibility_masks(
+    df: pd.DataFrame,
+    provider_etf_ids: list[int],
+    style_type: str | None,
+    cap_type: str,
+    country_type: str,
+    exchanges: list[str],
+    esg_only: bool,
+    held_ticker_ids: set[int] | None = None,
+) -> dict[str, pd.Series]:
+    """
+    The fund-configuration filters applied to the best-ideas DataFrame, one named boolean mask
+    per criterion (a row is eligible when all are True). Kept separate so the methodology
+    report can say which filter excluded a row, using exactly the logic the selection uses.
+    """
+    key = 'canonical_ticker_id'
+    etf_set = set(provider_etf_ids)
+    all_true = pd.Series(True, index=df.index)
+    masks: dict[str, pd.Series] = {}
+
+    masks['etf'] = df['provider_etf_id'].isin(etf_set) if etf_set else all_true
+    masks['style'] = df['style_type'] == style_type if style_type not in (None, 'core', 'blend') else all_true
+    if cap_type == 'large':
+        # A stock that has dropped below the large-cap threshold since it was bought is still
+        # let through here if it's already one of this fund's current holdings (held_ticker_ids),
+        # so it stays eligible to be ranked/kept rather than being force-sold purely for falling
+        # below the threshold — it will still be sold once its ranking genuinely drops out. This
+        # only ever widens the pool for a fund that already holds the ticker; funds that don't
+        # already hold it still can't pick it up as a fresh buy. See the matching comment in
+        # best_ideas_generator.compute_active_weights for why the full_universe benchmark_weight
+        # defaults to 0.0 for these instead of dropping the row outright.
+        masks['cap'] = (df['market_cap'] >= LARGE_CAP_THRESHOLD) | df[key].isin(held_ticker_ids or set())
+    elif cap_type == 'mid_small':
+        masks['cap'] = df['market_cap'] < LARGE_CAP_THRESHOLD
+    else:
+        masks['cap'] = all_true
+    if country_type == 'US':
+        masks['region'] = (df['etf_region'] == 'US') & (df['country'] == 'US')
+    elif country_type == 'Non-US':
+        masks['region'] = (df['etf_region'] == 'International') & df['country'].notna() & (df['country'] != 'US')
+    else:
+        masks['region'] = all_true
+    masks['exchange'] = df['exchange'].isin(exchanges) if exchanges else all_true
+    masks['esg'] = df['esg_qualified'] == True if esg_only else all_true
+    return masks
+
+
 def _filter_and_aggregate(
     df: pd.DataFrame,
     provider_etf_ids: list[int],
@@ -188,33 +235,10 @@ def _filter_and_aggregate(
     source_etf_id all relative to this fund's ETF list.
     """
     key = 'canonical_ticker_id'
-    etf_set = set(provider_etf_ids)
 
     mask = pd.Series(True, index=df.index)
-    if etf_set:
-        mask &= df['provider_etf_id'].isin(etf_set)
-    if style_type not in (None, 'core', 'blend'):
-        mask &= df['style_type'] == style_type
-    if cap_type == 'large':
-        # A stock that has dropped below the large-cap threshold since it was bought is still
-        # let through here if it's already one of this fund's current holdings (held_ticker_ids),
-        # so it stays eligible to be ranked/kept rather than being force-sold purely for falling
-        # below the threshold — it will still be sold once its ranking genuinely drops out. This
-        # only ever widens the pool for a fund that already holds the ticker; funds that don't
-        # already hold it still can't pick it up as a fresh buy. See the matching comment in
-        # best_ideas_generator._find_best_ideas for why the full_universe benchmark_weight
-        # defaults to 0.0 for these instead of dropping the row outright.
-        mask &= (df['market_cap'] >= LARGE_CAP_THRESHOLD) | df[key].isin(held_ticker_ids or set())
-    elif cap_type == 'mid_small':
-        mask &= df['market_cap'] < LARGE_CAP_THRESHOLD
-    if country_type == 'US':
-        mask &= (df['etf_region'] == 'US') & (df['country'] == 'US')
-    elif country_type == 'Non-US':
-        mask &= (df['etf_region'] == 'International') & df['country'].notna() & (df['country'] != 'US')
-    if exchanges:
-        mask &= df['exchange'].isin(exchanges)
-    if esg_only:
-        mask &= df['esg_qualified'] == True
+    for m in _eligibility_masks(df, provider_etf_ids, style_type, cap_type, country_type, exchanges, esg_only, held_ticker_ids).values():
+        mask &= m
 
     filtered = df[mask].copy()
     if exclude_ticker_ids:
@@ -372,6 +396,35 @@ def _fetch_and_select_by_region(
             country_type = 'Non-US'
 
     return _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type=country_type, held_ticker_ids=held_ticker_ids)
+
+
+def strategy_country_types(strategy: Strategy) -> list[str]:
+    """The country_type buckets _fetch_and_select_by_region selects from for this strategy."""
+    region = strategy.region
+    split = region.split if region is not None else None
+    if split is not None and split.us is not None and split.non_us is not None:
+        return ['US', 'Non-US']
+    if region is not None and region.name == 'US':
+        return ['US']
+    if region is not None and region.name == 'International':
+        return ['Non-US']
+    return ['all']
+
+
+def etfs_used(strategy: Strategy, all_best_ideas_df: pd.DataFrame) -> dict[int, date]:
+    """
+    {provider_etf_id: value_date} of the ETFs whose best ideas this fund's selection can draw
+    on: the strategy's ETF list (all ETFs when empty), limited to the ETF regions its country
+    buckets accept (same ETF-level conditions as _eligibility_masks).
+    """
+    df = all_best_ideas_df
+    if strategy.provider_etfs:
+        df = df[df['provider_etf_id'].isin(set(strategy.provider_etfs))]
+    regions = {'US': 'US', 'Non-US': 'International'}
+    country_types = strategy_country_types(strategy)
+    if 'all' not in country_types:
+        df = df[df['etf_region'].isin({regions[c] for c in country_types})]
+    return df.groupby('provider_etf_id')['value_date'].max().to_dict()
 
 
 def generate(
