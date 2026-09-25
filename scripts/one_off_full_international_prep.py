@@ -132,9 +132,9 @@ if __name__ == '__main__':
             f"Checked: {total} | Updated: {updated} | Marked invalid: {marked_invalid}",
         ]))
 
-        masters_updated, caps_updated = master.sync_masters_and_accumulated_caps()
-        print(f"Master sync: {masters_updated} link(s), {caps_updated} accumulated cap(s) refreshed.")
-        groups_report = master.build_master_groups_report(masters_updated, caps_updated)
+        masters_updated, unlinked, caps_updated = master.sync_masters_and_accumulated_caps()
+        print(f"Master sync: {masters_updated} link(s), {unlinked} unlinked, {caps_updated} accumulated cap(s) refreshed.")
+        groups_report = master.build_master_groups_report(masters_updated, caps_updated, unlinked)
         print(f"\n{groups_report}")
         report_sections.append(groups_report)
 

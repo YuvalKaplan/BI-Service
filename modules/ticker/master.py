@@ -124,6 +124,47 @@ def _sync_group(
     ]
 
 
+def _name_key(name: str | None) -> str:
+    return (name or '').strip().lower()
+
+
+def _still_matches(sibling: Ticker, master_ticker: Ticker) -> bool:
+    """A link is still valid if both tickers have a CIK and it's the same, or (when either one
+    lacks a CIK) if their normalized names still match — the same two criteria
+    sync_master_tickers() uses to form a group in the first place."""
+    if sibling.cik and master_ticker.cik:
+        return sibling.cik == master_ticker.cik
+    return bool(_name_key(sibling.name)) and _name_key(sibling.name) == _name_key(master_ticker.name)
+
+
+def unlink_stale_master_tickers() -> int:
+    """
+    Unlinks any sibling whose CIK no longer matches its master's, or (for name-based links)
+    whose name no longer matches — e.g. after a profile refresh corrected a CIK or company
+    name. Run before sync_master_tickers() so an unlinked ticker can be regrouped correctly in
+    the same run. Masters themselves are never re-elected; only sibling links are removed.
+    Returns the number of tickers unlinked.
+    """
+    siblings = ticker.fetch_linked_siblings()
+    if not siblings:
+        return 0
+    master_ids = sorted({s.master_ticker_id for s in siblings})
+    masters_by_id = {t.id: t for t in ticker.fetch_by_ids(master_ids)}
+
+    stale: list[int] = []
+    for s in siblings:
+        m = masters_by_id.get(s.master_ticker_id)
+        if m is None or not _still_matches(s, m):
+            stale.append(s.id)
+            log.record_notice(
+                f"Unlinked ticker_id={s.id} ({s.symbol}, {s.name}) from master ticker_id={s.master_ticker_id}"
+                + (f" ({m.symbol}, {m.name})" if m else "") + ": CIK/name no longer match."
+            )
+
+    ticker.clear_master_ticker_bulk(stale)
+    return len(stale)
+
+
 def sync_master_tickers() -> int:
     """
     Idempotent. Pass A groups tickers sharing a CIK; Pass B (only for tickers with no CIK)
@@ -147,8 +188,7 @@ def sync_master_tickers() -> int:
     no_cik_by_id: dict[int, Ticker] = {}
     for t in no_cik_tickers:
         no_cik_by_id[t.id] = t
-        key = t.name.strip().lower()
-        name_groups.setdefault(key, []).append(t.id)
+        name_groups.setdefault(_name_key(t.name), []).append(t.id)
 
     name_group_lists = [ids for ids in name_groups.values() if len(ids) > 1]
     name_ids = [tid for ids in name_group_lists for tid in ids]
@@ -175,17 +215,23 @@ def refresh_accumulated_market_caps() -> int:
             updates.append((master_id, sum(caps)))
 
     ticker.update_accumulated_market_cap_bulk(updates)
-    log.record_status(f"Accumulated market cap refresh: {len(updates)} master(s) updated.")
+    cleared = ticker.clear_stale_accumulated_market_caps()
+    log.record_status(
+        f"Accumulated market cap refresh: {len(updates)} master(s) updated, {cleared} stale cleared."
+    )
     return len(updates)
 
 
-def sync_masters_and_accumulated_caps() -> tuple[int, int]:
+def sync_masters_and_accumulated_caps() -> tuple[int, int, int]:
+    """Returns (links_added, links_removed, caps_refreshed). Unlinking runs first so a ticker
+    whose CIK/name changed can be regrouped correctly in the same run."""
+    unlinked = unlink_stale_master_tickers()
     masters_updated = sync_master_tickers()
     caps_updated = refresh_accumulated_market_caps()
-    return masters_updated, caps_updated
+    return masters_updated, unlinked, caps_updated
 
 
-def build_master_groups_report(masters_updated: int = 0, caps_updated: int = 0) -> str:
+def build_master_groups_report(masters_updated: int = 0, caps_updated: int = 0, unlinked: int = 0) -> str:
     """
     Human-readable summary of every current master-ticker group. CIK matches (the reliable,
     high-volume case) are only counted, not listed individually; name matches (the fallback
@@ -203,7 +249,7 @@ def build_master_groups_report(masters_updated: int = 0, caps_updated: int = 0) 
         "# Master Ticker Groups Report",
         "",
         f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"This run: {masters_updated} new link(s), {caps_updated} accumulated cap(s) refreshed.",
+        f"This run: {masters_updated} new link(s), {unlinked} unlinked, {caps_updated} accumulated cap(s) refreshed.",
         "",
     ]
 

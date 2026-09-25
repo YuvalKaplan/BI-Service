@@ -117,6 +117,18 @@ def fetch_all_valid() -> list['Ticker']:
         raise Exception(f"Error fetching all valid tickers: {e}")
 
 
+def fetch_all_valid_companies() -> list['Ticker']:
+    """Valid tickers that aren't a share-class sibling (master_ticker_id IS NULL) — one row per
+    company, for company-level analysis (ESG) that doesn't need repeating per share class."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                cur.execute("SELECT * FROM ticker WHERE invalid IS NULL AND master_ticker_id IS NULL;")
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching all valid companies: {e}")
+
+
 def fetch_stale_tickers(include_invalid: bool = False) -> list['Ticker']:
     """
     Every ticker whose profile hasn't been refreshed via the FMP profile API within the last
@@ -305,7 +317,8 @@ def update_style_from_categorization_etfs() -> None:
                     FROM public.categorize_ticker ct
                     WHERE t.symbol        = ct.symbol
                       AND ct.style_type IS NOT NULL
-                      AND t.invalid     IS NULL;
+                      AND t.invalid     IS NULL
+                      AND t.master_ticker_id IS NULL;
                 """)
     except Error as e:
         raise Exception(f"Error updating ticker style from categorization ETFs: {e}")
@@ -325,7 +338,8 @@ def update_style_for_unclassified() -> None:
                       AND t.exchange      = ct.exchange
                       AND ct.style_type   IS NOT NULL
                       AND t.style_type    IS NULL
-                      AND t.invalid       IS NULL;
+                      AND t.invalid       IS NULL
+                      AND t.master_ticker_id IS NULL;
                 """)
     except Error as e:
         raise Exception(f"Error updating style for unclassified tickers: {e}")
@@ -345,6 +359,7 @@ def update_style_from_provider_etfs() -> None:
                     WHERE t.id         = peh.ticker_id
                       AND t.style_type IS NULL
                       AND t.invalid    IS NULL
+                      AND t.master_ticker_id IS NULL
                       AND pe.style_type IN ('value', 'growth');
                 """)
     except Error as e:
@@ -358,6 +373,7 @@ def fetch_new_tickers_for_style() -> list['Ticker']:
                 cur.execute("""
                     SELECT id, symbol FROM ticker
                     WHERE style_type IS NULL AND invalid IS NULL
+                      AND master_ticker_id IS NULL
                       AND style_factors_failed_at IS NULL
                 """)
                 return cur.fetchall()
@@ -372,6 +388,7 @@ def fetch_retry_tickers_for_style() -> list['Ticker']:
                 cur.execute("""
                     SELECT id, symbol FROM ticker
                     WHERE style_type IS NULL AND invalid IS NULL
+                      AND master_ticker_id IS NULL
                       AND style_factors_failed_at < NOW() - INTERVAL '30 days'
                     LIMIT 200
                 """)
@@ -458,6 +475,45 @@ def update_master_ticker_bulk(pairs: list[tuple[int, int]]) -> None:
                 )
     except Error as e:
         raise Exception(f"Error bulk-updating master_ticker_id: {e}")
+
+
+def fetch_linked_siblings() -> list['Ticker']:
+    """Every ticker currently pointing at a master (master_ticker_id set)."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                cur.execute("SELECT * FROM ticker WHERE master_ticker_id IS NOT NULL;")
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching linked sibling tickers: {e}")
+
+
+def clear_master_ticker_bulk(ticker_ids: list[int]) -> None:
+    if not ticker_ids:
+        return
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE ticker SET master_ticker_id = NULL WHERE id = ANY(%s);", (ticker_ids,))
+    except Error as e:
+        raise Exception(f"Error clearing master_ticker_id: {e}")
+
+
+def clear_stale_accumulated_market_caps() -> int:
+    """NULLs accumulated_market_cap on any ticker that's no longer a master (no sibling points
+    at it) — otherwise a former master keeps its old combined cap after being unlinked."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE ticker t
+                    SET accumulated_market_cap = NULL
+                    WHERE t.accumulated_market_cap IS NOT NULL
+                      AND NOT EXISTS (SELECT 1 FROM ticker s WHERE s.master_ticker_id = t.id);
+                """)
+                return cur.rowcount
+    except Error as e:
+        raise Exception(f"Error clearing stale accumulated_market_cap: {e}")
 
 
 def fetch_master_groups() -> list[tuple[int, list[int]]]:

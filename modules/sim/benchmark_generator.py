@@ -71,7 +71,7 @@ def run(inception_date: date) -> list[tuple[str, date, int]]:
     most recent few days) — otherwise the same weekday the live cron refreshes the benchmark on.
 
     Returns a (benchmark_name, holding_date, num_holdings) row per snapshot actually stored,
-    for callers that want to report on what was created (e.g. scripts/sim_prep_data.py).
+    for callers that want to report on what was created (e.g. scripts/sim_benchmark.py).
 
     The eligible large-cap universe is fixed from today's FMP screener call
     (the screener has no historical mode); each resolved ticker's historical

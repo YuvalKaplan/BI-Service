@@ -66,12 +66,12 @@ if __name__ == '__main__':
 
         if weekday == 2: # Wednesday
             try:
-                masters_updated, caps_updated = ticker_master.sync_masters_and_accumulated_caps()
+                masters_updated, unlinked, caps_updated = ticker_master.sync_masters_and_accumulated_caps()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on ticker master/accumulated-cap sync with error:\n{e}\n\n")
                 raise e
 
-            message_actions += f"Ticker master sync: {masters_updated} link(s), {caps_updated} accumulated cap(s) refreshed\n"
+            message_actions += f"Ticker master sync: {masters_updated} link(s), {unlinked} unlinked, {caps_updated} accumulated cap(s) refreshed\n"
             message_actions += BREAKER_LINE
 
             try:

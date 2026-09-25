@@ -86,11 +86,12 @@ python scripts/current_benchmark_generator.py --dev    # today's live benchmark 
 Ongoing maintenance runs automatically: ticker profile refresh on the Tue–Sat cron step, master sync + accumulated cap refresh on Wednesday before benchmark/best-ideas generation (see `service_cron.py`).
 
 #### Preparing data for a historical simulation (sim)
-`scripts/sim_prep_data.py` combines all three prerequisite steps above plus the historical benchmark backfill into one call (edit `inception_date` in the file first; it asks the same retry-invalid prompt as `data_fill_ticker_profile.py`, since it goes over the exact same ticker list):
+Two steps, in order, before `sim_fund.py`:
 ```
-python scripts/sim_prep_data.py --dev
+python scripts/sim_prep_data.py --dev    # ticker profile refresh + master ticker sync
+python scripts/sim_benchmark.py --dev    # historical benchmark backfill (edit inception_date in the file first)
 ```
-Run this before `sim_fund.py`. The ticker profile refresh and master sync steps are idempotent, so it's safe to re-run even if the live steps above already populated them.
+`sim_prep_data.py` asks the same retry-invalid prompt as `data_fill_ticker_profile.py`, since it goes over the exact same ticker list. Its steps are idempotent, so it's safe to re-run even if the live steps above already populated them. It's equivalent to running `data_fill_ticker_profile.py` then `data_fill_master_tickers.py` (in that order — the profile refresh supplies the CIKs master matching relies on), so if you've just run both of those, you can skip straight to `sim_benchmark.py`.
 
 ## Playwright
 We are using this library to simulate activity in a web browser. We are using the [headless version](https://playwright.dev/python/docs/browsers).
