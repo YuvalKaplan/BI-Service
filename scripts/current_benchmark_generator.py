@@ -5,4 +5,4 @@ from modules.cron import benchmark_generator
 atexit.register(cleanup)
 
 if __name__ == '__main__':
-    benchmark_generator.run()
+    print(benchmark_generator.run())

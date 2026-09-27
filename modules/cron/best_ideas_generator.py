@@ -58,8 +58,8 @@ def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = N
     market_cap_values = fetch_latest_market_caps_within_window(ticker_ids, holding_date, DAYS_NO_MARKET_CAP)
 
     # Master-ticker info for held tickers, plus a second hop for any master not itself among
-    # the holdings (e.g. an ETF holding only GOOG still needs GOOGL's accumulated_market_cap to
-    # compute the true combined company weight).
+    # the holdings (e.g. an ETF holding only GOOG still needs the company_market_cap stored on
+    # GOOGL, its master).
     master_info = ticker.fetch_master_info_by_ids(ticker_ids)
     extra_master_ids = [
         mid for mid, _cap in master_info.values()
@@ -107,21 +107,22 @@ def compute_active_weights(inputs: EtfInputs, benchmark_weights: dict[int, float
     if df.empty:
         raise ValueError("No overlapping ticker_ids between holdings and market caps")
 
-    # Redirect share-class siblings (e.g. GOOGL/GOOG) onto their master ticker so both the
-    # ETF's exposure and the company's market cap are counted once, at the company level,
-    # instead of being split across each individually-listed share class. Ticker ids are
+    # Redirect share-class siblings / cross-listings (e.g. GOOGL/GOOG) onto their master ticker
+    # so the ETF's exposure is combined per company, and the company is measured by its company
+    # market cap (its primary listing's cap — FMP reports the whole company's cap on every
+    # listing, so it is never summed across listings). Ticker ids are
     # always positive, so `or t` safely falls back to the ticker's own id when it has no
     # master (avoids pandas' fillna on a mixed None/int object column, which triggers a
     # downcast FutureWarning).
     df["effective_ticker_id"] = df["ticker_id"].map(lambda t: master_info.get(t, (None, None))[0] or t).astype(int)
-    df["accumulated_market_cap"] = df["effective_ticker_id"].map(lambda t: master_info.get(t, (None, None))[1])
+    df["company_market_cap"] = df["effective_ticker_id"].map(lambda t: master_info.get(t, (None, None))[1])
     df["effective_market_cap"] = df.apply(
-        lambda row: row["accumulated_market_cap"] if pd.notna(row["accumulated_market_cap"]) else row["market_cap"],
+        lambda row: row["company_market_cap"] if pd.notna(row["company_market_cap"]) else row["market_cap"],
         axis=1,
     )
-    # A master was used when a sibling was redirected onto it, or when the company's combined
-    # (accumulated) market cap stood in for the listing's own.
-    df["master_used"] = (df["effective_ticker_id"] != df["ticker_id"]) | df["accumulated_market_cap"].notna()
+    # A master was used when a sibling was redirected onto it, or when the company market cap
+    # stood in for the listing's own.
+    df["master_used"] = (df["effective_ticker_id"] != df["ticker_id"]) | df["company_market_cap"].notna()
 
     # Company-level aggregation: sum the ETF's actual $ exposure across share classes of the
     # same company, producing one row per effective company rather than one per share class.

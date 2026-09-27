@@ -1,7 +1,7 @@
 """
 Prepares ticker data needed before a historical simulation: refreshes stale ticker profile data
 (cik/isin/name/etc., needed for master-ticker grouping), then elects/freezes master tickers and
-refreshes accumulated_market_cap. Follow with scripts/sim_benchmark.py (historical benchmark
+refreshes company_market_cap and region. Follow with scripts/sim_benchmark.py (historical benchmark
 backfill), then sim_fund.py.
 
 Ticker profile refresh and master sync are idempotent, so it's safe to re-run this even if the
@@ -41,8 +41,8 @@ if __name__ == '__main__':
             f"Checked: {total} | Updated: {updated} | Marked invalid: {marked_invalid}",
         ]))
 
-        masters_updated, unlinked, caps_updated = master.sync_masters_and_accumulated_caps()
-        print(f"Master sync: {masters_updated} link(s), {unlinked} unlinked, {caps_updated} accumulated cap(s) refreshed.")
+        masters_updated, unlinked, caps_updated = master.sync_masters_and_company_data()
+        print(f"Master sync: {masters_updated} link(s), {unlinked} unlinked, {caps_updated} company cap(s) refreshed.")
         groups_report = master.build_master_groups_report(masters_updated, caps_updated, unlinked)
         print(f"\n{groups_report}")
         report_sections.append(groups_report)

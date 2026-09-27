@@ -44,7 +44,7 @@ def fetch_latest_market_caps_within_window(ticker_ids: List[int], as_of_date: da
 
 def fetch_latest_market_caps(ticker_ids: List[int]) -> dict[int, float]:
     """Latest known market cap per ticker id, with no date window — used for master-ticker
-    election and accumulated market cap refresh, where siblings may have staggered price-refresh
+    election and company market cap refresh, where siblings may have staggered price-refresh
     dates and we always want whatever is most recently on record for each."""
     if not ticker_ids:
         return {}

@@ -116,8 +116,12 @@ def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
     Load all best ideas within the lookback window for all benchmark modes,
     including ticker attributes needed for per-fund filtering.
     Returned DataFrame columns: provider_etf_id, ticker_id, value_date, ranking,
-    delta, benchmark_mode, style_type, exchange, country, esg_qualified, name,
+    delta, benchmark_mode, style_type, exchange, country, region, esg_qualified, name,
     master_ticker_id, market_cap, etf_region.
+    market_cap is the company market cap when the ticker is a multi-listing company's master
+    (its primary listing's cap, maintained by master.refresh_company_data — latest, not as of
+    the date), else the listing's own latest cap within the window. A master's own listing can
+    be a secondary one with unreliable data, so its own cap is never used for the company.
     Callers should filter by benchmark_mode to match each fund's strategy.
     """
     sql = """
@@ -150,10 +154,11 @@ def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
             t.style_type,
             t.exchange,
             t.country,
+            t.region,
             t.esg_qualified,
             t.name,
             t.master_ticker_id,
-            tv.market_cap,
+            COALESCE(t.company_market_cap, tv.market_cap) AS market_cap,
             pe.region AS etf_region
         FROM latest_ideas li
         JOIN ticker t ON t.id = li.ticker_id

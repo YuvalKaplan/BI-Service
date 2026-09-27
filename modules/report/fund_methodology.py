@@ -137,6 +137,15 @@ class _Context:
         t = self.tickers.get(ticker_id) if ticker_id else None
         return (t.name or '') if t else ''
 
+    def exchange(self, ticker_id: int | None) -> str:
+        t = self.tickers.get(ticker_id) if ticker_id else None
+        return (t.exchange or '') if t else ''
+
+    def provider_name(self, etf_id: int) -> str:
+        e = self.etfs.get(etf_id)
+        p = self.providers.get(e.provider_id) if e else None
+        return p.name if p else ''
+
     def etf_label(self, etf_id: int | None) -> str:
         e = self.etfs.get(etf_id) if etf_id else None
         if e is None and etf_id:
@@ -188,6 +197,7 @@ def _write_etf_files(ctx: _Context, out_dir: str) -> list[str]:
             'Symbol': ctx.sym(a.ticker_id),
             'Name': ctx.tname(a.ticker_id),
             'Country': ctx.tickers[a.ticker_id].country if a.ticker_id in ctx.tickers else '',
+            'Region': ctx.tickers[a.ticker_id].region if a.ticker_id in ctx.tickers else '',
             'Listings held': per_company['listings'].get(ctx.sym(a.ticker_id), '') if not per_company.empty else '',
             'Master used': 'Y' if a.master_used else 'N',
             'Market value': per_company['market_value'].get(ctx.sym(a.ticker_id)) if not per_company.empty else None,
@@ -244,13 +254,15 @@ def _write_benchmark_file(ctx: _Context, out_dir: str) -> str:
                 df = pd.DataFrame([{
                     'Symbol': ctx.sym(r.ticker_id), 'Name': ctx.tname(r.ticker_id),
                     'Country': ctx.tickers[r.ticker_id].country if r.ticker_id in ctx.tickers else '',
+                    'Region': ctx.tickers[r.ticker_id].region if r.ticker_id in ctx.tickers else '',
+                    'Exchange': ctx.exchange(r.ticker_id),
                     'Market cap': r.market_cap, 'Weight': r.weight,
                     'Held by a fund ETF': 'Y' if r.ticker_id in held else '',
                 } for r in rows]).sort_values('Weight', ascending=False)
                 etfs = ", ".join(ctx.etf_label(a) for a in sorted({a.provider_etf_id for a in ctx.analysis if a.benchmark_id == bm_id}))
                 _write_sheet(w, _sheet_name(bm.name, used), df, {'Market cap': MONEY, 'Weight': PCT}, [
                     ('Benchmark', f"{bm.name} ({bm.id})"), ('Region', bm.region), ('Snapshot date', bm_date),
-                    ('Universe', f"{bm.cap_type} {bm.style_type}, market cap >= {bm.market_cap_min:,}, market-cap weighted, share classes combined"),
+                    ('Universe', f"{bm.cap_type} {bm.style_type}, USD market cap >= {bm.market_cap_min:,}, market-cap weighted, one row per company (its primary listing's cap), region by primary listing"),
                     ('Constituents', len(df)), ('Used for ETFs', etfs),
                 ])
         else:
@@ -258,6 +270,7 @@ def _write_benchmark_file(ctx: _Context, out_dir: str) -> str:
                 rows = [a for a in ctx.analysis if a.provider_etf_id == etf_id and a.benchmark_weight is not None]
                 df = pd.DataFrame([{
                     'Symbol': ctx.sym(a.ticker_id), 'Name': ctx.tname(a.ticker_id),
+                    'Exchange': ctx.exchange(a.ticker_id),
                     'Market cap used': a.market_cap, 'Weight': a.benchmark_weight,
                 } for a in rows]).sort_values('Weight', ascending=False)
                 _write_sheet(w, _sheet_name(ctx.etfs[etf_id].name or str(etf_id), used), df, {'Market cap used': MONEY, 'Weight': PCT}, [
@@ -275,7 +288,7 @@ def _eligibility(ctx: _Context, df: pd.DataFrame) -> tuple[pd.Series, pd.Series]
     s = ctx.strategy
     styles = ['growth', 'value'] if (s.style.name == 'blend' and s.style.value is not None and s.style.growth is not None) else [s.style.name]
     ranking_level = s.ranking_to + (5 if s.allocation == 'market_cap' else 2)
-    labels = {'etf': 'not one of the fund ETFs', 'style': 'style', 'cap': 'market cap', 'region': 'region/country',
+    labels = {'etf': 'not one of the fund ETFs', 'style': 'style', 'cap': 'market cap', 'region': 'region (primary listing)',
               'exchange': 'exchange', 'esg': 'not ESG-qualified'}
 
     eligible = pd.Series(False, index=df.index)
@@ -308,6 +321,7 @@ def _write_best_ideas_file(ctx: _Context, out_dir: str) -> str:
     df['eligible'] = eligible
     df['excluded_reason'] = reason
     out = pd.DataFrame([{
+        'Provider': ctx.provider_name(r['provider_etf_id']),
         'ETF': ctx.etf_label(r['provider_etf_id']),
         'Holdings date': r['value_date'],
         'Rank': r['ranking'],
@@ -321,6 +335,7 @@ def _write_best_ideas_file(ctx: _Context, out_dir: str) -> str:
         'Market cap': r['market_cap'],
         'Large cap': 'Y' if pd.notna(r['market_cap']) and r['market_cap'] >= LARGE_CAP_THRESHOLD else 'N',
         'Country': r['country'],
+        'Region': r['region'],
         'Exchange': r['exchange'],
         'ESG': 'Y' if r['esg_qualified'] else 'N',
         'Eligible for fund': 'Y' if r['eligible'] else 'N',
@@ -350,7 +365,7 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
 
     def bucket(ticker_id: int) -> str:
         t = ctx.tickers.get(ticker_id)
-        region = ('US' if t and t.country == 'US' else 'Non-US') if s.region and s.region.split else (s.region.name if s.region else 'all')
+        region = ('US' if t and t.region == 'US' else 'Non-US') if s.region and s.region.split else (s.region.name if s.region else 'all')
         return f"{region} / {t.style_type if t else '?'}"
 
     holdings = pd.DataFrame([{
@@ -432,7 +447,7 @@ def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
         f"1. **ETF holdings** — `etfs/` has one workbook per constituent ETF ({len(etf_files)}), with the holdings file "
         f"downloaded from the provider for the date shown. A ticker listed on several lines is summed when all lines "
         f"imply the same price (within {DUP_PRICE_TOLERANCE - 1:.0%}), and excluded (quarantined) when they don't. "
-        "Share classes of one company (e.g. GOOGL/GOOG) are combined under the company's master ticker (*Master used*).",
+        "Listings of one company (share classes such as GOOGL/GOOG, and foreign listings) are combined under the company's master ticker (*Master used*), measured by the company market cap of its primary listing.",
         f"2. **Benchmark** — mode `{ctx.mode}`: {bm_text}.",
         f"3. **Active weight** — for each company, ETF weight minus benchmark weight (delta). The top "
         f"{big.MAX_BEST_IDEAS_PER_FUND} companies with 0 < delta <= {big.HOLDING_DELTA_LIMIT_DROP_OFF:.0%} are the ETF's "
@@ -455,7 +470,7 @@ def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
         "## Caveat",
         "",
         "ETF, benchmark and best-idea numbers are the values stored when the fund was calculated. The fund-level filters "
-        "(style, country, exchange, ESG) are evaluated against the tickers' *current* attributes, so for an old date a "
+        "(style, region, exchange, ESG) are evaluated against the tickers' *current* attributes, so for an old date a "
         "change since then can make the re-run selection differ — any such holding is flagged `Matches stored = N` in "
         "`fund.xlsx`.",
         "",

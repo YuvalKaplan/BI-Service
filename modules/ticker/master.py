@@ -3,6 +3,7 @@ from datetime import datetime
 from modules.core import api_stocks
 from modules.object import ticker, ticker_value
 from modules.object.ticker import Ticker
+from modules.ticker import company
 from modules.ticker import util as tu
 from modules.ticker.resolver import TickerResolver
 
@@ -88,14 +89,10 @@ def _elect_master(
     tickers_by_id: dict[int, Ticker],
     market_caps: dict[int, float],
 ) -> int:
-    """First-election tie-break: highest market cap ("the point-in-time biggest ticker
-    representation of the company"), then US-exchange preference, then lowest id."""
-    def sort_key(tid: int):
-        t = tickers_by_id[tid]
-        cap = market_caps.get(tid) or 0.0
-        is_us = 1 if t.exchange in ticker.US_EXCHANGES else 0
-        return (-cap, -is_us, tid)
-    return min(candidate_ids, key=sort_key)
+    """First-election rule: the company's primary listing (home-market listing, else a US
+    listing — see modules.ticker.company), else the highest-cap listing, then lowest id."""
+    members = [tickers_by_id[tid] for tid in candidate_ids]
+    return company.primary_listing(members, None, market_caps).id
 
 
 def _sync_group(
@@ -165,11 +162,53 @@ def unlink_stale_master_tickers() -> int:
     return len(stale)
 
 
+def repair_master_chains() -> int:
+    """
+    Makes every link point directly at a root master: a ticker whose master itself has a master
+    is re-pointed at the end of the chain, and a cycle (A -> B -> A) is broken by electing one
+    of its members as the master and clearing that member's own link. Run before and after
+    sync_master_tickers() so grouping always starts from, and leaves, a flat one-level structure.
+    Returns the number of tickers re-pointed or cleared.
+    """
+    master_of: dict[int, int | None] = {s.id: s.master_ticker_id for s in ticker.fetch_linked_siblings()}
+    if not master_of:
+        return 0
+
+    fixes: dict[int, int | None] = {}
+    for start in list(master_of):
+        path: list[int] = []
+        node = start
+        while master_of.get(node) is not None and node not in path:
+            path.append(node)
+            node = master_of[node]
+        if node in path:  # cycle: elect a master among the cycle members
+            cycle = path[path.index(node):]
+            tickers_by_id = {t.id: t for t in ticker.fetch_by_ids(cycle)}
+            caps = ticker_value.fetch_latest_market_caps(cycle)
+            root = _elect_master(cycle, tickers_by_id, caps)
+            master_of[root] = None
+            fixes[root] = None
+            log.record_notice(f"Master cycle {cycle} broken: ticker_id={root} elected master.")
+            node = root
+        for tid in path:
+            if tid != node and master_of.get(tid) != node:
+                master_of[tid] = node
+                fixes[tid] = node
+
+    ticker.update_master_ticker_bulk(list(fixes.items()))
+    if fixes:
+        log.record_status(f"Ticker master repair: {len(fixes)} link(s) flattened.")
+    return len(fixes)
+
+
 def sync_master_tickers() -> int:
     """
-    Idempotent. Pass A groups tickers sharing a CIK; Pass B (only for tickers with no CIK)
-    falls back to grouping by normalized company name, catching international listings that
-    don't carry an SEC CIK. Both passes share the same election/freeze rule via _sync_group.
+    Idempotent. Pass A groups tickers sharing a CIK. Pass B handles tickers with no CIK
+    (typically non-US listings) by normalized company name: a name that matches exactly one CIK
+    company joins that company's master — this is how a US company's foreign listings (e.g.
+    Alphabet on XETRA) end up under the US master, even when they had already formed a group
+    of their own (the one exception to "masters are frozen"). Other no-CIK names group among
+    themselves under the usual elect-and-freeze rule (_sync_group).
     Returns the number of ticker rows whose master_ticker_id was newly assigned/changed.
     """
     assignments: list[tuple[int, int]] = []
@@ -181,8 +220,16 @@ def sync_master_tickers() -> int:
     market_caps = ticker_value.fetch_latest_market_caps(cik_ids) if cik_ids else {}
     for _cik, member_ids in cik_groups:
         assignments.extend(_sync_group(member_ids, tickers_by_id, market_caps))
+    pass_a = dict(assignments)
 
-    # Pass B: name-based groups among tickers that still have no CIK.
+    # Name index of CIK companies: name -> the company's master (after Pass A's assignments).
+    cik_company_by_name: dict[str, set[int]] = {}
+    for t in ticker.fetch_cik_tickers():
+        key = _name_key(t.name)
+        if key:
+            cik_company_by_name.setdefault(key, set()).add(pass_a.get(t.id) or t.master_ticker_id or t.id)
+
+    # Pass B: tickers that still have no CIK, grouped by normalized name.
     no_cik_tickers = ticker.fetch_no_cik_tickers()
     name_groups: dict[str, list[int]] = {}
     no_cik_by_id: dict[int, Ticker] = {}
@@ -190,44 +237,77 @@ def sync_master_tickers() -> int:
         no_cik_by_id[t.id] = t
         name_groups.setdefault(_name_key(t.name), []).append(t.id)
 
-    name_group_lists = [ids for ids in name_groups.values() if len(ids) > 1]
-    name_ids = [tid for ids in name_group_lists for tid in ids]
+    merged = 0
+    ambiguous: list[str] = []
+    local_groups: list[list[int]] = []
+    for key, member_ids in name_groups.items():
+        companies = cik_company_by_name.get(key)
+        if companies and len(companies) == 1:
+            target = next(iter(companies))
+            moves = [(tid, target) for tid in member_ids if tid != target and no_cik_by_id[tid].master_ticker_id != target]
+            assignments.extend(moves)
+            merged += len(moves)
+        elif companies:
+            ambiguous.append(key)
+        elif len(member_ids) > 1:
+            local_groups.append(member_ids)
+
+    name_ids = [tid for ids in local_groups for tid in ids]
     name_market_caps = ticker_value.fetch_latest_market_caps(name_ids) if name_ids else {}
-    for member_ids in name_group_lists:
+    for member_ids in local_groups:
         assignments.extend(_sync_group(member_ids, no_cik_by_id, name_market_caps))
 
     ticker.update_master_ticker_bulk(assignments)
-    log.record_status(f"Ticker master sync: {len(assignments)} assignment(s).")
+    if ambiguous:
+        log.record_notice(f"Ticker master sync: {len(ambiguous)} no-CIK name(s) match several CIK companies, left unlinked: {ambiguous[:20]}")
+    log.record_status(f"Ticker master sync: {len(assignments)} assignment(s), {merged} into CIK companies by name.")
     return len(assignments)
 
 
-def refresh_accumulated_market_caps() -> int:
-    """For every established master, sums the latest known market cap across it and all its
-    siblings and persists it on the master row. Siblings' own accumulated_market_cap is left NULL."""
-    groups = ticker.fetch_master_groups()  # [(master_id, [sibling_ids...]), ...]
-    all_ids = sorted({tid for master_id, sibling_ids in groups for tid in [master_id] + sibling_ids})
-    market_caps = ticker_value.fetch_latest_market_caps(all_ids) if all_ids else {}
+def refresh_company_data() -> int:
+    """
+    For every company, finds its primary listing (modules.ticker.company) and persists:
+      - company_market_cap on the master: the primary listing's latest market cap. FMP reports
+        the whole company's cap on every listing, so listings are never summed.
+      - region on every listing (standalone tickers included): 'US' | 'International'.
+    Returns the number of masters whose company cap was set.
+    """
+    all_tickers = ticker.fetch_all()
+    by_id = {t.id: t for t in all_tickers}
+    members_of: dict[int, list[Ticker]] = {}
+    for t in all_tickers:
+        root = t.master_ticker_id if t.master_ticker_id in by_id else t.id
+        members_of.setdefault(root, []).append(t)
 
-    updates: list[tuple[int, float]] = []
-    for master_id, sibling_ids in groups:
-        caps = [market_caps[tid] for tid in [master_id] + sibling_ids if market_caps.get(tid)]
-        if caps:
-            updates.append((master_id, sum(caps)))
+    grouped_ids = [t.id for ms in members_of.values() if len(ms) > 1 for t in ms]
+    caps = ticker_value.fetch_latest_market_caps(grouped_ids) if grouped_ids else {}
 
-    ticker.update_accumulated_market_cap_bulk(updates)
-    cleared = ticker.clear_stale_accumulated_market_caps()
+    cap_updates: list[tuple[int, float | None]] = []
+    region_updates: list[tuple[int, str]] = []
+    for root, members in members_of.items():
+        region = company.region(members, root)
+        region_updates.extend((t.id, region) for t in members)
+        if len(members) > 1:
+            cap_updates.append((root, company.company_market_cap(members, root, caps)))
+
+    ticker.update_company_market_cap_bulk(cap_updates)
+    ticker.update_region_bulk(region_updates)
+    cleared = ticker.clear_stale_company_market_caps()
     log.record_status(
-        f"Accumulated market cap refresh: {len(updates)} master(s) updated, {cleared} stale cleared."
+        f"Company data refresh: {len(cap_updates)} company cap(s), region checked on {len(region_updates)} ticker(s), {cleared} stale cap(s) cleared."
     )
-    return len(updates)
+    return len(cap_updates)
 
 
-def sync_masters_and_accumulated_caps() -> tuple[int, int, int]:
-    """Returns (links_added, links_removed, caps_refreshed). Unlinking runs first so a ticker
-    whose CIK/name changed can be regrouped correctly in the same run."""
+def sync_masters_and_company_data() -> tuple[int, int, int]:
+    """Returns (links_added, links_removed, company_caps_refreshed). Unlinking runs first so a
+    ticker whose CIK/name changed can be regrouped correctly in the same run; chains/cycles are
+    flattened before and after grouping."""
     unlinked = unlink_stale_master_tickers()
+    repair_master_chains()
     masters_updated = sync_master_tickers()
-    caps_updated = refresh_accumulated_market_caps()
+    masters_updated += repair_master_chains()
+    caps_updated = refresh_company_data()
     return masters_updated, unlinked, caps_updated
 
 
@@ -249,7 +329,7 @@ def build_master_groups_report(masters_updated: int = 0, caps_updated: int = 0, 
         "# Master Ticker Groups Report",
         "",
         f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"This run: {masters_updated} new link(s), {unlinked} unlinked, {caps_updated} accumulated cap(s) refreshed.",
+        f"This run: {masters_updated} new link(s), {unlinked} unlinked, {caps_updated} company cap(s) refreshed.",
         "",
     ]
 
@@ -291,12 +371,12 @@ def build_master_groups_report(masters_updated: int = 0, caps_updated: int = 0, 
         name_client_tickers += len(sibling_ids)
         master_symbol = master_ticker.symbol if master_ticker else f"id={master_id}"
         master_name = master_ticker.name if master_ticker and master_ticker.name else "unknown"
-        cap = master_ticker.accumulated_market_cap if master_ticker else None
+        cap = master_ticker.company_market_cap if master_ticker else None
         cap_str = f"${cap:,.0f}" if cap else "n/a"
         sibling_desc = ", ".join(_describe(sid) for sid in sorted(sibling_ids))
         name_lines.append(
             f"- **{master_symbol}** ({master_name}, id={master_id}, "
-            f"accumulated_market_cap={cap_str}) <- {sibling_desc}"
+            f"company_market_cap={cap_str}) <- {sibling_desc}"
         )
 
     lines.append("## Summary")

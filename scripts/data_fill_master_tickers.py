@@ -8,8 +8,8 @@ atexit.register(cleanup)
 REPORT_PATH = os.path.join(os.path.dirname(__file__), '..', '.output', 'master_tickers_report.md')
 
 if __name__ == '__main__':
-    masters_updated, unlinked, caps_updated = master.sync_masters_and_accumulated_caps()
-    print(f"Master sync: {masters_updated} link(s), {unlinked} unlinked, {caps_updated} accumulated cap(s) refreshed")
+    masters_updated, unlinked, caps_updated = master.sync_masters_and_company_data()
+    print(f"Master sync: {masters_updated} link(s), {unlinked} unlinked, {caps_updated} company cap(s) refreshed")
 
     report = master.build_master_groups_report(masters_updated, caps_updated, unlinked)
     print(f"\n{report}")

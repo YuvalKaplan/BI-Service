@@ -688,7 +688,8 @@ CREATE TABLE public.ticker (
     esg_qualified boolean,
     is_actively_trading boolean,
     master_ticker_id integer,
-    accumulated_market_cap double precision,
+    company_market_cap double precision,
+    region text,
     invalid text,
     CONSTRAINT ticker_master_ticker_id_not_self CHECK (((master_ticker_id IS NULL) OR (master_ticker_id <> id)))
 );

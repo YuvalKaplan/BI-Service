@@ -62,7 +62,7 @@ A third mode, the **simulation** (`scripts/sim_prep_data.py` → `scripts/sim_be
 ```
 etf_downloader        → scrapes provider websites (Playwright), resolves lines  → provider_etf_holding, ticker, ticker_value
                         (TickerResolver + FMP), then assigns style to new tickers → ticker.style_type
-ticker.master         → profile refresh; master-ticker sync + accumulated caps   → ticker
+ticker.master         → profile refresh; master-ticker sync + company cap/region → ticker
 categorize_downloader → scrapes style reference ETFs + FMP factors               → categorize_etf_holding, categorize_ticker
 esg_update            → FMP ESG disclosure/rating                                → ticker.esg_qualified, esg factors
 benchmark_generator   → FMP screener API                                         → benchmark_holding
@@ -75,20 +75,20 @@ funds_update          → fund strategy composition                             
 **Cron schedule** (weekday 0=Monday, UTC):
 - Tue–Sat: ETF holdings download (incl. ticker resolution/values and style assignment for unclassified tickers), ticker profile refresh
 - Sun: Categorization ETFs, ESG update
-- Wed (after the Tue–Sat steps): master ticker sync + accumulated market cap refresh (`modules/ticker/master.py`), benchmark blend holdings (`benchmark_generator.run()`), best ideas generation, fund updates
+- Wed (after the Tue–Sat steps): benchmark blend holdings (`benchmark_generator.run()`, which includes the master ticker sync + company market cap/region refresh from `modules/ticker/master.py`, run after the screener), best ideas generation, fund updates. A failed step stops the rest: the FMP screener raises once its 3 attempts fail, and an empty benchmark raises too.
 
 Benchmark generation runs on Wednesday so it's built the same day best ideas/fund generation consume it.
 
 ### Benchmarks
 
-Two synthetic large-cap benchmarks (market cap ≥ $10B) are built from the FMP company screener API and stored in dedicated `benchmark` and `benchmark_holding` tables — separate from provider ETF data.
+Two synthetic large-cap benchmarks (company market cap ≥ $10B **in USD**) are built from the FMP company screener API and stored in dedicated `benchmark` and `benchmark_holding` tables — separate from provider ETF data.
 
 | Benchmark | Region | Coverage |
 |-----------|--------|----------|
-| US Large Cap Blend | US | All large-cap US stocks |
-| Intl Large Cap Blend | International | All large-cap non-US stocks |
+| US Large Cap Blend | US | Large-cap companies with `ticker.region = 'US'` |
+| Intl Large Cap Blend | International | Large-cap companies with `ticker.region = 'International'` |
 
-`benchmark_generator.run()` runs every Wednesday (right before `best_ideas_generator`/`funds_update`): paginates the FMP screener, upserts any new tickers into the `ticker` table, then stores market-cap-weighted holdings for both benchmarks.
+`benchmark_generator.run()` runs every Wednesday (right before `best_ideas_generator`/`funds_update`): queries the FMP screener per exchange (`SCREENER_EXCHANGES`), upserts any new tickers, runs the master sync (the only one in the Wednesday cron — it must follow the screener so new listings are linked), then stores market-cap-weighted holdings for both benchmarks, one row per company. **FMP's `marketCapMoreThan` filters on the listing's local-currency cap** (verified: ¥10B admits $65M companies), so the threshold is converted per exchange (`_usd_rate`), and the USD $10B floor is re-applied to the company cap (per date in the sim backfill).
 
 Each `provider_etf` row has an optional `benchmark_id` FK pointing to the appropriate benchmark. When set, `best_ideas_generator` computes best ideas twice per ETF — once using the ETF's own holdings as the benchmark (`benchmark_mode = 'self'`) and once using the external benchmark universe (`benchmark_mode = 'full_universe'`). Both sets are stored in `best_idea`.
 
@@ -96,11 +96,13 @@ Each `provider_etf` row has an optional `benchmark_id` FK pointing to the approp
 
 #### Multi-ticker (share-class) company consolidation
 
-A company can trade as more than one independently-listed ticker (e.g. Alphabet as `GOOGL`/`GOOG`). `ticker.master_ticker_id` groups these: `NULL` on the master row, pointing at the master's `id` on every sibling. `ticker.accumulated_market_cap` is populated only on the master, as the sum of the latest known market cap across it and all its siblings.
+A company can trade as more than one independently-listed ticker (e.g. Alphabet as `GOOGL`/`GOOG`, and `ABEA` on XETRA). `ticker.master_ticker_id` groups these: `NULL` on the master row, pointing at the master's `id` on every sibling (always one level — `repair_master_chains()` flattens chains/cycles).
 
-Detection (`modules/ticker/master.py::sync_master_tickers()`, run every Wednesday before `benchmark_generator`): primary match is `ticker.cik` (SEC Central Index Key, shared across a US company's share classes); tickers with no CIK (typically international listings) fall back to normalized-company-name matching. Either way, the master is elected once — highest market cap at election time, tie-broken by US-exchange preference then lowest id — and **frozen permanently**; a group that already has an established master never re-elects, regardless of how market caps move afterward.
+Detection (`modules/ticker/master.py::sync_master_tickers()`, run every Wednesday inside `benchmark_generator.run()`, after the screener): primary match is `ticker.cik`; a no-CIK ticker whose normalized name matches exactly one CIK company joins that company's master (this also re-points a pre-existing no-CIK group — the only exception to the freeze); remaining no-CIK tickers group by name. A new group's master is elected once — the primary listing, else highest cap, then lowest id — and **frozen permanently**.
 
-Both `benchmark_generator` (building `benchmark_holding`) and `best_ideas_generator` (computing `etf_weight`/`benchmark_weight`) redirect a sibling ticker to its master and use `accumulated_market_cap` in place of the sibling's own market cap, so a company with multiple share classes is weighted once, at the company level, instead of being split across each listing. `modules/calc/model_fund.py::resolve_canonical_ticker_ids` is a thin `COALESCE(master_ticker_id, ticker_id)` lookup over this same persisted assignment. Live pipeline only — BT has no `full_universe`/`benchmark_holding` concept and isn't affected.
+**Company market cap and region** (`modules/ticker/company.py`, persisted by `master.refresh_company_data()`): FMP reports the **whole company's** cap on every listing, so listings are never summed. A company's *primary listing* is its home-country listing (`util.EXCHANGE_COUNTRY`, HK counts for CN), else a US listing, else the master. `ticker.company_market_cap` (master only) = the primary listing's latest cap; `ticker.region` (every listing) = `'US'` if the primary listing is on NYSE/NASDAQ/AMEX, else `'International'`. Benchmarks split US/International by `region`, and the fund region filter (`model_fund._eligibility_masks`) uses the same `region`.
+
+Both `benchmark_generator` (building `benchmark_holding`) and `best_ideas_generator` (computing `etf_weight`/`benchmark_weight`) redirect a sibling ticker to its master and use `company_market_cap` in place of the listing's own market cap, so a company is weighted once, at the company level. `best_idea.fetch_all_as_df` likewise gives masters their `company_market_cap` (latest, not as of the date). `modules/calc/model_fund.py::resolve_canonical_ticker_ids` is a thin `COALESCE(master_ticker_id, ticker_id)` lookup over this same persisted assignment. Live pipeline only — BT has no `full_universe`/`benchmark_holding` concept and isn't affected.
 
 ### Key Modules
 
@@ -121,7 +123,8 @@ Both `benchmark_generator` (building `benchmark_holding`) and `best_ideas_genera
 | `modules/cron/categorize_downloader.py` | Scrapes style reference ETFs into `categorize_ticker` (with FMP factors) |
 | `modules/cron/esg_update.py` | Weekly ESG refresh for every valid company (masters/standalone only) |
 | `modules/sim/orchestrator.py`, `modules/sim/benchmark_generator.py` | Fund simulation loop and historical benchmark backfill |
-| `modules/ticker/master.py` | Ticker profile refresh (cik/isin/name/etc.), master-ticker election/freeze, accumulated market cap refresh |
+| `modules/ticker/master.py` | Ticker profile refresh (cik/isin/name/etc.), master-ticker election/freeze/repair, company market cap + region refresh |
+| `modules/ticker/company.py` | Primary-listing rule behind `company_market_cap` and `region` |
 | `modules/ticker/resolver.py` | Resolves provider holding lines to `ticker` rows (US: symbol; non-US: ISIN, else symbol search, else verified name search) |
 | `modules/ticker/pricing.py` | Validated `ticker_value` storage (FMP history cross-check, grace period, invalid flagging) and historical FX → USD |
 | `modules/object/fund_analysis.py` | Per-fund snapshot of every constituent ETF company's active-weight calculation |

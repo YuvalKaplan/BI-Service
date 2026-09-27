@@ -1,9 +1,12 @@
 import log
 from datetime import date, timedelta
+from modules.const import LARGE_CAP_THRESHOLD
 from modules.core import api_stocks
 from modules.object import batch_run, ticker
+from modules.object.ticker import Ticker
 from modules.ticker.resolver import TickerResolver
-from modules.ticker import pricing
+from modules.ticker import company, pricing
+from modules.ticker import master as ticker_master
 from modules.ticker import util as tu
 from modules.cron.benchmark_generator import (
     _fetch_all_screener_results,
@@ -38,29 +41,26 @@ def _wednesdays_between(start: date, end: date) -> list[date]:
 
 
 def _consolidate_for_date(
-    rows: list[tuple[int, str, float]],  # (ticker_id, exchange, market_cap) for ONE historical date
-    master_lookup: dict[int, int | None],
-    exchange_lookup: dict[int, str],  # authoritative ticker.exchange, keyed by ticker_id
+    wednesday: date,
+    history: dict[int, dict[date, float]],
+    listing_order: dict[int, list[int]],   # company id -> its listings with history, primary first
+    region_lookup: dict[int, str],         # company id -> 'US' | 'International'
 ) -> list[tuple[int, str, float]]:
     """
-    Collapses share-class siblings onto their master ticker for a single historical
-    snapshot date. Unlike the live path, the combined cap can't be read from the persisted
-    accumulated_market_cap column (that only reflects today) — it's reconstructed by summing
-    whichever siblings have a historical market cap for this exact date.
-
-    The output exchange (used for US/International bucketing) always comes from the master's
-    own registered exchange via exchange_lookup, never from whichever sibling happened to have
-    price data on this particular date — otherwise a company could flip between the US and
-    International bucket week to week purely depending on which listing's history was
-    available that day (e.g. a master whose own row is missing for this date would previously
-    fall back to an arbitrary sibling's exchange instead).
+    One (company_id, region, market_cap) row per company for a single historical date. FMP
+    reports the whole company's cap on every listing, so listings are never summed: the cap is
+    the primary listing's value closest to that date, falling back to the next listing (in
+    primary order) with data. Companies below the $10B USD floor on that date are dropped.
     """
-    by_master: dict[int, float] = {}
-    for tid, _exchange, mc in rows:
-        eff_id = master_lookup.get(tid) or tid
-        by_master[eff_id] = by_master.get(eff_id, 0.0) + mc
-
-    return [(eff_id, exchange_lookup.get(eff_id, ''), total_mc) for eff_id, total_mc in by_master.items()]
+    rows: list[tuple[int, str, float]] = []
+    for cid, listing_ids in listing_order.items():
+        for tid in listing_ids:
+            mc = pricing.closest_value_for_date(history[tid], wednesday, window_days=WINDOW_DAYS)
+            if mc and mc > 0:
+                if mc >= LARGE_CAP_THRESHOLD:
+                    rows.append((cid, region_lookup.get(cid, company.INTERNATIONAL), mc))
+                break
+    return rows
 
 
 def run(inception_date: date) -> list[tuple[str, date, int]]:
@@ -101,6 +101,9 @@ def run(inception_date: date) -> list[tuple[str, date, int]]:
         resolved = _resolve_tickers(screener_results, value_date=data_cutoff_date, require_validated_price=False)
         log.record_status(f"Resolved {len(resolved)} tickers.")
 
+        # Stage 2a: link any newly seen listings to their company and refresh company regions.
+        ticker_master.sync_masters_and_company_data()
+
         # Stage 3 (sim-only): for each resolved ticker, pull its full historical market-cap
         # series in one call — this is what makes historical (not just "today") snapshots possible.
         ticker_ids = [tid for tid, _exchange, _mc in resolved.values()]
@@ -108,13 +111,11 @@ def run(inception_date: date) -> list[tuple[str, date, int]]:
         resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
 
         history: dict[int, dict[date, float]] = {}
-        exchange_by_ticker: dict[int, str] = {}
 
         for _symbol, (ticker_id, exchange, _today_mc) in resolved.items():
             t = tickers_by_id.get(ticker_id)
             if t is None:
                 continue
-            exchange_by_ticker[ticker_id] = exchange
             # Reconstruct FMP's original symbol (e.g. "TD.TO") from our stripped
             # ticker.symbol + ticker.exchange — required by the historical endpoint below.
             full_symbol = resolver.get_full_symbol(t)
@@ -126,7 +127,7 @@ def run(inception_date: date) -> list[tuple[str, date, int]]:
 
             # FMP reports market cap in the security's native currency — convert to USD before
             # it ever enters `history`, same as the live/pricing.py path, so every consumer
-            # downstream (benchmark weighting, accumulated_market_cap, thresholds) can trust
+            # downstream (benchmark weighting, company caps, the $10B floor) can trust
             # these values are uniformly USD. Uses that date's own historical FX rate, not a
             # single blanket rate — rates move meaningfully over a multi-month backfill range.
             currency = tu.currency_for_exchange(exchange)
@@ -157,19 +158,27 @@ def run(inception_date: date) -> list[tuple[str, date, int]]:
         # Stage 4: resolve the two blend Benchmark rows once, reused across every Wednesday below.
         us_blend, intl_blend = _fetch_blend_benchmarks()
 
-        # Stage 4b: master-ticker assignment is a permanent identity fact, not time-varying,
-        # so it's fetched once and reused for every historical date in the loop below.
+        # Stage 4b: group listings by company (master assignment is a permanent identity fact,
+        # so fetched once) and order each company's listings primary-first, for per-date cap
+        # lookup; region comes from the company (refreshed by the sync in Stage 2a).
         master_lookup = {
-            tid: master_id for tid, (master_id, _acc_cap) in ticker.fetch_master_info_by_ids(ticker_ids).items()
+            tid: master_id for tid, (master_id, _cap) in ticker.fetch_master_info_by_ids(list(history)).items()
         }
-
-        # Stage 4c: authoritative exchange per master, for _consolidate_for_date. A master
-        # not itself among ticker_ids (only a sibling cleared the threshold this week) still
-        # needs its own registered exchange looked up directly, same as the live path.
-        exchange_lookup = {tid: t.exchange or '' for tid, t in tickers_by_id.items()}
-        missing_master_ids = set(master_lookup.values()) - {None} - set(exchange_lookup.keys())
-        if missing_master_ids:
-            exchange_lookup.update({t.id: t.exchange or '' for t in ticker.fetch_by_ids(list(missing_master_ids))})
+        company_of = {tid: master_lookup.get(tid) or tid for tid in history}
+        missing = set(company_of.values()) - set(tickers_by_id)
+        if missing:
+            tickers_by_id.update({t.id: t for t in ticker.fetch_by_ids(list(missing))})
+        members: dict[int, list[Ticker]] = {}
+        for tid, cid in company_of.items():
+            if tid in tickers_by_id:
+                members.setdefault(cid, []).append(tickers_by_id[tid])
+        listing_order: dict[int, list[int]] = {}
+        region_lookup: dict[int, str] = {}
+        for cid, ms in members.items():
+            candidates = ms + ([tickers_by_id[cid]] if cid in tickers_by_id and all(m.id != cid for m in ms) else [])
+            listing_order[cid] = [t.id for t in company.ordered_listings(candidates, cid) if t.id in history]
+            c = tickers_by_id.get(cid)
+            region_lookup[cid] = (c.region if c and c.region else company.region(candidates, cid))
 
         # Stage 5 (sim-only): for each historical Wednesday, look up each ticker's closest
         # available market cap, consolidate share-class siblings, and build/store one snapshot
@@ -181,14 +190,7 @@ def run(inception_date: date) -> list[tuple[str, date, int]]:
         benchmarks_created: list[tuple[str, date, int]] = []
 
         for wednesday in wednesdays:
-            rows: list[tuple[int, str, float]] = []
-            for ticker_id, series in history.items():
-                mc = pricing.closest_value_for_date(series, wednesday, window_days=WINDOW_DAYS)
-                if mc is None or mc <= 0:
-                    continue
-                rows.append((ticker_id, exchange_by_ticker.get(ticker_id, ''), mc))
-
-            rows = _consolidate_for_date(rows, master_lookup, exchange_lookup)
+            rows = _consolidate_for_date(wednesday, history, listing_order, region_lookup)
             us_items, intl_items = _split_us_intl(rows)
 
             if us_blend and us_items:

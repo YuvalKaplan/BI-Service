@@ -66,10 +66,10 @@ FMP screener ──► benchmark_holding (US / Intl large-cap blend)     ticker,
 |-----|-------|
 | Tue – Sat | Holdings collection from all providers (steps 2–4), style classification of new tickers (step 6), ticker profile refresh (step 5) |
 | Sun | Categorization ETF download (step 6), ESG refresh (step 7) |
-| Wed | *in addition to the Tue–Sat steps:* master ticker sync (step 8) → benchmark generation (step 9) → best ideas (step 10) → fund updates (steps 11–12) |
+| Wed | *in addition to the Tue–Sat steps:* benchmark generation (step 9, which runs the master ticker sync of step 8 right after the screener) → best ideas (step 10) → fund updates (steps 11–12) |
 | Mon | Nothing |
 
-Collection runs Tue–Sat because providers generally publish the previous trading day's holdings, so those runs pick up Monday to Friday. The Wednesday steps run in that order on purpose: the benchmark is built on the same day the best ideas and funds consume it, and it's built from freshly consolidated companies.
+Collection runs Tue–Sat because providers generally publish the previous trading day's holdings, so those runs pick up Monday to Friday. The Wednesday steps run in that order on purpose: the benchmark is built on the same day the best ideas and funds consume it, and from freshly consolidated companies – the master sync runs inside benchmark generation, after the screener, so listings first seen that day are already linked to their companies. If a step fails the cron stops and emails the admin: in particular the FMP screener is retried 3 times and then fails the run, and an empty benchmark (no market cap could be validated) fails it too, so best ideas and funds never run on a partial or missing benchmark.
 
 When the run finishes (or fails), an email summary goes to the admins (step 13).
 
@@ -160,32 +160,35 @@ A company with no ESG data at all is not qualified. The raw factors are stored a
 
 ### 8. Share-class consolidation (master tickers)
 
-`modules/ticker/master.py::sync_masters_and_accumulated_caps` – Wednesdays, before benchmarks
+`modules/ticker/master.py::sync_masters_and_company_data` – Wednesdays, inside benchmark generation (right after the screener)
 
-Some companies trade as more than one listing (Alphabet as `GOOGL` and `GOOG`, or a company listed on several exchanges). Left alone they would be weighted twice and could both be picked by a fund. They are grouped instead:
+Some companies trade as more than one listing (Alphabet as `GOOGL` and `GOOG`, and on XETRA as `ABEA`; Samsung on KSC, LSE and Vienna). Left alone they would be weighted twice and could both be picked by a fund. They are grouped instead:
 
-- Tickers sharing an SEC **CIK** form a group. Tickers with no CIK (typically international listings) are grouped by identical normalized company name.
-- The first time a group is seen, a **master** is elected: highest market cap, then preference for a US exchange, then lowest id. The master is then **frozen** – it never changes as market caps move. Every other member points at it through `ticker.master_ticker_id`.
-- A sibling whose CIK or name no longer matches its master (e.g. after a profile correction) is unlinked first, so it can be regrouped in the same run.
-- The master's `accumulated_market_cap` is set to the sum of the latest market caps of all its listings.
+- Tickers sharing an SEC **CIK** form a group. A ticker with no CIK (typically a foreign listing) whose normalized name matches exactly one CIK company joins that company – this is how a US company's German or London listings end up under its US master. Other no-CIK tickers are grouped by identical normalized name.
+- The first time a group is seen, a **master** is elected: the company's primary listing (below), else the highest market cap, then lowest id. The master is then **frozen** – it never changes as market caps move. Every other member points at it through `ticker.master_ticker_id`. (The one exception: an existing no-CIK group is moved under the CIK company it turns out to belong to.)
+- A sibling whose CIK or name no longer matches its master (e.g. after a profile correction) is unlinked first, so it can be regrouped in the same run. Chained or circular links are flattened.
+- **Primary listing** – a listing on an exchange in the company's home country (HK counts as home for Chinese companies); otherwise a US listing (for US-listed, foreign-domiciled companies such as Eaton or Medtronic); otherwise the master.
+- `ticker.company_market_cap` (master only) is the primary listing's latest market cap. FMP reports the **whole company's** market cap on every listing, so listings are never summed.
+- `ticker.region` (every listing) is the company's region: `US` when the primary listing trades on NYSE/NASDAQ/AMEX, else `International`. TSM, ASML, SAP and Shopify are International; Eaton, Medtronic, Linde and Alphabet's XETRA listing are US.
 
-Benchmarks, best ideas and funds all work at company level: a sibling is replaced by its master, and the master's combined market cap is used instead of a single listing's.
+Benchmarks, best ideas and funds all work at company level: a sibling is replaced by its master, the company market cap is used instead of a single listing's, and US/International is decided by `ticker.region`.
 
 ### 9. Benchmark generation
 
 `modules/cron/benchmark_generator.py` – Wednesdays
 
-Two synthetic benchmarks represent the investable large-cap universe (market cap ≥ **$10B**):
+Two synthetic benchmarks represent the investable large-cap universe (company market cap ≥ **$10B in USD**):
 
 | Benchmark | Universe |
 |-----------|----------|
-| US Large Cap Blend | companies whose (master) listing is on NYSE or NASDAQ |
-| Intl Large Cap Blend | all other large-cap companies |
+| US Large Cap Blend | large-cap companies with `ticker.region = 'US'` |
+| Intl Large Cap Blend | large-cap companies with `ticker.region = 'International'` |
 
-1. The FMP company screener is paged through for companies above $10B – once unfiltered (covers the US and Canada well) and once for each of 23 major international exchanges (Japan, Germany, Hong Kong, Australia, Switzerland, France, China, India, Taiwan, Korea, …).
+1. The FMP company screener is paged through once per exchange: NYSE, NASDAQ, AMEX, TSX and 35 international exchanges (Japan, Germany, Hong Kong, Australia, Switzerland, France, China, India, Taiwan, Korea, the Nordics, …). FMP compares `marketCapMoreThan` against each listing's **local-currency** market cap, so the $10B threshold is first converted into the exchange's currency at the latest FX rate (an exchange with no known currency is skipped). The log shows each exchange's local threshold and smallest company returned, in USD.
 2. Each company is matched to (or added to) the `ticker` table and its market cap is validated as in step 4. Companies whose value can't be validated this week are left out.
-3. Share-class siblings are replaced by their master with its combined market cap (a master is included even if only a sibling cleared the screener).
-4. Companies are split US / International and each is weighted by market cap (`weight = market cap / total`). The snapshot is stored in `benchmark_holding` for today's date.
+3. The master-ticker sync (step 8) runs here, so listings first seen today join their company and company caps reflect today's values.
+4. Each company is represented once, by its master, at its company market cap; companies below $10B in USD are dropped.
+5. Companies are split US / International by `ticker.region` and each is weighted by market cap (`weight = market cap / total`). The snapshot is stored in `benchmark_holding` for today's date.
 
 ### 10. Best ideas
 
@@ -253,7 +256,7 @@ Each fund is defined by a JSON **strategy**, for example:
 
 **Building the candidate list.** All stored best ideas (latest per ETF) are filtered by the strategy:
 
-- **Region** – `US` takes ideas from US ETFs in US-domiciled companies; `International` takes ideas from international ETFs in non-US companies. With a split, the international list is built first and those companies are excluded from the US list.
+- **Region** – `US` takes ideas from US ETFs in companies whose `ticker.region` is `US`; `International` takes ideas from international ETFs in companies whose region is `International` (region = primary listing, see step 8). With a split, the international list is built first and those companies are excluded from the US list.
 - **Cap** – for a `large` fund, a stock that has fallen below $10B is still allowed *only if the fund already holds it*, so it isn't sold for that reason alone; it can never be a new buy.
 - **Style, exchanges, ESG** as configured.
 
@@ -301,7 +304,7 @@ python scripts/sim_fund.py --dev         # 3. run the fund simulation (edit fund
 ```
 
 1. **`sim_prep_data.py`** – the same profile refresh and master-ticker sync as live (steps 5 and 8), so companies are grouped correctly. It asks whether to also retry tickers previously marked invalid. It's safe to re-run; it only picks up what's stale or new. Report: `.output/sim_prep_data_report.md`.
-2. **`sim_benchmark.py`** – builds a benchmark snapshot for every Wednesday from `inception_date` to the latest date FMP has published data for (a few days behind today). The FMP screener has no history, so today's large-cap universe is used; each company's **historical** market cap is then fetched, converted to USD at that date's exchange rate, and share classes are summed per date. Report: `.output/sim_benchmark_report.md`.
+2. **`sim_benchmark.py`** – builds a benchmark snapshot for every Wednesday from `inception_date` to the latest date FMP has published data for (a few days behind today). The FMP screener has no history, so today's large-cap universe is used; each listing's **historical** market cap is then fetched and converted to USD at that date's exchange rate. Per date, each company takes its primary listing's value (never a sum of listings), companies below $10B that date are dropped, and the US/International split follows `ticker.region`. Report: `.output/sim_benchmark_report.md`.
 3. **`sim_fund.py`** – for the chosen fund:
    - **erases** its existing `fund_holding`, `fund_holding_change` and `fund_analysis` rows (it refuses to run against production for this reason);
    - starting on the first Tuesday on or after `inception_date` and then every `recalc_frequency_days`, generates best ideas as of that date for all ETFs and recalculates the fund;
@@ -358,7 +361,8 @@ All scripts are run from the project root with the virtual environment active. C
 | Script | What it does |
 |--------|--------------|
 | `scripts/data_fill_ticker_profile.py` | Refreshes every ticker profile not checked in a week (step 5). Asks whether to retry invalid tickers too. |
-| `scripts/data_fill_master_tickers.py` | Runs the master-ticker sync and combined market cap refresh (step 8). Report listing every group (name-matched groups in detail, worth reviewing): `.output/master_tickers_report.md`. Run `data_fill_ticker_profile.py` first – CIKs come from the profiles. |
+| `scripts/data_fill_master_tickers.py` | Runs the master-ticker sync and the company market cap / region refresh (step 8). Report listing every group (name-matched groups in detail, worth reviewing): `.output/master_tickers_report.md`. Run `data_fill_ticker_profile.py` first – CIKs come from the profiles. |
+| `scripts/data_fill_categorization_esg.py` | Fills missing style and ESG for valid companies (not share-class siblings): the style chain (CAT_ETF → PROVIDER_ETF → MODEL) for tickers with no style, then ESG for companies never fetched. Asks whether to re-scrape the categorization ETFs first, retry tickers whose factor fetch failed (ignoring the 30-day back-off), and refresh ESG for all companies. Run after `data_fill_master_tickers.py`. Report with before/after coverage: `.output/data_fill_categorization_esg_report.md`. |
 | `scripts/data_fill_ticker_value_gaps.py` | Finds gaps of more than 4 weekdays in `ticker_value` since 2026-01-01 for tickers held by ETFs, and fills them from FMP history (USD converted). |
 | `scripts/data_fill_ticker_value_refresh.py` | Rebuilds `ticker_value` history since 2026-01-01 from FMP's historical endpoints, **replacing** what's stored. Options: `--yes` (no confirmation), `--dry-run` (roll back), `--symbol AVGO` (one ticker). Report: `.output/data_fill_ticker_value_refresh_report.md`. |
 
@@ -515,11 +519,13 @@ The authoritative schema is `modules/object/_db_schema.sql` (live) and `modules/
 1. Create a data-only backup of the production database in a CMD window:
     > pg_dump -h dpg-d5do2kje5dus739gfud0-a.virginia-postgres.render.com -U admin -d best_ideas_eq6y --column-inserts --disable-triggers --data-only -f C:\Users\Yuval\Downloads\db_backup_data_only.sql
     - You will need the admin password – get it from render.com
+    - pg_dump warns about circular foreign-key constraints on `ticker` (the self-referencing `master_ticker_id`). This is expected: `--disable-triggers` handles it, provided the restore runs as a superuser (step 3)
 2. Truncate all the tables in the development database in pgAdmin:
     > call truncate_all_tables();
-3. Back in the CMD window, restore the database:
-    > psql -h localhost -p 5432 -U admin -d best_ideas -f C:\Users\Yuval\Downloads\db_backup_data_only.sql
-    - You will need the admin password
+3. Back in the CMD window, restore the database **as the `postgres` superuser**:
+    > psql -h localhost -p 5432 -U postgres -d best_ideas -f C:\Users\Yuval\Downloads\db_backup_data_only.sql
+    - You will need the postgres password (set when PostgreSQL was installed locally)
+    - Don't restore as `admin`: it isn't a superuser, so the dump's `DISABLE TRIGGER ALL` statements fail and `ticker` rows that reference a master row not yet inserted are rejected with `violates foreign key constraint "ticker_master_ticker_id_fkey"`
 
 ---
 

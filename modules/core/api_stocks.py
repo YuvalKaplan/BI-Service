@@ -380,26 +380,28 @@ def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = SC
     empirically: an unfiltered call returns a handful of XETRA-listed companies, while an
     explicit exchange=XETRA call returns the full ~300-company German large-cap universe) —
     callers that want broad international coverage need to loop this over a list of exchanges.
-    Returns the list of company dicts, or [] on error or when the last page is reached.
+    Returns the list of company dicts ([] past the last page).
     Expected fields per item: symbol, marketCap, country, exchangeShortName, companyName.
+
+    Raises when the call still fails after get_jsonparsed_data's API_RETRIES attempts, or when
+    FMP answers with something other than a list (e.g. an error message). Returning [] instead
+    would read as "no more companies on this exchange" and silently build a benchmark with an
+    exchange missing or cut off mid-pagination.
     """
+    throttle_api_calls()
+    apikey = os.getenv('SECRET_MARKET_DATA_API_KEY')
+    url = (
+        f"{FMP_API_URL}/company-screener"
+        f"?marketCapMoreThan={market_cap_more_than}&limit={limit}&page={page}"
+        f"&isEtf=false&isFund=false&isActivelyTrading=true"
+    )
+    if exchange:
+        url += f"&exchange={exchange}"
     try:
-        throttle_api_calls()
-        apikey = os.getenv('SECRET_MARKET_DATA_API_KEY')
-        url = (
-            f"{FMP_API_URL}/company-screener"
-            f"?marketCapMoreThan={market_cap_more_than}&limit={limit}&page={page}"
-            f"&isEtf=false&isFund=false&isActivelyTrading=true"
-        )
-        if exchange:
-            url += f"&exchange={exchange}"
-        url += f"&apikey={apikey}"
-        result = get_jsonparsed_data(url)
-        if not isinstance(result, list):
-            log.record_notice(f"Unexpected screener response on page {page} (exchange={exchange}): {type(result)}")
-            return []
-        return result
+        result = get_jsonparsed_data(url + f"&apikey={apikey}")
     except Exception as e:
-        log.record_notice(f"Failed to fetch company screener page {page} (exchange={exchange}): {e}")
-        return []
+        raise Exception(f"FMP company screener failed after {API_RETRIES} attempts (exchange={exchange}, page={page}): {e}")
+    if not isinstance(result, list):
+        raise Exception(f"Unexpected FMP company screener response (exchange={exchange}, page={page}): {str(result)[:200]}")
+    return result
 

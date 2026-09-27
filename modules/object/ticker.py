@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import Optional
 from psycopg.errors import Error
-from psycopg.rows import class_row
+from psycopg.rows import class_row, dict_row
 from dataclasses import dataclass
 from modules.core.db import db_pool_instance
 
@@ -48,7 +48,8 @@ class Ticker:
     is_actively_trading: bool | None = None
     invalid: str | None = None
     master_ticker_id: int | None = None
-    accumulated_market_cap: float | None = None
+    company_market_cap: float | None = None
+    region: str | None = None
 
 
 # ── DB read ──────────────────────────────────────────────────────────────────
@@ -127,6 +128,64 @@ def fetch_all_valid_companies() -> list['Ticker']:
                 return cur.fetchall()
     except Error as e:
         raise Exception(f"Error fetching all valid companies: {e}")
+
+
+def fetch_companies_missing_esg() -> list['Ticker']:
+    """Valid companies (masters/standalone) whose ESG has never been fetched (esg_factors IS NULL).
+    A fetch that found no FMP data still stores all-None factors, so those aren't retried here."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                cur.execute("""
+                    SELECT * FROM ticker
+                    WHERE invalid IS NULL AND master_ticker_id IS NULL AND esg_factors IS NULL;
+                """)
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching companies missing ESG: {e}")
+
+
+def fetch_style_esg_stats() -> dict[str, int]:
+    """Coverage counts over valid companies (masters/standalone), for data-fill reports."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("""
+                    SELECT count(*)                                                           AS companies,
+                           count(*) FILTER (WHERE style_type IS NULL)                          AS style_missing,
+                           count(*) FILTER (WHERE style_type IS NULL
+                                              AND style_factors_failed_at IS NOT NULL)         AS style_factors_failed,
+                           count(*) FILTER (WHERE type_from = 'CAT_ETF')                       AS style_cat_etf,
+                           count(*) FILTER (WHERE type_from = 'PROVIDER_ETF')                  AS style_provider_etf,
+                           count(*) FILTER (WHERE type_from = 'MODEL')                         AS style_model,
+                           count(*) FILTER (WHERE esg_factors IS NULL)                         AS esg_missing,
+                           count(*) FILTER (WHERE esg_factors IS NOT NULL
+                                              AND esg_factors->>'esg_risk_rating' IS NULL
+                                              AND esg_factors->>'esg_score' IS NULL
+                                              AND esg_factors->>'governance_score' IS NULL)    AS esg_no_data,
+                           count(*) FILTER (WHERE esg_qualified)                               AS esg_qualified
+                    FROM ticker
+                    WHERE invalid IS NULL AND master_ticker_id IS NULL;
+                """)
+                row = cur.fetchone()
+                return dict(row) if row else {}
+    except Error as e:
+        raise Exception(f"Error fetching style/ESG coverage stats: {e}")
+
+
+def clear_style_factors_failed_at() -> int:
+    """Clear the 30-day retry back-off on unclassified companies so the classifier retries them now."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE ticker SET style_factors_failed_at = NULL
+                    WHERE style_type IS NULL AND invalid IS NULL AND master_ticker_id IS NULL
+                      AND style_factors_failed_at IS NOT NULL;
+                """)
+                return cur.rowcount
+    except Error as e:
+        raise Exception(f"Error clearing style_factors_failed_at: {e}")
 
 
 def fetch_stale_tickers(include_invalid: bool = False) -> list['Ticker']:
@@ -499,21 +558,21 @@ def clear_master_ticker_bulk(ticker_ids: list[int]) -> None:
         raise Exception(f"Error clearing master_ticker_id: {e}")
 
 
-def clear_stale_accumulated_market_caps() -> int:
-    """NULLs accumulated_market_cap on any ticker that's no longer a master (no sibling points
-    at it) — otherwise a former master keeps its old combined cap after being unlinked."""
+def clear_stale_company_market_caps() -> int:
+    """NULLs company_market_cap on any ticker that's no longer a master (no sibling points at
+    it) — otherwise a former master keeps its old company cap after being unlinked."""
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
                     UPDATE ticker t
-                    SET accumulated_market_cap = NULL
-                    WHERE t.accumulated_market_cap IS NOT NULL
+                    SET company_market_cap = NULL
+                    WHERE t.company_market_cap IS NOT NULL
                       AND NOT EXISTS (SELECT 1 FROM ticker s WHERE s.master_ticker_id = t.id);
                 """)
                 return cur.rowcount
     except Error as e:
-        raise Exception(f"Error clearing stale accumulated_market_cap: {e}")
+        raise Exception(f"Error clearing stale company_market_cap: {e}")
 
 
 def fetch_master_groups() -> list[tuple[int, list[int]]]:
@@ -532,30 +591,67 @@ def fetch_master_groups() -> list[tuple[int, list[int]]]:
         raise Exception(f"Error fetching master groups: {e}")
 
 
-def update_accumulated_market_cap_bulk(pairs: list[tuple[int, float]]) -> None:
-    """pairs: [(master_ticker_id, accumulated_market_cap), ...]"""
+def update_company_market_cap_bulk(pairs: list[tuple[int, float | None]]) -> None:
+    """pairs: [(master_ticker_id, company_market_cap), ...]"""
     if not pairs:
         return
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.executemany(
-                    "UPDATE ticker SET accumulated_market_cap = %s WHERE id = %s",
+                    "UPDATE ticker SET company_market_cap = %s WHERE id = %s",
                     [(cap, tid) for tid, cap in pairs]
                 )
     except Error as e:
-        raise Exception(f"Error bulk-updating accumulated_market_cap: {e}")
+        raise Exception(f"Error bulk-updating company_market_cap: {e}")
+
+
+def update_region_bulk(pairs: list[tuple[int, str]]) -> None:
+    """pairs: [(ticker_id, region), ...] — only rows whose region actually changes are written."""
+    if not pairs:
+        return
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "UPDATE ticker SET region = %s WHERE id = %s AND region IS DISTINCT FROM %s",
+                    [(r, tid, r) for tid, r in pairs]
+                )
+    except Error as e:
+        raise Exception(f"Error bulk-updating region: {e}")
+
+
+def fetch_all() -> list['Ticker']:
+    """Every ticker row, valid or not — for company-level derivations over all listings."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                cur.execute("SELECT * FROM ticker;")
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching all tickers: {e}")
+
+
+def fetch_cik_tickers() -> list['Ticker']:
+    """Valid tickers carrying a CIK — the name index that no-CIK listings are matched against."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                cur.execute("SELECT * FROM ticker WHERE cik IS NOT NULL AND cik <> '' AND invalid IS NULL;")
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching CIK tickers: {e}")
 
 
 def fetch_master_info_by_ids(ticker_ids: list[int]) -> dict[int, tuple[int | None, float | None]]:
-    """Returns {ticker_id: (master_ticker_id, accumulated_market_cap)}."""
+    """Returns {ticker_id: (master_ticker_id, company_market_cap)}."""
     if not ticker_ids:
         return {}
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id, master_ticker_id, accumulated_market_cap FROM ticker WHERE id = ANY(%s);",
+                    "SELECT id, master_ticker_id, company_market_cap FROM ticker WHERE id = ANY(%s);",
                     (ticker_ids,)
                 )
                 return {row[0]: (row[1], row[2]) for row in cur.fetchall()}

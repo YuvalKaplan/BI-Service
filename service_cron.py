@@ -65,22 +65,17 @@ if __name__ == '__main__':
             message_actions += BREAKER_LINE
 
         if weekday == 2: # Wednesday
+            # Includes the master-ticker sync, which has to run after the screener so that
+            # listings first seen today are linked to their companies. Fails (stopping best ideas
+            # and funds) if the FMP screener still fails after its retries or a benchmark comes out empty.
             try:
-                masters_updated, unlinked, caps_updated = ticker_master.sync_masters_and_accumulated_caps()
+                bench = benchmark_generator.run()
             except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on ticker master/accumulated-cap sync with error:\n{e}\n\n")
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed in benchmark generation (FMP screener, master sync or benchmark snapshot) with error:\n{e}\n\n")
                 raise e
 
-            message_actions += f"Ticker master sync: {masters_updated} link(s), {unlinked} unlinked, {caps_updated} accumulated cap(s) refreshed\n"
-            message_actions += BREAKER_LINE
-
-            try:
-                benchmark_generator.run()
-            except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed in benchmark blend holdings with error:\n{e}\n\n")
-                raise e
-
-            message_actions += "Benchmark blend holdings refreshed\n"
+            message_actions += f"Ticker master sync: {bench.masters_updated} link(s), {bench.unlinked} unlinked, {bench.company_caps} company cap(s) refreshed\n"
+            message_actions += f"Benchmark blend holdings refreshed: {bench.us_companies} US, {bench.intl_companies} International companies\n"
             message_actions += BREAKER_LINE
 
             try:

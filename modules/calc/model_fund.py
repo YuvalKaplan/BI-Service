@@ -205,10 +205,13 @@ def _eligibility_masks(
         masks['cap'] = df['market_cap'] < LARGE_CAP_THRESHOLD
     else:
         masks['cap'] = all_true
+    # A company's region is its primary listing's (ticker.region, see modules/ticker/company.py):
+    # US-listed foreign-domiciled companies (Eaton, Medtronic) are US; ADRs of companies with a
+    # home-market listing (TSM, ASML) are International — the same rule the benchmarks use.
     if country_type == 'US':
-        masks['region'] = (df['etf_region'] == 'US') & (df['country'] == 'US')
+        masks['region'] = (df['etf_region'] == 'US') & (df['region'] == 'US')
     elif country_type == 'Non-US':
-        masks['region'] = (df['etf_region'] == 'International') & df['country'].notna() & (df['country'] != 'US')
+        masks['region'] = (df['etf_region'] == 'International') & (df['region'] == 'International')
     else:
         masks['region'] = all_true
     masks['exchange'] = df['exchange'].isin(exchanges) if exchanges else all_true

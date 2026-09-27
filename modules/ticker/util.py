@@ -48,7 +48,44 @@ EXCHANGE_CURRENCY: dict[str, str] = {
     'OSL': 'NOK',
     'JNB': 'ZAR',
     'JKT': 'IDR',
+    'CPH': 'DKK', 'HEL': 'EUR', 'BRU': 'EUR', 'LIS': 'EUR', 'DUB': 'EUR',
+    'TLV': 'ILS', 'NZE': 'NZD', 'SET': 'THB', 'KLS': 'MYR', 'IST': 'TRY',
+    'MEX': 'MXN', 'SAU': 'SAR', 'KOE': 'KRW', 'TWO': 'TWD',
 }
+
+# The country an exchange is located in — used to find a company's home-market (primary)
+# listing. Secondary venues that only carry other markets' securities (OTC pink sheets,
+# LSE's International Order Book, Cboe Europe) are deliberately absent: they're never "home".
+EXCHANGE_COUNTRY: dict[str, str] = {
+    'NYSE': 'US', 'NASDAQ': 'US', 'AMEX': 'US', 'CBOE': 'US',
+    'TSX': 'CA', 'TSXV': 'CA', 'CNQ': 'CA', 'NEO': 'CA',
+    'LSE': 'GB',
+    'JPX': 'JP',
+    'XETRA': 'DE', 'FSX': 'DE', 'BER': 'DE', 'STU': 'DE', 'DUS': 'DE', 'HAM': 'DE', 'MUN': 'DE',
+    'PAR': 'FR', 'AMS': 'NL', 'MIL': 'IT', 'VIE': 'AT', 'BME': 'ES', 'BRU': 'BE', 'LIS': 'PT',
+    'DUB': 'IE', 'HEL': 'FI', 'CPH': 'DK', 'STO': 'SE', 'OSL': 'NO', 'SIX': 'CH', 'ATH': 'GR',
+    'WSE': 'PL', 'PRA': 'CZ', 'IST': 'TR',
+    'HKSE': 'HK', 'SHH': 'CN', 'SHZ': 'CN',
+    'NSE': 'IN', 'BSE': 'IN',
+    'TAI': 'TW', 'TWO': 'TW',
+    'KSC': 'KR', 'KOE': 'KR',
+    'ASX': 'AU', 'NZE': 'NZ', 'SES': 'SG', 'SET': 'TH', 'KLS': 'MY', 'JKT': 'ID',
+    'SAO': 'BR', 'MEX': 'MX', 'SGO': 'CL', 'BUE': 'AR',
+    'JNB': 'ZA', 'TLV': 'IL', 'SAU': 'SA', 'DFM': 'AE', 'DOH': 'QA',
+}
+
+# Exchanges whose listings make a company "US-listed" for region purposes (OTC excluded:
+# it mostly carries foreign companies' unsponsored ADRs).
+US_LISTING_EXCHANGES: set[str] = {'NYSE', 'NASDAQ', 'AMEX'}
+
+# Extra countries counted as a company's home market beyond its own (HK-listed Chinese companies).
+HOME_COUNTRY_ALIASES: dict[str, set[str]] = {'CN': {'HK'}}
+
+
+def home_countries(country: str | None) -> set[str]:
+    if not country:
+        return set()
+    return {country} | HOME_COUNTRY_ALIASES.get(country, set())
 
 
 def currency_for_exchange(exchange: str | None) -> str | None:
