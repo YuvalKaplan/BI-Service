@@ -25,7 +25,8 @@ from modules.cron import categorize_downloader
 from modules.object import ticker
 from modules.object import categorize_ticker as cat_ticker_obj
 from modules.calc import classification
-from modules.ticker.resolver import populate_esg, TickerResolver
+from modules.ticker.esg import populate_esg
+from modules.ticker.resolver import TickerResolver
 
 atexit.register(cleanup)
 
@@ -72,7 +73,6 @@ def fill_esg(refresh_all: bool) -> int:
     print(f"ESG: fetching {len(companies)} companies...")
     resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
     for i, t in enumerate(companies, 1):
-        assert t.id is not None
         populate_esg(t.id, resolver.get_full_symbol(t))
         if i % 100 == 0:
             print(f"  {i}/{len(companies)}")

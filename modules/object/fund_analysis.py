@@ -1,6 +1,7 @@
 from datetime import date
 from typing import List
 from dataclasses import dataclass
+from psycopg import sql
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from modules.core.db import db_pool_instance
@@ -34,6 +35,10 @@ _COLUMNS = (
     'fund_id', 'as_of_date', 'provider_etf_id', 'holding_date', 'ticker_id', 'benchmark_id', 'benchmark_date',
     'market_cap', 'master_used', 'etf_weight', 'benchmark_weight', 'delta', 'ranking', 'note',
 )
+_INSERT_SQL = sql.SQL("INSERT INTO fund_analysis ({columns}) VALUES ({placeholders});").format(
+    columns=sql.SQL(", ").join(map(sql.Identifier, _COLUMNS)),
+    placeholders=sql.SQL(", ").join(sql.Placeholder() for _ in _COLUMNS),
+)
 
 
 def replace_for_fund_date(fund_id: int, as_of_date: date, items: List[FundAnalysis]) -> None:
@@ -43,10 +48,7 @@ def replace_for_fund_date(fund_id: int, as_of_date: date, items: List[FundAnalys
             with conn.cursor() as cur:
                 cur.execute('DELETE FROM fund_analysis WHERE fund_id = %s AND as_of_date = %s;', (fund_id, as_of_date))
                 if items:
-                    cur.executemany(
-                        f"INSERT INTO fund_analysis ({', '.join(_COLUMNS)}) VALUES ({', '.join(['%s'] * len(_COLUMNS))});",
-                        [tuple(getattr(i, c) for c in _COLUMNS) for i in items],
-                    )
+                    cur.executemany(_INSERT_SQL, [tuple(getattr(i, c) for c in _COLUMNS) for i in items])
             conn.commit()
     except Error as e:
         raise Exception(f"Error replacing fund analysis for fund {fund_id} on {as_of_date}: {e}")

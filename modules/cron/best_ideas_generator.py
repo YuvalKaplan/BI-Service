@@ -2,12 +2,14 @@ import log
 import pandas as pd
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from functools import partial
 from modules.object import batch_run, batch_run_log
 from modules.object import provider, provider_etf, ticker
 from modules.object.provider_etf_holding import ProviderEtfHolding, QuarantinedHolding, fetch_latest_holdings_for_etf, aggregate_holdings
 from modules.object.ticker_value import fetch_latest_market_caps_within_window
 from modules.object import best_idea, benchmark
 from modules.object.fund_analysis import FundAnalysis
+from modules.ticker import company
 
 DAYS_NO_MARKET_CAP = 5
 MIN_HOLDINGS_WITH_PRICES_PCT = 0.95
@@ -68,6 +70,14 @@ def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = N
     if extra_master_ids:
         master_info.update(ticker.fetch_master_info_by_ids(extra_master_ids))
 
+    # A master's company cap as of the holding date — the first listing, in primary-listing
+    # order, with a value near that date — rather than the stored (latest) company_market_cap,
+    # so historical (sim) dates weigh multi-listing companies at that date's value like every
+    # other company. Masters with no listing value near the date keep the stored cap.
+    master_ids = [tid for tid, (mid, cap) in master_info.items() if mid is None and cap is not None]
+    for mid, cap in company.company_caps_as_of(master_ids, holding_date, DAYS_NO_MARKET_CAP).items():
+        master_info[mid] = (None, cap)
+
     priced_ids = {v.ticker_id for v in market_cap_values}
     return EtfInputs(
         etf=pe,
@@ -113,9 +123,10 @@ def compute_active_weights(inputs: EtfInputs, benchmark_weights: dict[int, float
     # listing, so it is never summed across listings). Ticker ids are
     # always positive, so `or t` safely falls back to the ticker's own id when it has no
     # master (avoids pandas' fillna on a mixed None/int object column, which triggers a
-    # downcast FutureWarning).
-    df["effective_ticker_id"] = df["ticker_id"].map(lambda t: master_info.get(t, (None, None))[0] or t).astype(int)
-    df["company_market_cap"] = df["effective_ticker_id"].map(lambda t: master_info.get(t, (None, None))[1])
+    # downcast FutureWarning). The id columns hold no NaN; na_action='ignore' only tells the type
+    # checker the lambda never receives one.
+    df["effective_ticker_id"] = df["ticker_id"].map(lambda t: master_info.get(t, (None, None))[0] or t, na_action='ignore').astype(int)
+    df["company_market_cap"] = df["effective_ticker_id"].map(lambda t: master_info.get(t, (None, None))[1], na_action='ignore')
     df["effective_market_cap"] = df.apply(
         lambda row: row["company_market_cap"] if pd.notna(row["company_market_cap"]) else row["market_cap"],
         axis=1,
@@ -191,10 +202,19 @@ def get_benchmark_weights(
     cache: dict[int, tuple[dict[int, float], date | None]],
 ) -> tuple[dict[int, float], date | None]:
     """{ticker_id: weight} and holding_date of the benchmark's latest snapshot as of as_of_date
-    (or now), memoized in `cache` so each benchmark is fetched once per run."""
+    (or now), memoized in `cache` so each benchmark is fetched once per run. A snapshot stores
+    each company under its master id at the time; a master moved to a better primary listing
+    since (master.align_masters_to_primary) is resolved to the company's current master, the
+    id compute_active_weights looks it up by."""
     if benchmark_id not in cache:
         bm_holdings = benchmark.fetch_latest_holdings(benchmark_id, LOOK_BACK_WINDOW, up_to_date=as_of_date)
-        weights = {h.ticker_id: h.weight for h in bm_holdings if h.ticker_id}
+        ids = [h.ticker_id for h in bm_holdings if h.ticker_id]
+        master_of = {tid: mid for tid, (mid, _cap) in ticker.fetch_master_info_by_ids(ids).items() if mid}
+        weights: dict[int, float] = {}
+        for h in bm_holdings:
+            if h.ticker_id:
+                cid = master_of.get(h.ticker_id, h.ticker_id)
+                weights[cid] = weights.get(cid, 0.0) + h.weight
         cache[benchmark_id] = (weights, bm_holdings[0].holding_date if bm_holdings else None)
     return cache[benchmark_id]
 
@@ -214,8 +234,8 @@ def build_analysis_rows(
     cap or for being quarantined as an inconsistent duplicate.
     """
     rank_by_ticker = {int(t): rank for rank, t in enumerate(selected["ticker_id"], start=1)}
-    base = dict(fund_id=fund_id, as_of_date=as_of_date, provider_etf_id=inputs.etf.id, holding_date=inputs.holding_date,
-                benchmark_id=benchmark_id, benchmark_date=benchmark_date)
+    make_row = partial(FundAnalysis, fund_id=fund_id, as_of_date=as_of_date, provider_etf_id=inputs.etf.id,
+                       holding_date=inputs.holding_date, benchmark_id=benchmark_id, benchmark_date=benchmark_date)
 
     rows: list[FundAnalysis] = []
     for r in weights.to_dict("records"):
@@ -229,8 +249,8 @@ def build_analysis_rows(
             note = 'delta>limit'
         else:
             note = 'beyond_top_N'
-        rows.append(FundAnalysis(
-            **base, ticker_id=ticker_id, market_cap=float(r["market_cap"]), master_used=bool(r["master_used"]),
+        rows.append(make_row(
+            ticker_id=ticker_id, market_cap=float(r["market_cap"]), master_used=bool(r["master_used"]),
             etf_weight=float(r["etf_weight"]), benchmark_weight=float(r["benchmark_weight"]), delta=float(r["delta"]),
             ranking=ranking, note=note,
         ))
@@ -243,8 +263,8 @@ def build_analysis_rows(
         if ticker_id in seen:
             continue
         seen.add(ticker_id)
-        rows.append(FundAnalysis(
-            **base, ticker_id=ticker_id, market_cap=None, master_used=False,
+        rows.append(make_row(
+            ticker_id=ticker_id, market_cap=None, master_used=False,
             etf_weight=None, benchmark_weight=None, delta=None, ranking=None, note=note,
         ))
     return rows

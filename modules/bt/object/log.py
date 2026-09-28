@@ -9,7 +9,7 @@ class Log:
     created_at: datetime
     process: str
     log_type: str
-    code: str | None
+    code: str | int | None
     msg: str
 
     def __init__(self, type: str, code: str | int | None, msg: str):

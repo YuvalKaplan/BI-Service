@@ -1,87 +1,15 @@
 import log
-from datetime import datetime
-from modules.core import api_stocks
+from datetime import date, datetime, timedelta
 from modules.object import ticker, ticker_value
 from modules.object.ticker import Ticker
-from modules.ticker import company
+from modules.ticker import company, identity
 from modules.ticker import util as tu
-from modules.ticker.resolver import TickerResolver
 
-
-def refresh_ticker_profiles(include_invalid: bool = False) -> tuple[int, int, int]:
-    """
-    Refreshes full ticker profile data (isin/cusip/cik/name/industry/sector/country/currency/
-    is_actively_trading) from FMP for every ticker whose profile hasn't been checked within
-    the last week (ticker.fetch_stale_tickers) — the single shared implementation used by
-    scripts/data_fill_ticker_profile.py, scripts/sim_prep_data.py, and the live Tue-Sat cron
-    step, so all three go over the exact same ticker list rather than each having their own
-    narrower variant (e.g. the old cik-only backfill).
-
-    A ticker is flagged invalid if its profile turns out to be crypto, a fund/ETF, or no
-    longer actively trading — same detection as the original data_fill_ticker_profile.py.
-    A ticker whose profile lookup itself returns an invalid/error response is also marked
-    invalid (rather than merely logged and retried forever), since fetch_stale_tickers()
-    already excludes already-invalid tickers by default — pass include_invalid=True to retry
-    them too (a ticker that checks out fine on retry has its invalid flag cleared).
-
-    Returns (total_checked, updated, marked_invalid).
-    """
-    resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
-    tickers = ticker.fetch_stale_tickers(include_invalid=include_invalid)
-
-    updated = 0
-    marked_invalid = 0
-
-    for t in tickers:
-        full_symbol = resolver.get_full_symbol(t)
-        profile = api_stocks.get_stock_profile(full_symbol)
-        if not isinstance(profile, dict):
-            log.record_notice(f"Ticker profile refresh: no profile for '{full_symbol}': {profile}")
-            ticker.update_invalid(t.id, "Profile lookup failed")
-            marked_invalid += 1
-            continue
-
-        exchange = profile.get('exchange')
-        name = profile.get('companyName')
-        is_active = profile.get('isActivelyTrading')
-
-        invalid_reason = None
-        if exchange == 'CRYPTO':
-            invalid_reason = 'Crypto'
-        elif not name or tu.is_unwanted_names(name):
-            invalid_reason = 'Fund or ETF'
-        elif is_active is not None and not is_active:
-            invalid_reason = 'Not actively trading'
-
-        updated_ticker = Ticker(
-            id=t.id,
-            symbol=t.symbol,
-            isin=profile.get('isin') or t.isin,
-            cusip=profile.get('cusip') or t.cusip,
-            cik=profile.get('cik') or t.cik,
-            name=name or t.name,
-            exchange=t.exchange,
-            industry=profile.get('industry') or t.industry,
-            sector=profile.get('sector') or t.sector,
-            country=profile.get('country') or t.country,
-            currency=profile.get('currency') or t.currency,
-            source=t.source,
-            type_from=t.type_from,
-            is_actively_trading=bool(is_active) if is_active is not None else None,
-        )
-        ticker.update(updated_ticker)  # stamps updated_at
-
-        ticker.update_invalid(t.id, invalid_reason)  # clears it if the retry now checks out fine
-        if invalid_reason:
-            marked_invalid += 1
-        else:
-            updated += 1
-
-    log.record_status(
-        f"Ticker profile refresh: {updated} updated, {marked_invalid} marked invalid, "
-        f"out of {len(tickers)} checked."
-    )
-    return len(tickers), updated, marked_invalid
+# A master is realigned to a better primary listing only when that listing has a market cap
+# within this many days — longer than company.ACTIVE_DAYS, so a listing that misses a few weekly
+# screener runs doesn't swap the company's id back and forth.
+REALIGN_ACTIVE_DAYS = 90
+RECENT_CAP_DAYS = 21  # how far back link_same_company looks for caps to compare on a common date
 
 
 def _elect_master(
@@ -89,10 +17,12 @@ def _elect_master(
     tickers_by_id: dict[int, Ticker],
     market_caps: dict[int, float],
 ) -> int:
-    """First-election rule: the company's primary listing (home-market listing, else a US
-    listing — see modules.ticker.company), else the highest-cap listing, then lowest id."""
+    """First-election rule: the company's primary listing (active ordinary shares, home-market
+    listing, else a US listing — see modules.ticker.company), else the highest-cap listing,
+    then lowest id."""
     members = [tickers_by_id[tid] for tid in candidate_ids]
-    return company.primary_listing(members, None, market_caps).id
+    latest_dates = {tid: d for tid, (d, _cap) in ticker_value.fetch_latest_values(candidate_ids).items()}
+    return company.primary_listing(members, None, market_caps, latest_dates).id
 
 
 def _sync_group(
@@ -103,14 +33,14 @@ def _sync_group(
     """
     Given a candidate group (all sharing a CIK, or all sharing a normalized name), returns
     the (ticker_id, master_ticker_id) assignments still needed. If any member already has an
-    established master, every other member is (re)pointed at that same frozen master — a
-    master is never re-elected once set, regardless of how market caps move afterward. Only
-    a group with no existing master calls _elect_master.
+    established master, every other member is (re)pointed at that same master (market-cap
+    moves never re-elect it); only a group with no existing master calls _elect_master.
+    align_masters_to_primary() later moves a master to a better primary listing, if any.
     """
     existing_masters = {
-        tickers_by_id[tid].master_ticker_id
+        mid
         for tid in member_ids
-        if tickers_by_id[tid].master_ticker_id is not None
+        if (mid := tickers_by_id[tid].master_ticker_id) is not None
     }
     master_id = min(existing_masters) if existing_masters else _elect_master(member_ids, tickers_by_id, market_caps)
 
@@ -122,40 +52,66 @@ def _sync_group(
 
 
 def _name_key(name: str | None) -> str:
-    return (name or '').strip().lower()
+    return tu.name_key(name)
 
 
-def _still_matches(sibling: Ticker, master_ticker: Ticker) -> bool:
-    """A link is still valid if both tickers have a CIK and it's the same, or (when either one
-    lacks a CIK) if their normalized names still match — the same two criteria
-    sync_master_tickers() uses to form a group in the first place."""
-    if sibling.cik and master_ticker.cik:
-        return sibling.cik == master_ticker.cik
-    return bool(_name_key(sibling.name)) and _name_key(sibling.name) == _name_key(master_ticker.name)
+def _tied(a: Ticker, b: Ticker) -> bool:
+    """Evidence that keeps two already-linked listings together: same CIK; same ISIN with names
+    agreeing on their first word or the same domicile; identical normalized name; or (same
+    domicile) matching names or a depositary receipt's company name. Looser than what creates a
+    link (identity.link_evidence also wants the caps to agree), so a link made on a week the
+    caps agreed isn't undone on a week one listing has no fresh cap."""
+    if a.cik and b.cik and a.cik == b.cik:
+        return True
+    if a.isin and b.isin and a.isin == b.isin and (identity.first_word_agrees(a.name, b.name) or (a.country and a.country == b.country)):
+        return True
+    if bool(_name_key(a.name)) and _name_key(a.name) == _name_key(b.name):
+        return True
+    if a.country and a.country == b.country:
+        if tu.names_match(a.name or '', b.name or ''):
+            return True
+        if tu.names_match(identity.core_name(a.name), identity.core_name(b.name)):
+            return True
+    return False
 
 
 def unlink_stale_master_tickers() -> int:
     """
-    Unlinks any sibling whose CIK no longer matches its master's, or (for name-based links)
-    whose name no longer matches — e.g. after a profile refresh corrected a CIK or company
-    name. Run before sync_master_tickers() so an unlinked ticker can be regrouped correctly in
-    the same run. Masters themselves are never re-elected; only sibling links are removed.
+    Unlinks a sibling that no longer belongs with its company — e.g. after a profile refresh
+    corrected a CIK, ISIN or name. A sibling whose CIK differs from its master's is unlinked
+    (different registrants) unless the company is dual-listed (same ISIN and name as another of
+    its listings); otherwise it stays linked while it's tied (_tied) to its
+    master or to any other member of the group, so a listing linked through another listing
+    (by ISIN, say) isn't unlinked just because its spelling differs from the master's. Run
+    before sync_master_tickers() so an unlinked ticker can be regrouped correctly in the same
+    run. Masters themselves are never re-elected; only sibling links are removed.
     Returns the number of tickers unlinked.
     """
     siblings = ticker.fetch_linked_siblings()
     if not siblings:
         return 0
-    master_ids = sorted({s.master_ticker_id for s in siblings})
-    masters_by_id = {t.id: t for t in ticker.fetch_by_ids(master_ids)}
+    master_of = {s.id: mid for s in siblings if (mid := s.master_ticker_id) is not None}
+    masters_by_id = {t.id: t for t in ticker.fetch_by_ids(sorted(set(master_of.values())))}
+    members: dict[int, list[Ticker]] = {mid: [m] for mid, m in masters_by_id.items()}
+    for s in siblings:
+        members.setdefault(master_of[s.id], []).append(s)
+
+    def dual_listed(s: Ticker) -> bool:
+        # A dual-listed company's two registrants (Rio Tinto plc / Ltd): another listing of the
+        # group carries the same ISIN under the identical name (see identity.link_evidence).
+        return any(o.id != s.id and s.isin and o.isin == s.isin and _name_key(o.name) == _name_key(s.name)
+                   for o in members[master_of[s.id]])
 
     stale: list[int] = []
     for s in siblings:
-        m = masters_by_id.get(s.master_ticker_id)
-        if m is None or not _still_matches(s, m):
+        m = masters_by_id.get(master_of[s.id])
+        cik_conflict = m is not None and s.cik and m.cik and s.cik != m.cik and not dual_listed(s)
+        tied = m is not None and not cik_conflict and any(o.id != s.id and _tied(s, o) for o in members[master_of[s.id]])
+        if not tied:
             stale.append(s.id)
             log.record_notice(
                 f"Unlinked ticker_id={s.id} ({s.symbol}, {s.name}) from master ticker_id={s.master_ticker_id}"
-                + (f" ({m.symbol}, {m.name})" if m else "") + ": CIK/name no longer match."
+                + (f" ({m.symbol}, {m.name})" if m else "") + ": no longer tied to the company by CIK, ISIN or name."
             )
 
     ticker.clear_master_ticker_bulk(stale)
@@ -178,9 +134,9 @@ def repair_master_chains() -> int:
     for start in list(master_of):
         path: list[int] = []
         node = start
-        while master_of.get(node) is not None and node not in path:
+        while (next_node := master_of.get(node)) is not None and node not in path:
             path.append(node)
-            node = master_of[node]
+            node = next_node
         if node in path:  # cycle: elect a master among the cycle members
             cycle = path[path.index(node):]
             tickers_by_id = {t.id: t for t in ticker.fetch_by_ids(cycle)}
@@ -207,8 +163,8 @@ def sync_master_tickers() -> int:
     (typically non-US listings) by normalized company name: a name that matches exactly one CIK
     company joins that company's master — this is how a US company's foreign listings (e.g.
     Alphabet on XETRA) end up under the US master, even when they had already formed a group
-    of their own (the one exception to "masters are frozen"). Other no-CIK names group among
-    themselves under the usual elect-and-freeze rule (_sync_group).
+    of their own. Other no-CIK names group among themselves (_sync_group). Names are compared
+    by util.name_key (case, accents and punctuation ignored, legal suffixes kept).
     Returns the number of ticker rows whose master_ticker_id was newly assigned/changed.
     """
     assignments: list[tuple[int, int]] = []
@@ -264,6 +220,162 @@ def sync_master_tickers() -> int:
     return len(assignments)
 
 
+def _follow(moved: dict[int, int], c: int) -> int:
+    while c in moved:
+        c = moved[c]
+    return c
+
+
+# Result of the latest link_same_company() / align_masters_to_primary() run, for build_master_groups_report.
+LAST_LINKS: list[str] = []
+LAST_REJECTIONS: list[str] = []
+LAST_REALIGNED: list[str] = []
+
+
+def _describe(t: Ticker) -> str:
+    return f"{t.symbol}:{t.exchange} [{t.name}]"
+
+
+def _current_companies() -> tuple[list[Ticker], dict[int, list[Ticker]]]:
+    """Valid tickers and {company id: its listings}, company id = master (or own) id."""
+    all_t = [t for t in ticker.fetch_all() if not t.invalid]
+    by_id = {t.id: t for t in all_t}
+    members: dict[int, list[Ticker]] = {}
+    for t in all_t:
+        members.setdefault(company.company_id(t, by_id), []).append(t)
+    return all_t, members
+
+
+def link_same_company() -> int:
+    """
+    Merges companies (listing groups) that identity.link_evidence says are one company: a
+    shared ISIN (names agreeing on their first word, or caps within 10% — "GE Aerospace" /
+    "General Electric Company", "Exxon Mobil" / "Exxonmobil Holdings"), matching names of the
+    same domicile with caps within 2% on the same date (Midea's A and H shares, "AXIA Energia" /
+    "AXIA Energia S.A."), or a depositary receipt whose company name matches (Cisco's Canadian
+    DR). The target is the company with a CIK, then one whose primary listing is in its home
+    market, then the most listings, then the lowest id; every listing of the other company is
+    re-pointed to it (align_masters_to_primary then picks the right master). Two different CIKs
+    are never merged; ISIN matches rejected by the guard are kept for the report.
+    Returns the number of listings re-pointed.
+    """
+    global LAST_LINKS, LAST_REJECTIONS
+    all_t, members = _current_companies()
+    ids = [t.id for t in all_t]
+    today = date.today()
+    recent = ticker_value.fetch_market_caps_between(ids, today - timedelta(days=RECENT_CAP_DAYS), today)
+    latest_dates = {tid: max(vals) for tid, vals in recent.items() if vals}
+    views = identity.build_views(members, recent, latest_dates)
+
+    # Candidate pairs: companies sharing an ISIN, or a (domicile, first name word) bucket.
+    buckets: dict[tuple[str, str], set[int]] = {}
+    for cid, v in views.items():
+        for isin in v.isins:
+            buckets.setdefault(('isin', isin), set()).add(cid)
+        for key in identity.blocking_keys(v):
+            buckets.setdefault(key, set()).add(cid)
+
+    def rank(c: int):
+        v = views[c]
+        return (v.cik, v.home, len(v.members), -c)
+
+    moved: dict[int, int] = {}
+    links: list[str] = []
+    rejections: list[str] = []
+    seen_pairs: set[tuple[int, int]] = set()
+    for key, cids in sorted(buckets.items()):
+        if len(cids) < 2 or len(cids) > 200:   # a huge bucket is a generic word, not a company
+            continue
+        for a in sorted(cids):
+            for b in sorted(cids):
+                if b <= a or (a, b) in seen_pairs:
+                    continue
+                seen_pairs.add((a, b))
+                ca, cb = _follow(moved, a), _follow(moved, b)
+                if ca == cb:
+                    continue
+                va, vb = views[ca], views[cb]
+                evidence = identity.link_evidence(va, vb)
+                if evidence is None:
+                    if key[0] == 'isin' and not (va.ciks and vb.ciks and va.ciks.isdisjoint(vb.ciks)):
+                        rejections.append(f"{key[1]}: {va.name} ({va.country}) vs {vb.name} ({vb.country}) — names and caps disagree")
+                    continue
+                target, other = (ca, cb) if rank(ca) >= rank(cb) else (cb, ca)
+                vt, vo = views[target], views[other]
+                vt.members.extend(vo.members)
+                vt.isins |= vo.isins
+                vt.names |= vo.names
+                vt.ciks |= vo.ciks
+                vt.cik = vt.cik or vo.cik
+                moved[other] = target
+                links.append(f"{evidence}: {vo.name} ({vo.country}, {len(vo.members)} listing(s)) -> {vt.name}")
+
+    by_id = {t.id: t for t in all_t}
+    targets = {_follow(moved, cid) for cid in moved}
+    # Every listing of a merged-away company (its own row included) points at the final target.
+    assignments = {
+        t.id: _follow(moved, cid)
+        for cid in moved
+        for t in views[cid].members
+    }
+    assignments = [(tid, mid) for tid, mid in assignments.items() if tid != mid and by_id[tid].master_ticker_id != mid]
+    # A target is a company id: its own row must not point at a master (e.g. a stale link to an
+    # invalid ticker).
+    ticker.clear_master_ticker_bulk([tid for tid in targets if by_id[tid].master_ticker_id is not None])
+    ticker.update_master_ticker_bulk(assignments)
+    for r in rejections:
+        log.record_notice(f"ISIN match rejected — {r}")
+    log.record_status(f"Ticker same-company link: {len(moved)} compan(ies) merged ({len(assignments)} listing(s)), {len(rejections)} ISIN match(es) rejected.")
+    LAST_LINKS, LAST_REJECTIONS = links, rejections
+    return len(assignments)
+
+
+def align_masters_to_primary() -> int:
+    """
+    Makes every company's master its primary listing (company.primary_listing: active ordinary
+    shares in the home market, else a US listing, …), re-pointing the whole group when a better
+    listing than the current master exists — e.g. Bank of America's master 0Q16 (LSE order
+    book) becomes BAC (NYSE), TSMC's becomes 2330 (Taiwan). The current master wins ties, and a
+    listing needs a market cap within REALIGN_ACTIVE_DAYS to take over, so masters don't swap
+    back and forth. Stored ids referring to the old master (benchmark_holding, best_idea,
+    fund_holding) still resolve to the company through COALESCE(master_ticker_id, id).
+    Returns the number of companies realigned.
+    """
+    global LAST_REALIGNED
+    all_t = ticker.fetch_all()
+    by_id = {t.id: t for t in all_t}
+    members: dict[int, list[Ticker]] = {}
+    for t in all_t:
+        members.setdefault(company.company_id(t, by_id), []).append(t)
+    grouped_ids = [t.id for ms in members.values() if len(ms) > 1 for t in ms]
+    latest = ticker_value.fetch_latest_values(grouped_ids)
+    caps = {tid: cap for tid, (_d, cap) in latest.items()}
+    latest_dates = {tid: d for tid, (d, _cap) in latest.items()}
+
+    clears: list[int] = []
+    assignments: list[tuple[int, int]] = []
+    realigned: list[str] = []
+    for root, ms in members.items():
+        if len(ms) < 2:
+            continue
+        candidates = [t for t in ms if not t.invalid] or ms
+        if root not in {t.id for t in candidates}:
+            candidates = candidates + [by_id[root]]
+        primary = company.primary_listing(candidates, root, caps, latest_dates, active_days=REALIGN_ACTIVE_DAYS)
+        if primary.id == root:
+            continue
+        clears.append(primary.id)
+        assignments.extend((t.id, primary.id) for t in ms if t.id != primary.id)
+        realigned.append(f"{_describe(by_id[root])} -> {_describe(primary)}")
+
+    ticker.clear_master_ticker_bulk(clears)
+    ticker.update_master_ticker_bulk(assignments)
+    if realigned:
+        log.record_status(f"Ticker master realignment: {len(realigned)} compan(ies) moved to their primary listing.")
+    LAST_REALIGNED = realigned
+    return len(realigned)
+
+
 def refresh_company_data() -> int:
     """
     For every company, finds its primary listing (modules.ticker.company) and persists:
@@ -276,19 +388,20 @@ def refresh_company_data() -> int:
     by_id = {t.id: t for t in all_tickers}
     members_of: dict[int, list[Ticker]] = {}
     for t in all_tickers:
-        root = t.master_ticker_id if t.master_ticker_id in by_id else t.id
-        members_of.setdefault(root, []).append(t)
+        members_of.setdefault(company.company_id(t, by_id), []).append(t)
 
     grouped_ids = [t.id for ms in members_of.values() if len(ms) > 1 for t in ms]
-    caps = ticker_value.fetch_latest_market_caps(grouped_ids) if grouped_ids else {}
+    latest = ticker_value.fetch_latest_values(grouped_ids) if grouped_ids else {}
+    caps = {tid: cap for tid, (_d, cap) in latest.items()}
+    latest_dates = {tid: d for tid, (d, _cap) in latest.items()}
 
     cap_updates: list[tuple[int, float | None]] = []
     region_updates: list[tuple[int, str]] = []
     for root, members in members_of.items():
-        region = company.region(members, root)
+        region = company.region(members, root, latest_dates if len(members) > 1 else None)
         region_updates.extend((t.id, region) for t in members)
         if len(members) > 1:
-            cap_updates.append((root, company.company_market_cap(members, root, caps)))
+            cap_updates.append((root, company.company_market_cap(members, root, caps, latest_dates)))
 
     ticker.update_company_market_cap_bulk(cap_updates)
     ticker.update_region_bulk(region_updates)
@@ -302,11 +415,15 @@ def refresh_company_data() -> int:
 def sync_masters_and_company_data() -> tuple[int, int, int]:
     """Returns (links_added, links_removed, company_caps_refreshed). Unlinking runs first so a
     ticker whose CIK/name changed can be regrouped correctly in the same run; chains/cycles are
-    flattened before and after grouping."""
+    flattened before and after grouping; masters are then moved to each company's primary
+    listing, before the company cap and region are derived from it."""
     unlinked = unlink_stale_master_tickers()
     repair_master_chains()
     masters_updated = sync_master_tickers()
     masters_updated += repair_master_chains()
+    masters_updated += link_same_company()
+    masters_updated += repair_master_chains()
+    masters_updated += align_masters_to_primary()
     caps_updated = refresh_company_data()
     return masters_updated, unlinked, caps_updated
 
@@ -388,5 +505,17 @@ def build_master_groups_report(masters_updated: int = 0, caps_updated: int = 0, 
     lines.append(f"## Matched by name: {len(name_lines)} group(s)")
     lines.append("")
     lines.extend(name_lines if name_lines else ["None."])
+    lines.append("")
+    lines.append(f"## Companies merged this run (ISIN, name + market cap, depositary receipt): {len(LAST_LINKS)}")
+    lines.append("")
+    lines.extend([f"- {x}" for x in LAST_LINKS] or ["None."])
+    lines.append("")
+    lines.append(f"## ISIN matches rejected: {len(LAST_REJECTIONS)} (names and caps disagree — review: renames, or a wrong ISIN at FMP)")
+    lines.append("")
+    lines.extend([f"- {x}" for x in LAST_REJECTIONS] or ["None."])
+    lines.append("")
+    lines.append(f"## Masters moved to the company's primary listing this run: {len(LAST_REALIGNED)}")
+    lines.append("")
+    lines.extend([f"- {x}" for x in LAST_REALIGNED] or ["None."])
 
     return "\n".join(lines)

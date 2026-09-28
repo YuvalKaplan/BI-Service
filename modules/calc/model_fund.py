@@ -1,11 +1,12 @@
 import log
 import pandas as pd
 from datetime import date
-from typing import Any, List, Optional
+from typing import Any, List, Optional, cast
 from dataclasses import dataclass
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from modules.const import LARGE_CAP_THRESHOLD
 from modules.object import best_idea, ticker
+from modules.ticker import company
 
 
 # ── Shared strategy models ──────────────────────────────────────────────────
@@ -19,9 +20,11 @@ class Style(BaseModel):
     growth: Optional[int] = None
 
 class RegionSplit(BaseModel):
-    model_config = {'populate_by_name': True}
-    us: Optional[int] = Field(None, alias='US')
-    non_us: Optional[int] = Field(None, alias='Non-US')
+    # Percent of the fund's holdings per region, keyed by ticker.region value. Unknown keys are
+    # rejected so a misspelt split can't silently turn into "no region filter".
+    model_config = {'extra': 'forbid'}
+    US: Optional[int] = None
+    International: Optional[int] = None
 
 class Region(BaseModel):
     name: str
@@ -156,8 +159,8 @@ def resolve_canonical_ticker_ids(df: pd.DataFrame) -> pd.DataFrame:
     Adds a `canonical_ticker_id` column = COALESCE(master_ticker_id, ticker_id). Share-class/
     cross-listing grouping is no longer computed here — it's done once, persistently, by
     modules.ticker.master.sync_master_tickers() (CIK match, falling back to normalized-name
-    match for tickers with no CIK) and frozen on ticker.master_ticker_id, so it can't flip
-    week to week as market caps move. Tickers with no master keep canonical_ticker_id == ticker_id.
+    match for tickers with no CIK, plus modules.ticker.identity evidence) and stored on
+    ticker.master_ticker_id — the company's primary listing, which market-cap moves never change. Tickers with no master keep canonical_ticker_id == ticker_id.
     """
     if df.empty or 'master_ticker_id' not in df.columns:
         return df.assign(canonical_ticker_id=df['ticker_id'])
@@ -205,15 +208,14 @@ def _eligibility_masks(
         masks['cap'] = df['market_cap'] < LARGE_CAP_THRESHOLD
     else:
         masks['cap'] = all_true
-    # A company's region is its primary listing's (ticker.region, see modules/ticker/company.py):
-    # US-listed foreign-domiciled companies (Eaton, Medtronic) are US; ADRs of companies with a
-    # home-market listing (TSM, ASML) are International — the same rule the benchmarks use.
-    if country_type == 'US':
-        masks['region'] = (df['etf_region'] == 'US') & (df['region'] == 'US')
-    elif country_type == 'Non-US':
-        masks['region'] = (df['etf_region'] == 'International') & (df['region'] == 'International')
-    else:
+    # country_type is a region ('US' | 'International') or 'all'. A company's region is its
+    # primary listing's (ticker.region, see modules/ticker/company.py): US-listed
+    # foreign-domiciled companies (Eaton, Medtronic) are US; ADRs of companies with a home-market
+    # listing (TSM, ASML) are International — the same rule the benchmarks use.
+    if country_type == 'all':
         masks['region'] = all_true
+    else:
+        masks['region'] = (df['etf_region'] == country_type) & (df['region'] == country_type)
     masks['exchange'] = df['exchange'].isin(exchanges) if exchanges else all_true
     masks['esg'] = df['esg_qualified'] == True if esg_only else all_true
     return masks
@@ -368,49 +370,45 @@ def _fetch_and_select_by_region(
 ) -> tuple[list, list]:
     """
     Returns (ideal, fetched).
-    - Split region (us + non_us both set): filters US and Non-US independently then combines by percentages.
-    - Name-only region ("US" or "International"): filters all holdings to that country group.
-    - No region or unrecognised name: no country filter applied.
+    - Split region (US + International both set): filters each region independently then combines by percentages.
+    - Name-only region ("US" or "International"): filters all holdings to that region.
+    - No region or unrecognised name: no region filter applied.
     """
-    region = strategy.region
-    region_split = region.split if region is not None else None
+    region_split = strategy.region.split if strategy.region is not None else None
 
     if (
         region_split is not None
-        and region_split.us is not None
-        and region_split.non_us is not None
+        and region_split.US is not None
+        and region_split.International is not None
     ):
-        intl_ideal, intl_fetched = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type='Non-US', held_ticker_ids=held_ticker_ids)
+        intl_ideal, intl_fetched = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type=company.INTERNATIONAL, held_ticker_ids=held_ticker_ids)
         intl_ticker_ids = {i.ticker_id for i in intl_fetched}
-        us_ideal,   us_fetched   = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type='US', exclude_ticker_ids=intl_ticker_ids, held_ticker_ids=held_ticker_ids)
+        us_ideal,   us_fetched   = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type=company.US, exclude_ticker_ids=intl_ticker_ids, held_ticker_ids=held_ticker_ids)
 
-        us_n_target   = round(strategy.holdings * region_split.us / 100)
+        us_n_target   = round(strategy.holdings * region_split.US / 100)
         intl_n_target = strategy.holdings - us_n_target
         us_n   = min(len(us_ideal),   us_n_target)
         intl_n = min(len(intl_ideal), intl_n_target)
 
         return us_ideal[:us_n] + intl_ideal[:intl_n], us_fetched + intl_fetched
 
-    country_type = 'all'
-    if region is not None:
-        if region.name == 'US':
-            country_type = 'US'
-        elif region.name == 'International':
-            country_type = 'Non-US'
-
+    country_type = strategy_country_types(strategy)[0]
     return _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type=country_type, held_ticker_ids=held_ticker_ids)
 
 
 def strategy_country_types(strategy: Strategy) -> list[str]:
-    """The country_type buckets _fetch_and_select_by_region selects from for this strategy."""
+    """
+    The country_type buckets _fetch_and_select_by_region selects from: both regions for a
+    US/International split, the region's name when it's one of them, else ['all'] (no filter).
+    """
     region = strategy.region
-    split = region.split if region is not None else None
-    if split is not None and split.us is not None and split.non_us is not None:
-        return ['US', 'Non-US']
-    if region is not None and region.name == 'US':
-        return ['US']
-    if region is not None and region.name == 'International':
-        return ['Non-US']
+    if region is None:
+        return ['all']
+    split = region.split
+    if split is not None and split.US is not None and split.International is not None:
+        return [company.US, company.INTERNATIONAL]
+    if region.name in (company.US, company.INTERNATIONAL):
+        return [region.name]
     return ['all']
 
 
@@ -423,11 +421,11 @@ def etfs_used(strategy: Strategy, all_best_ideas_df: pd.DataFrame) -> dict[int, 
     df = all_best_ideas_df
     if strategy.provider_etfs:
         df = df[df['provider_etf_id'].isin(set(strategy.provider_etfs))]
-    regions = {'US': 'US', 'Non-US': 'International'}
     country_types = strategy_country_types(strategy)
     if 'all' not in country_types:
-        df = df[df['etf_region'].isin({regions[c] for c in country_types})]
-    return df.groupby('provider_etf_id')['value_date'].max().to_dict()
+        df = df[df['etf_region'].isin(country_types)]
+    # pandas types to_dict() as dict[Hashable, Any]; the keys are provider_etf_id ints.
+    return cast(dict[int, date], df.groupby('provider_etf_id')['value_date'].max().to_dict())
 
 
 def generate(

@@ -1,10 +1,11 @@
 """
-Backfills historical Wednesday-dated benchmark_holding snapshots (US and International blend
-benchmarks) from inception_date up to the most recent date with published FMP data, for use
-by a historical simulation (sim_fund.py).
+Backfills historical Wednesday-dated benchmark_holding snapshots (every enabled benchmark) from
+inception_date up to the most recent date with published FMP data, for use by a historical
+simulation (sim_fund.py).
 
-Run after scripts/sim_prep_data.py (ticker profile refresh + master ticker sync) — this reads
-the master_ticker_id links to consolidate share-class siblings, but doesn't create them.
+Run after scripts/sim_prep_data.py (ticker profile refresh, universe screener, master ticker
+sync, large-cap universe) — this forms the benchmarks from the stored universe, but doesn't
+screen, link or build it.
 
 Writes a report (every snapshot created, with its date and holdings count) to
 .output/sim_benchmark_report.md.
@@ -27,13 +28,14 @@ if __name__ == '__main__':
     try:
         inception_date = date(2026, 6, 1)  # <-- edit before each run
 
-        benchmarks_created = benchmark_generator.run(inception_date)
+        screen_date, benchmarks_created = benchmark_generator.run(inception_date)
 
         report_lines = [
             "# Sim Benchmark Report",
             "",
             f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"Inception date: {inception_date}",
+            f"Universe: screen of {screen_date} (see .output/sim_prep_data_report.md)",
             "",
             f"Total snapshots: {len(benchmarks_created)}",
             "",

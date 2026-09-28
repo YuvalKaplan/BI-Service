@@ -1,9 +1,10 @@
 import atexit
 import os
 from modules.object.exit import cleanup
-from modules.object import provider, provider_etf, provider_etf_holding
+from modules.object import provider, provider_etf, provider_etf_holding, ticker
 from modules.parse.url import scrape_provider_etf
 from modules.parse.convert import load, map_data
+from modules.ticker import pricing, valuation
 from modules.ticker.resolver import TickerResolver
 
 atexit.register(cleanup)
@@ -51,6 +52,11 @@ if __name__ == '__main__':
             print("... ------------ ...")
             print(df.tail())
             provider_etf_holding.insert_all_holdings(etf.id, df)
+            # Resolution registers the tickers; their values come from the valuation pass.
+            values = valuation.store_values(
+                valuation.targets_for_tickers(ticker.fetch_by_ids([int(i) for i in df['ticker_id'].unique()])),
+                pricing.latest_value_date())
+            print(f"Values: {values.validated} validated, {values.already_valued} already valued, {values.withheld} withheld")
 
     except Exception as e:
         print(f"Error in scraping single provider ETF: {e}")

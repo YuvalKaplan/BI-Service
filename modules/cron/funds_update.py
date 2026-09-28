@@ -3,9 +3,12 @@ import pandas as pd
 from datetime import date, timedelta
 from typing import List
 from modules.object import batch_run
-from modules.object import best_idea, fund, fund_analysis, fund_holding, fund_holding_change, provider_etf
+from modules.object import best_idea, fund, fund_analysis, fund_holding, fund_holding_change, provider_etf, ticker
 from modules.calc import model_fund
 from modules.cron import best_ideas_generator
+from modules.ticker import company
+
+COMPANY_CAP_WINDOW_DAYS = 10  # matches best_idea.fetch_all_as_df's market-cap lookback
 
 
 def build_shared_context(as_of_date: date) -> tuple[pd.DataFrame, dict]:
@@ -16,6 +19,18 @@ def build_shared_context(as_of_date: date) -> tuple[pd.DataFrame, dict]:
     """
     all_best_ideas_df = best_idea.fetch_all_as_df(as_of_date=as_of_date)
     all_best_ideas_df = model_fund.resolve_canonical_ticker_ids(all_best_ideas_df)
+
+    # A multi-listing company's master is measured by the company's cap as of the date (its
+    # first listing, in primary-listing order, with a value near the date — the master's own
+    # listing can be a secondary one), not by the master listing's own cap. Feeds the large-cap
+    # filter and the market-cap weighting (mc_map).
+    if not all_best_ideas_df.empty:
+        company_caps = company.company_caps_as_of(
+            [int(t) for t in all_best_ideas_df['ticker_id'].unique()], as_of_date, COMPANY_CAP_WINDOW_DAYS)
+        if company_caps:
+            all_best_ideas_df['market_cap'] = [
+                company_caps.get(int(t), mc) for t, mc in zip(all_best_ideas_df['ticker_id'], all_best_ideas_df['market_cap'])
+            ]
 
     canonical_rows = all_best_ideas_df[
         all_best_ideas_df['ticker_id'] == all_best_ideas_df['canonical_ticker_id']
@@ -51,6 +66,7 @@ def activate_fund(
     strategy = model_fund.getStrategyFromJson(fund_protocol.strategy)
 
     previous_holdings = fund_holding.fetch_funds_holdings(fund_id, previous_eval_date)
+    _to_current_masters(previous_holdings)
 
     if previous_holdings:
         days_since_recalc = (as_of_date - previous_holdings[0].holding_date).days
@@ -79,6 +95,18 @@ def activate_fund(
 
     log.record_status(model_fund.results_to_string(results))
     return results
+
+
+def _to_current_masters(holdings: list) -> None:
+    """A holding is stored under its company's master id at the time; one whose master has
+    since moved to a better primary listing (master.align_masters_to_primary) is carried over
+    under the company's current master — the id the best ideas now use — so the same company
+    isn't sold and bought back."""
+    info = ticker.fetch_master_info_by_ids([h.ticker_id for h in holdings])
+    for h in holdings:
+        master_id = info.get(h.ticker_id, (None, None))[0]
+        if master_id:
+            h.ticker_id = master_id
 
 
 def _record_fund_analysis(

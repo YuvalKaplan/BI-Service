@@ -9,7 +9,7 @@ from modules.core.db import db_pool_instance
 @dataclass
 class TickerValue:
     ticker_id: int
-    value_date: date | None
+    value_date: date
     stock_price: float | None
     market_cap: float | None
 
@@ -42,24 +42,74 @@ def fetch_latest_market_caps_within_window(ticker_ids: List[int], as_of_date: da
         raise Exception(f"Error fetching latest market caps within window: {e}")
 
 
-def fetch_latest_market_caps(ticker_ids: List[int]) -> dict[int, float]:
-    """Latest known market cap per ticker id, with no date window — used for master-ticker
-    election and company market cap refresh, where siblings may have staggered price-refresh
-    dates and we always want whatever is most recently on record for each."""
+def fetch_latest_values(ticker_ids: List[int]) -> dict[int, tuple[date, float]]:
+    """Latest known (value_date, market_cap) per ticker id, with no date window."""
     if not ticker_ids:
         return {}
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT DISTINCT ON (ticker_id) ticker_id, market_cap
+                    SELECT DISTINCT ON (ticker_id) ticker_id, value_date, market_cap
                     FROM ticker_value
                     WHERE ticker_id = ANY(%s) AND market_cap IS NOT NULL
                     ORDER BY ticker_id, value_date DESC;
                 """, (ticker_ids,))
-                return {row[0]: row[1] for row in cur.fetchall()}
+                return {row[0]: (row[1], row[2]) for row in cur.fetchall()}
     except Error as e:
-        raise Exception(f"Error fetching latest market caps: {e}")
+        raise Exception(f"Error fetching latest values: {e}")
+
+
+def fetch_latest_market_caps(ticker_ids: List[int]) -> dict[int, float]:
+    """Latest known market cap per ticker id, with no date window — used for master-ticker
+    election and company market cap refresh, where siblings may have staggered price-refresh
+    dates and we always want whatever is most recently on record for each."""
+    return {tid: cap for tid, (_d, cap) in fetch_latest_values(ticker_ids).items()}
+
+
+def fetch_market_caps_between(ticker_ids: List[int], start: date, end: date) -> dict[int, dict[date, float]]:
+    """{ticker_id: {value_date: market_cap}} for every stored value in [start, end]."""
+    if not ticker_ids:
+        return {}
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT ticker_id, value_date, market_cap
+                    FROM ticker_value
+                    WHERE ticker_id = ANY(%s) AND market_cap IS NOT NULL
+                      AND value_date BETWEEN %s AND %s;
+                """, (ticker_ids, start, end))
+                out: dict[int, dict[date, float]] = {}
+                for tid, d, cap in cur.fetchall():
+                    out.setdefault(tid, {})[d] = cap
+                return out
+    except Error as e:
+        raise Exception(f"Error fetching market caps between {start} and {end}: {e}")
+
+
+def fetch_price_and_cap_series_between(ticker_ids: List[int], start: date, end: date) -> dict[int, tuple[dict[date, float], dict[date, float]]]:
+    """{ticker_id: ({value_date: market_cap}, {value_date: stock_price})} for every stored value in [start, end]."""
+    if not ticker_ids:
+        return {}
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT ticker_id, value_date, market_cap, stock_price
+                    FROM ticker_value
+                    WHERE ticker_id = ANY(%s) AND market_cap IS NOT NULL
+                      AND value_date BETWEEN %s AND %s;
+                """, (ticker_ids, start, end))
+                out: dict[int, tuple[dict[date, float], dict[date, float]]] = {}
+                for tid, d, cap, price in cur.fetchall():
+                    caps, prices = out.setdefault(tid, ({}, {}))
+                    caps[d] = cap
+                    if price:
+                        prices[d] = price
+                return out
+    except Error as e:
+        raise Exception(f"Error fetching price and market cap series between {start} and {end}: {e}")
 
 
 def fetch_values_for_ticker(ticker_id: int, start: date, end: date) -> List[TickerValue]:

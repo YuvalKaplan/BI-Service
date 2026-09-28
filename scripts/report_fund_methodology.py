@@ -24,7 +24,7 @@ atexit.register(cleanup)
 
 if __name__ == '__main__':
     try:
-        fund_id = 8  # <-- edit before each run
+        fund_id = 10  # <-- edit before each run
         as_of_date: date | None = None  # <-- edit before each run (None = the fund's inception date)
 
         out_dir = fund_methodology.run(fund_id, as_of_date)

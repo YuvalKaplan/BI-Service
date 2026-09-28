@@ -1,25 +1,12 @@
 import re
 import log
-from datetime import datetime, date, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from modules.core import api_stocks
+from modules.ticker import esg
 from modules.ticker import util as tu
-from modules.ticker import pricing
-from modules.object.ticker import Ticker, upsert_by_symbol, update_invalid, update_esg_data
+from modules.object.ticker import Ticker, upsert_by_symbol, update_invalid
 from modules.object import categorize_ticker as _cat_ticker
-from modules.calc import esg as _esg
-
-_VALUE_DATE_CUT_OFF_HOUR = 17
-
-def populate_esg(ticker_id: int, full_symbol: str) -> None:
-    try:
-        disclosure, rating = api_stocks.fetch_esg_data(full_symbol)
-        esg_qualified, esg_factors = _esg.qualify(disclosure, rating)
-        update_esg_data(ticker_id, esg_qualified, esg_factors)
-    except Exception as e:
-        log.record_notice(f"Failed to store ESG for '{full_symbol}': {e}")
 
 
 class TickerResolver:
@@ -204,10 +191,10 @@ class TickerResolver:
             update_invalid(ticker_id, 'Missing market cap')
             return None
 
-        self._store_ticker_value(ticker_id, profile)
-        
+        # Its price and market cap are stored by the valuation pass (modules/ticker/valuation.py),
+        # once per ticker, not here — a ticker held by several providers' ETFs is resolved by each.
         if is_new:
-            populate_esg(ticker_id, full_symbol)
+            esg.populate_esg(ticker_id, full_symbol)
         return ticker_id
 
     def _populate_category_ticker(self, profile: dict) -> int | None:
@@ -231,10 +218,4 @@ class TickerResolver:
             "market_cap": profile.get('marketCap'),
             "factors":    factors,
         })
-
-    def _store_ticker_value(self, ticker_id: int, profile: dict) -> None:
-        full_symbol = profile.get('symbol')
-        now_et = datetime.now(ZoneInfo("America/New_York"))
-        value_date = (now_et - timedelta(days=1) if now_et.hour < _VALUE_DATE_CUT_OFF_HOUR else now_et).date()
-        pricing.store_validated_ticker_value(ticker_id, full_symbol, value_date, exchange=profile.get('exchange'))
 

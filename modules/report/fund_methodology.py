@@ -144,7 +144,7 @@ class _Context:
     def provider_name(self, etf_id: int) -> str:
         e = self.etfs.get(etf_id)
         p = self.providers.get(e.provider_id) if e else None
-        return p.name if p else ''
+        return (p.name if p else None) or ''
 
     def etf_label(self, etf_id: int | None) -> str:
         e = self.etfs.get(etf_id) if etf_id else None
@@ -173,7 +173,8 @@ def _write_etf_files(ctx: _Context, out_dir: str) -> list[str]:
         holdings, quarantined = aggregate_holdings(ctx.raw_lines[etf_id])
         line_counts: dict[int, int] = {}
         for h in ctx.raw_lines[etf_id]:
-            line_counts[h.ticker_id] = line_counts.get(h.ticker_id, 0) + 1
+            if h.ticker_id:
+                line_counts[h.ticker_id] = line_counts.get(h.ticker_id, 0) + 1
 
         # Listing-level detail, grouped under the company the calculation used
         company_ids = {a.ticker_id for a in rows}
@@ -245,7 +246,7 @@ def _write_benchmark_file(ctx: _Context, out_dir: str) -> str:
     held = {a.ticker_id for a in ctx.analysis}
     with pd.ExcelWriter(path, engine='openpyxl') as w:
         if ctx.mode == 'full_universe':
-            snapshots = sorted({(a.benchmark_id, a.benchmark_date) for a in ctx.analysis if a.benchmark_id})
+            snapshots = sorted({(a.benchmark_id, a.benchmark_date) for a in ctx.analysis if a.benchmark_id and a.benchmark_date})
             for bm_id, bm_date in snapshots:
                 bm = ctx.benchmarks[bm_id]
                 rows = benchmark.fetch_latest_holdings_for_date(bm_id, bm_date)
@@ -365,7 +366,7 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
 
     def bucket(ticker_id: int) -> str:
         t = ctx.tickers.get(ticker_id)
-        region = ('US' if t and t.region == 'US' else 'Non-US') if s.region and s.region.split else (s.region.name if s.region else 'all')
+        region = ('US' if t and t.region == 'US' else 'International') if s.region and s.region.split else (s.region.name if s.region else 'all')
         return f"{region} / {t.style_type if t else '?'}"
 
     holdings = pd.DataFrame([{

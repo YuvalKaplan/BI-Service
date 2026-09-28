@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Sequence
 from psycopg.errors import Error
 from psycopg.rows import class_row, dict_row
 from dataclasses import dataclass
@@ -26,7 +26,7 @@ def is_preferred_exchange(candidate_exchange: str | None, current_exchange: str 
 @dataclass
 class Ticker:
     symbol: str
-    id: Optional[int] = None
+    id: int = 0  # 0 until inserted; rows read from the DB always carry their id
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     source: str | None = None
@@ -263,12 +263,12 @@ def upsert_by_symbol(item: Ticker) -> tuple[int, bool]:
                         cik = COALESCE(EXCLUDED.cik, ticker.cik),
                         name = EXCLUDED.name,
                         exchange = EXCLUDED.exchange,
-                        industry = EXCLUDED.industry,
-                        sector = EXCLUDED.sector,
-                        country = EXCLUDED.country,
-                        currency = EXCLUDED.currency,
+                        industry = COALESCE(EXCLUDED.industry, ticker.industry),
+                        sector = COALESCE(EXCLUDED.sector, ticker.sector),
+                        country = COALESCE(EXCLUDED.country, ticker.country),
+                        currency = COALESCE(EXCLUDED.currency, ticker.currency),
                         source = EXCLUDED.source,
-                        type_from = EXCLUDED.type_from,
+                        type_from = COALESCE(EXCLUDED.type_from, ticker.type_from),
                         is_actively_trading = EXCLUDED.is_actively_trading
                     RETURNING id, (xmax = 0) AS is_new;
                 """
@@ -505,7 +505,7 @@ def fetch_cik_groups() -> list[tuple[str, list[int]]]:
 
 def fetch_no_cik_tickers() -> list['Ticker']:
     """Tickers with no cik (whether or not a master is already assigned — an existing
-    master must still be visible here so name-based grouping can detect and freeze it),
+    master must still be visible here so name-based grouping can reuse it),
     candidates for the name-matching fallback pass."""
     try:
         with db_pool_instance.get_connection() as conn:
@@ -521,8 +521,8 @@ def fetch_no_cik_tickers() -> list['Ticker']:
         raise Exception(f"Error fetching no-cik tickers: {e}")
 
 
-def update_master_ticker_bulk(pairs: list[tuple[int, int]]) -> None:
-    """pairs: [(ticker_id, master_ticker_id), ...]"""
+def update_master_ticker_bulk(pairs: Sequence[tuple[int, int | None]]) -> None:
+    """pairs: [(ticker_id, master_ticker_id), ...]; a None master_ticker_id clears the link."""
     if not pairs:
         return
     try:
@@ -641,6 +641,25 @@ def fetch_cik_tickers() -> list['Ticker']:
                 return cur.fetchall()
     except Error as e:
         raise Exception(f"Error fetching CIK tickers: {e}")
+
+
+def fetch_group_members(master_ids: list[int]) -> dict[int, list['Ticker']]:
+    """{master_id: [the master, then each sibling]} for the given masters."""
+    if not master_ids:
+        return {}
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                cur.execute("SELECT * FROM ticker WHERE id = ANY(%s) OR master_ticker_id = ANY(%s);", (master_ids, master_ids))
+                rows = cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching group members: {e}")
+    groups: dict[int, list[Ticker]] = {mid: [] for mid in master_ids}
+    for t in sorted(rows, key=lambda t: (t.master_ticker_id is not None, t.id)):
+        root = t.master_ticker_id if t.master_ticker_id in groups else t.id
+        if root in groups:
+            groups[root].append(t)
+    return groups
 
 
 def fetch_master_info_by_ids(ticker_ids: list[int]) -> dict[int, tuple[int | None, float | None]]:

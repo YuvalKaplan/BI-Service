@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from modules.core import api_stocks
 
 NAME_NOISE: set[str] = {
@@ -81,6 +82,20 @@ US_LISTING_EXCHANGES: set[str] = {'NYSE', 'NASDAQ', 'AMEX'}
 # Extra countries counted as a company's home market beyond its own (HK-listed Chinese companies).
 HOME_COUNTRY_ALIASES: dict[str, set[str]] = {'CN': {'HK'}}
 
+# Dutch and Luxembourg holding companies are often primarily listed on another continental
+# exchange (Airbus and Euronext in Paris, Stellantis and Ferrari in Milan, argenx in Brussels,
+# ArcelorMittal in Amsterdam/Madrid, Tenaris in Milan), so those markets count as home for
+# them too — ranked after the domicile country's own exchanges.
+WIDER_HOME_COUNTRIES: dict[str, set[str]] = {
+    'NL': {'FR', 'BE', 'IT', 'PT', 'ES'},
+    'LU': {'NL', 'FR', 'BE', 'IT', 'PT', 'ES'},
+}
+
+# LSE's International Order Book: foreign securities mirrored on LSE under 4-character codes
+# starting with 0 (0Q16 = Bank of America), carrying the issuer's home-market data. FMP files
+# them under 'LSE' or 'IOB'. Never a home listing.
+_IOB_SYMBOL = re.compile(r'^0[0-9A-Z]{3}$')
+
 
 def home_countries(country: str | None) -> set[str]:
     if not country:
@@ -88,10 +103,62 @@ def home_countries(country: str | None) -> set[str]:
     return {country} | HOME_COUNTRY_ALIASES.get(country, set())
 
 
+def is_iob_line(symbol: str | None, exchange: str | None) -> bool:
+    return exchange == 'IOB' or (exchange == 'LSE' and bool(symbol) and bool(_IOB_SYMBOL.match(symbol)))
+
+
+def listing_country(symbol: str | None, exchange: str | None) -> str | None:
+    """The country a listing trades in, or None for venues with no country of their own (OTC,
+    LSE's International Order Book, unknown exchanges)."""
+    if is_iob_line(symbol, exchange):
+        return None
+    return EXCHANGE_COUNTRY.get(exchange or '')
+
+
+def market_tier(domicile: str | None, symbol: str | None, exchange: str | None) -> int:
+    """How strong a candidate for a company's primary listing a listing is, by market:
+    0 = the domicile country's own market (incl. HOME_COUNTRY_ALIASES), 1 = a wider home market
+    (WIDER_HOME_COUNTRIES), 2 = a US exchange, 3 = another country's exchange, 4 = a venue with
+    no country of its own (OTC, LSE's International Order Book, unknown)."""
+    country = listing_country(symbol, exchange)
+    if country and country in home_countries(domicile):
+        return 0
+    if country and country in WIDER_HOME_COUNTRIES.get(domicile or '', set()):
+        return 1
+    if exchange in US_LISTING_EXCHANGES and not is_iob_line(symbol, exchange):
+        return 2
+    return 3 if country else 4
+
+
+def has_screened_home(domicile: str | None, screened_exchanges: list[str] | set[str]) -> bool:
+    """Whether any of `screened_exchanges` is in the domicile's home market (tier 0 or 1) — if
+    not (Bermuda, Cayman, Jersey, Hungary, Kazakhstan, …), a company domiciled there can only be
+    found on a foreign exchange, which then counts as home for it."""
+    return any(market_tier(domicile, None, ex) <= 1 for ex in screened_exchanges)
+
+
 def currency_for_exchange(exchange: str | None) -> str | None:
     """Best-known currency for `exchange`, or None if the exchange isn't in EXCHANGE_CURRENCY
     (caller should then fall back to whatever ticker.currency has, if anything)."""
     return EXCHANGE_CURRENCY.get(exchange) if exchange else None
+
+
+# FMP quotes some markets in minor units (GBp pence, ZAc cents, ILA agorot) but reports their
+# market caps in the major unit.
+_MINOR_CURRENCY_UNITS: dict[str, str] = {'GBp': 'GBP', 'GBX': 'GBP', 'ZAc': 'ZAR', 'ZAC': 'ZAR', 'ILA': 'ILS'}
+
+
+def normalize_currency(currency: str | None) -> str | None:
+    return _MINOR_CURRENCY_UNITS.get(currency, currency) if currency else None
+
+
+def listing_currency(exchange: str | None, currency: str | None = None) -> str | None:
+    """The currency a listing's market data is reported in: FMP's own currency for the listing
+    (ticker.currency / the profile's `currency`) when known — a market doesn't always report in
+    its exchange's currency (Compass on LSE in USD, Jardine Matheson on SES in USD, Hong Kong's
+    RMB counters in CNY, LSE's mirrored foreign lines in the issuer's currency) — else the
+    exchange's currency."""
+    return normalize_currency(currency) or currency_for_exchange(exchange)
 
 # Currencies and combination holdings (BRK - Berkshire Hathaway)
 EXCLUDED_TICKERS: set[str] = {'USD', 'BACKUSD', 'CAD', 'EUR', 'ISR', 'JPY', 'GBP', 'TICKER', 'BRK'}
@@ -102,9 +169,21 @@ TREASURY_SECURITIES: set[str] = {
 }
 
 
+def fold_accents(text: str) -> str:
+    """'Telefónica' -> 'Telefonica': FMP spells the same company with and without accents."""
+    return ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c))
+
+
+def name_key(name: str | None) -> str:
+    """Exact-name identity key: case, accents, punctuation and spacing ignored ("SK Telecom
+    Co.,Ltd" == "SK Telecom Co., Ltd."), legal suffixes kept ("Midea Group" != "Midea Group Co.,
+    Ltd.") — stripping them could merge unrelated companies."""
+    return re.sub(r'[^a-z0-9]', '', fold_accents(name or '').lower())
+
+
 def name_tokens(name: str) -> list[str]:
-    """Return meaningful lowercase tokens from a company name, stripping noise words and single chars."""
-    raw = re.split(r'[\s.\-,&/()\']', name.lower())
+    """Return meaningful lowercase tokens from a company name (accents folded), stripping noise words and single chars."""
+    raw = re.split(r'[\s.\-,&/()\']', fold_accents(name).lower())
     return [t for t in raw if len(t) > 1 and t not in NAME_NOISE and not _NAME_NOISE_PATTERN.match(t)]
 
 

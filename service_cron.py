@@ -5,8 +5,8 @@ from modules.object.exit import cleanup
 from modules.core.db import db_pool_instance, ENVIRONMENT
 from modules.core import sender
 from modules.calc.model_fund import results_to_string
-from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, esg_update, benchmark_generator
-from modules.ticker import master as ticker_master
+from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, benchmark_generator, universe_screener, universe_builder
+from modules.ticker import esg, master, refresh, style, valuation
 
 SEPERATOR_LINE = "-" * 20 + "\n"
 BREAKER_LINE = "=" * 20 + "\n\n"
@@ -25,6 +25,13 @@ if __name__ == '__main__':
         message_actions = ""
 
         if 1 <= weekday <= 5: # Tuesday through Saturday
+            # Listings in first — the holdings (stage 2) and the large-cap screener (stage 3), which
+            # register their tickers as they read them — then ticker maintenance (stage 4) runs the
+            # ticker utilities over every ticker, in order: profiles (so values use current
+            # currencies and skip tickers no longer valid) -> values (once per ticker in use; on
+            # Wednesday also the stored screen's lines) -> share-class consolidation (company caps
+            # come from the values) -> style (after grouping, so a new listing isn't classified on
+            # its own). The Wednesday generators only ever use maintained tickers.
             try:
                 stats_downloader, total_downloaded, provider_ids, = etf_downloader.run(start_time)
             except Exception as e:
@@ -37,15 +44,48 @@ if __name__ == '__main__':
             message_actions += BREAKER_LINE
 
             try:
-                profiles_checked, profiles_updated, profiles_marked_invalid = ticker_master.refresh_ticker_profiles()
+                screen = universe_screener.run(store=(weekday == 2))
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the FMP large-cap screener with error:\n{e}\n\n")
+                raise e
+
+            message_actions += universe_screener.summary(screen) + "\n"
+            message_actions += BREAKER_LINE
+
+            message_actions += f"Ticker Maintenance\n" + SEPERATOR_LINE
+            try:
+                profiles_checked, profiles_updated, profiles_marked_invalid = refresh.refresh_ticker_profiles()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on ticker profile refresh with error:\n{e}\n")
                 raise e
 
             message_actions += f"Ticker profiles refreshed: {profiles_updated} updated, {profiles_marked_invalid} marked invalid, out of {profiles_checked} checked\n"
+
+            try:
+                values = valuation.run()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on ticker values with error:\n{e}\n\n")
+                raise e
+
+            message_actions += valuation.summary(values) + "\n"
+
+            try:
+                masters_updated, unlinked, caps_updated = master.sync_masters_and_company_data()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the master ticker sync with error:\n{e}\n\n")
+                raise e
+
+            message_actions += f"Ticker master sync: {masters_updated} link(s), {unlinked} unlinked, {caps_updated} company cap(s) refreshed\n"
+
+            try:
+                style.assign_styles()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on style assignment with error:\n{e}\n\n")
+                raise e
+
             message_actions += BREAKER_LINE
 
-        if weekday == 6:  # Sunday
+        if weekday == 6:  # Sunday — ticker maintenance, Sunday part: style reference data, then ESG
             try:
                 total_etfs = categorize_downloader.run()
             except Exception as e:
@@ -56,7 +96,7 @@ if __name__ == '__main__':
             message_actions += BREAKER_LINE
 
             try:
-                total_esg = esg_update.run()
+                total_esg = esg.refresh_all()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on ESG update with error:\n{e}\n\n")
                 raise e
@@ -65,17 +105,28 @@ if __name__ == '__main__':
             message_actions += BREAKER_LINE
 
         if weekday == 2: # Wednesday
-            # Includes the master-ticker sync, which has to run after the screener so that
-            # listings first seen today are linked to their companies. Fails (stopping best ideas
-            # and funds) if the FMP screener still fails after its retries or a benchmark comes out empty.
+            # The generators, after the Tue–Sat steps above (which stored and valued the screen): the
+            # universe is built from the stored screen and the linked companies, then benchmarks,
+            # best ideas, funds — each reading what the previous step stored. A failed step stops
+            # the rest: the FMP screener fails after its retries, and an empty universe or
+            # benchmark fails too, so the generators never run on partial data.
+            try:
+                universe = universe_builder.run()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the large-cap universe with error:\n{e}\n\n")
+                raise e
+
+            message_actions += universe_builder.summary(universe) + "\n"
+            message_actions += BREAKER_LINE
+
             try:
                 bench = benchmark_generator.run()
             except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed in benchmark generation (FMP screener, master sync or benchmark snapshot) with error:\n{e}\n\n")
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on benchmark generation with error:\n{e}\n\n")
                 raise e
 
-            message_actions += f"Ticker master sync: {bench.masters_updated} link(s), {bench.unlinked} unlinked, {bench.company_caps} company cap(s) refreshed\n"
-            message_actions += f"Benchmark blend holdings refreshed: {bench.us_companies} US, {bench.intl_companies} International companies\n"
+            message_actions += f"Benchmark holdings refreshed:\n" + SEPERATOR_LINE
+            message_actions += benchmark_generator.summary(bench) + "\n"
             message_actions += BREAKER_LINE
 
             try:

@@ -13,6 +13,21 @@ Usage:
     python scripts/data_fill_ticker_value_refresh.py --yes               # skip the confirmation prompt
     python scripts/data_fill_ticker_value_refresh.py --dry-run           # run everything, always roll back
     python scripts/data_fill_ticker_value_refresh.py --symbol AVGO       # limit to one ticker, for testing
+    python scripts/data_fill_ticker_value_refresh.py --currency-mismatch # only listings FMP quotes in a currency
+                                                                         # other than their exchange's (Compass on
+                                                                         # LSE in USD, HK RMB counters) - stored with
+                                                                         # the exchange's currency before 2026-09
+    python scripts/data_fill_ticker_value_refresh.py --outliers          # only tickers whose stored market caps hold
+                                                                         # an FMP glitch (pricing.market_cap_outliers:
+                                                                         # e.g. Compass at 1/100 in late June 2026) -
+                                                                         # rewritten with the glitches repaired from
+                                                                         # the price, or dropped
+    python scripts/data_fill_ticker_value_refresh.py --profile-check     # only tickers whose stored market cap
+                                                                         # (any since 2026) is 2.5x+ off what their FMP
+                                                                         # profile's share count gives (a history on
+                                                                         # a wrong share count throughout, e.g. Uniper's
+                                                                         # new XETRA line) - rewritten against the
+                                                                         # profile's share count; one profile call each
 
 Writes a report (summary counts, tickers with mismatches, skipped tickers) to
 .output/data_fill_ticker_value_refresh_report.md.
@@ -26,9 +41,11 @@ from concurrent.futures import ThreadPoolExecutor
 from modules.object.exit import cleanup
 from modules.object import ticker
 from modules.object.ticker import Ticker
-from modules.object.ticker_value import TickerValue, fetch_values_for_ticker, replace_range
+from modules.object.ticker_value import TickerValue, fetch_price_and_cap_series_between, fetch_values_for_ticker, replace_range
+from modules.core import api_stocks
+from modules.ticker import refresh
 from modules.ticker.resolver import TickerResolver
-from modules.ticker import pricing
+from modules.ticker import company, pricing
 from modules.ticker import util as tu
 
 atexit.register(cleanup)
@@ -37,13 +54,44 @@ INCEPTION_DATE = date(2026, 1, 1)  # matches scripts/data_fill_ticker_value_gaps
 REPORT_PATH = os.path.join(os.path.dirname(__file__), '..', '.output', 'data_fill_ticker_value_refresh_report.md')
 
 
-def resync_ticker(t: Ticker, resolver: TickerResolver, end_date: date, dry_run: bool):
-    """Returns (symbol, rows_written, mismatches, error)."""
-    assert t.id is not None
+def tickers_with_stored_outliers(tickers: list[Ticker], end_date: date) -> list[Ticker]:
+    """The tickers whose stored market caps since INCEPTION_DATE contain an FMP glitch."""
+    out: list[Ticker] = []
+    for i in range(0, len(tickers), 500):
+        chunk = tickers[i:i + 500]
+        stored = fetch_price_and_cap_series_between([t.id for t in chunk], INCEPTION_DATE, end_date)
+        out += [t for t in chunk if t.id in stored and pricing.market_cap_outliers(*stored[t.id])]
+    return out
 
+
+def tickers_off_their_profile(tickers: list[Ticker], resolver: TickerResolver) -> dict[int, float]:
+    """{ticker_id: the profile's share count} for the tickers whose latest stored market cap is
+    GLITCH_FACTOR-fold off their FMP profile's (refresh.stored_cap_off_profile)."""
+    today = date.today()
+    stored: dict = {}
+    for i in range(0, len(tickers), 500):
+        stored.update(fetch_price_and_cap_series_between([t.id for t in tickers[i:i + 500]], INCEPTION_DATE, today))
+
+    def check(t: Ticker) -> tuple[int, float] | None:
+        profile = api_stocks.get_stock_profile(resolver.get_full_symbol(t))
+        if not isinstance(profile, dict):
+            return None
+        reason = refresh.stored_cap_off_profile(stored.get(t.id), profile, tu.listing_currency(t.exchange, t.currency), today)
+        if not reason:
+            return None
+        print(f"  {t.symbol}:{t.exchange} {reason}")
+        return t.id, profile['marketCap'] / profile['price']
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        return dict(r for r in executor.map(check, tickers) if r)
+
+
+def resync_ticker(t: Ticker, resolver: TickerResolver, end_date: date, dry_run: bool, reference_shares: float | None = None):
+    """Returns (symbol, rows_written, mismatches, error)."""
     full_symbol = resolver.get_full_symbol(t)
     fetched = pricing.fetch_price_and_market_cap_history(
-        full_symbol, INCEPTION_DATE, end_date, currency=tu.currency_for_exchange(t.exchange),
+        full_symbol, INCEPTION_DATE, end_date, currency=tu.listing_currency(t.exchange, t.currency),
+        reference_shares=reference_shares,
     )
     if isinstance(fetched, str):
         return full_symbol, 0, [], fetched
@@ -65,6 +113,12 @@ def main() -> None:
     parser.add_argument('--symbol', help="Limit to a single ticker symbol, for testing.")
     parser.add_argument('--dry-run', action='store_true', help="Run the whole resync but roll back every write.")
     parser.add_argument('--yes', action='store_true', help="Skip the confirmation prompt.")
+    parser.add_argument('--currency-mismatch', action='store_true',
+                        help="Only valid tickers whose FMP currency differs from their exchange's currency.")
+    parser.add_argument('--outliers', action='store_true',
+                        help="Only valid tickers whose stored market caps contain an FMP glitch.")
+    parser.add_argument('--profile-check', action='store_true',
+                        help="Only valid tickers with a stored market cap 2.5x+ off what their FMP profile's share count gives.")
     args, _unknown = parser.parse_known_args()  # --prod/--dev are read directly from sys.argv by modules/core/db.py
 
     if args.symbol:
@@ -77,8 +131,18 @@ def main() -> None:
         if len(tickers) > 1:
             print(f"Note: {len(tickers)} tickers match symbol '{args.symbol}': "
                   + ", ".join(f"id={t.id} exchange={t.exchange}" for t in tickers))
+    elif args.currency_mismatch:
+        tickers = [t for t in ticker.fetch_all_valid() if company.is_foreign_currency_line(t)]
+    elif args.outliers:
+        tickers = tickers_with_stored_outliers(ticker.fetch_all_valid(), date.today())
+    elif args.profile_check:
+        candidates = ticker.fetch_all_valid()
+        print(f"Checking {len(candidates)} ticker(s) against their FMP profile...")
+        references = tickers_off_their_profile(candidates, TickerResolver(TickerResolver.POPULATE_TICKER))
+        tickers = [t for t in candidates if t.id in references]
     else:
         tickers = ticker.fetch_all_valid()
+    references = references if args.profile_check else {}
 
     end_date = date.today()
     print(
@@ -101,7 +165,7 @@ def main() -> None:
     skipped_lines: list[str] = []
 
     with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(resync_ticker, t, resolver, end_date, args.dry_run): t for t in tickers}
+        futures = {executor.submit(resync_ticker, t, resolver, end_date, args.dry_run, references.get(t.id)): t for t in tickers}
         for i, future in enumerate(futures, start=1):
             t = futures[future]
             try:

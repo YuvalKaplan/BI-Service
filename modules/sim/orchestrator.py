@@ -46,9 +46,11 @@ def run(
     fund_holding_change.delete_all_for_fund(fund_id)
     fund_analysis.delete_all_for_fund(fund_id)
 
-    # First recalculation date: the first Tuesday on/after inception_date.
-    days_until_tuesday = (1 - inception_date.weekday()) % 7
-    first_recalc_date = inception_date + timedelta(days=days_until_tuesday)
+    # First recalculation date: the first Wednesday on/after inception_date — the live cron's
+    # recalculation day, and the day sim_benchmark.py dates its snapshots, so each recalculation
+    # uses that same day's benchmark (as live does) rather than the previous week's.
+    days_until_wednesday = (2 - inception_date.weekday()) % 7
+    first_recalc_date = inception_date + timedelta(days=days_until_wednesday)
 
     log.record_status(
         f"[sim] Running fund_id={fund_id} simulation from {inception_date} to {end_date}, "

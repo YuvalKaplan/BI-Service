@@ -32,6 +32,32 @@ def fetch_valid_ticker_ids_in_holdings() -> List[int]:
         raise Exception(f"Error retrieving valid ticker IDs in holdings: {e}")
 
 
+def fetch_valid_ticker_ids_in_recent_holdings(look_back_days: int) -> List[int]:
+    """Valid tickers in each active ETF's latest holdings from the last look_back_days — the
+    holdings best ideas can use (best_ideas_generator.LOOK_BACK_WINDOW)."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    WITH latest AS (
+                        SELECT peh.provider_etf_id, MAX(peh.holding_date) AS holding_date
+                        FROM provider_etf_holding AS peh
+                        JOIN provider_etf AS pe ON pe.id = peh.provider_etf_id AND NOT pe.disabled
+                        JOIN provider AS p ON p.id = pe.provider_id AND NOT p.disabled
+                        WHERE peh.holding_date > NOW() - (%s * INTERVAL '1 day')
+                        GROUP BY peh.provider_etf_id
+                    )
+                    SELECT DISTINCT peh.ticker_id
+                    FROM provider_etf_holding AS peh
+                    JOIN latest AS l ON l.provider_etf_id = peh.provider_etf_id AND l.holding_date = peh.holding_date
+                    JOIN ticker AS t ON t.id = peh.ticker_id
+                    WHERE t.invalid IS NULL;
+                """, (look_back_days,))
+                return [row[0] for row in cur.fetchall()]
+    except Error as e:
+        raise Exception(f"Error retrieving valid ticker IDs in recent holdings: {e}")
+
+
 def fetch_valid_tickers_in_holdings() -> List[str]:
     try:
         with db_pool_instance.get_connection() as conn:

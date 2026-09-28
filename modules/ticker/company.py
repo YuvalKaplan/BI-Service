@@ -4,22 +4,75 @@ cross-listing siblings, or a standalone ticker).
 
 FMP reports the *whole company's* market cap on every listing, so listings are never summed.
 Instead one listing — the company's primary listing — is the source of both its market cap and
-its region:
+its region, and is the company's master ticker. Listings are ordered (ordered_listings), best
+candidate first, by:
 
-  1. a listing on an exchange in the company's home country (see util.home_countries),
-  2. otherwise a US-exchange listing (US-listed, foreign-domiciled companies such as Eaton or
-     Medtronic, whose only listing is in the US),
-  3. otherwise the master (or, before a master exists, the highest-cap listing).
+  1. activity — a listing with no market cap in the last ACTIVE_DAYS (e.g. an old ticker left
+     behind by a ticker change) ranks after every active one,
+  2. share line — ordinary shares before preferred / note / depositary / when-issued / unit lines,
+  3. market (util.market_tier) — the domicile country's own market, then a wider home market
+     (Dutch/Luxembourg holding companies listed in Paris, Milan, …), then a US listing (US-listed,
+     foreign-domiciled companies such as Eaton or Medtronic), then other countries' exchanges,
+     then venues with no country of their own (OTC, LSE's International Order Book),
+  4. currency — a line quoted in its exchange's own currency before one quoted in another
+     (Hong Kong's RMB counters, mirrored foreign lines),
+  5. the master, then (before a master exists) the highest cap, then the lowest id.
 
-Within a tier the master is preferred, then the lowest id. The market cap comes from the
-first listing in that same order that has one, so a primary listing with no price data yet
-falls back to the next-best listing rather than to nothing.
+A company's cap on a given date is the first listing in that order with a value near the date
+(cap_near_date); company_market_cap is the same rule applied to each listing's latest value.
 """
+import re
+from collections.abc import Container
+from datetime import date, timedelta
+from modules.object import ticker as ticker_obj
+from modules.object import ticker_value
 from modules.object.ticker import Ticker
 from modules.ticker import util as tu
+from modules.ticker.pricing import closest_value_for_date
 
 US = 'US'
 INTERNATIONAL = 'International'
+
+ACTIVE_DAYS = 30  # no market cap within this many days of "as of" = inactive (e.g. a ticker left behind by a rename).
+                  # Generous on purpose: many listings only get a value from the weekly screener, and a
+                  # missed week or two must not flip a company's primary listing (and so its region).
+
+# Lines that aren't the company's common equity. FMP reports the parent company's full market
+# cap on many of them (Bank of America on a Merrill Lynch note, Corteva on an EIDP preferred),
+# so one admitted to the benchmark counts the company a second time.
+_NON_EQUITY_NAME = re.compile(
+    r'\b(pfd|preferred|pref|preference|cumulative|cum|notes?|debentures?|bonds?|obligations?|subordinated|'
+    r'when[- ]issued|warrants?|rights|units|partizipationsschein|partizipsch|participation|genussschein)\b|%',
+    re.IGNORECASE)
+_NON_EQUITY_SYMBOL = re.compile(r'-P[A-Z]?$')  # preferred series, e.g. FITB-PM, ENB-PA
+_DEPOSITARY_NAME = re.compile(r'\b(depositary|depository|adrs?|ads|gdrs?|cdrs?|sdrs?|edrs?)\b', re.IGNORECASE)
+
+_KRX_EXCHANGES = {'KSC', 'KOE'}
+
+
+def is_non_equity_line(symbol: str | None, name: str | None, exchange: str | None) -> bool:
+    """Preferred, note/bond, when-issued, warrant/right, unit or participation-certificate line
+    rather than the company's ordinary shares. Korean preferred shares carry no marker in their
+    FMP name; by KRX convention they're the codes not ending in 0 (005935 vs common 005930, 02826K)."""
+    if exchange in _KRX_EXCHANGES and symbol and not symbol.endswith('0'):
+        return True
+    return bool((name and _NON_EQUITY_NAME.search(name)) or (symbol and _NON_EQUITY_SYMBOL.search(symbol)))
+
+
+def is_depositary_line(name: str | None) -> bool:
+    """A depositary receipt (ADR/ADS, GDR, and the Canadian/Singapore CDRs/SDRs of foreign
+    companies) as far as its FMP name says so — many ADRs' names carry no marker."""
+    return bool(name and _DEPOSITARY_NAME.search(name))
+
+
+def is_secondary_line(t: Ticker) -> bool:
+    return is_non_equity_line(t.symbol, t.name, t.exchange) or is_depositary_line(t.name)
+
+
+def is_foreign_currency_line(t: Ticker) -> bool:
+    """Quoted in a currency other than its exchange's (when FMP's currency for it is known)."""
+    own = tu.normalize_currency(t.currency)
+    return bool(own) and own != tu.currency_for_exchange(t.exchange)
 
 
 def _company_country(members: list[Ticker], master_id: int | None) -> str | None:
@@ -29,47 +82,129 @@ def _company_country(members: list[Ticker], master_id: int | None) -> str | None
     return next((t.country for t in members if t.country), None)
 
 
-def ordered_listings(members: list[Ticker], master_id: int | None, caps: dict[int, float] | None = None) -> list[Ticker]:
-    """The company's listings, best primary-listing candidate first."""
-    caps = caps or {}
-    homes = tu.home_countries(_company_country(members, master_id))
+def company_country(members: list[Ticker], master_id: int | None) -> str | None:
+    return _company_country(members, master_id)
 
-    def tier(t: Ticker) -> int:
-        if tu.EXCHANGE_COUNTRY.get(t.exchange or '') in homes:
+
+def company_id(t: Ticker, known_ids: Container[int]) -> int:
+    """The id a listing's company is keyed by: its master's, or its own when it has no master
+    or the master isn't among known_ids (e.g. an invalid master filtered out)."""
+    mid = t.master_ticker_id
+    return mid if mid is not None and mid in known_ids else t.id
+
+
+def ordered_listings(
+    members: list[Ticker],
+    master_id: int | None,
+    caps: dict[int, float] | None = None,
+    latest_dates: dict[int, date] | None = None,
+    as_of: date | None = None,
+    active_days: int = ACTIVE_DAYS,
+) -> list[Ticker]:
+    """The company's listings, best primary-listing candidate first (see module docstring).
+    latest_dates ({ticker_id: latest ticker_value date}) enables the activity rule; without
+    it every listing counts as active."""
+    caps = caps or {}
+    country = _company_country(members, master_id)
+    cutoff = (as_of or date.today()) - timedelta(days=active_days)
+
+    def inactive(t: Ticker) -> int:
+        if latest_dates is None:
             return 0
-        if t.exchange in tu.US_LISTING_EXCHANGES:
-            return 1
-        return 2
+        d = latest_dates.get(t.id)
+        return 0 if d is not None and d >= cutoff else 1
 
     def key(t: Ticker):
-        # Before a master exists (election), the non-home, non-US tier falls back to the
+        tier = tu.market_tier(country, t.symbol, t.exchange)
+        # Before a master exists (election), the foreign/OTC tiers fall back to the
         # highest-cap listing, as the election rule always did.
-        within_tier = -(caps.get(t.id) or 0.0) if (master_id is None and tier(t) == 2) else 0.0
-        return (tier(t), 0 if t.id == master_id else 1, within_tier, t.id)
+        within_tier = -(caps.get(t.id) or 0.0) if (master_id is None and tier >= 3) else 0.0
+        return (inactive(t), 1 if is_secondary_line(t) else 0, tier, 1 if is_foreign_currency_line(t) else 0,
+                0 if t.id == master_id else 1, within_tier, t.id)
 
     return sorted(members, key=key)
 
 
-def primary_listing(members: list[Ticker], master_id: int | None, caps: dict[int, float] | None = None) -> Ticker:
-    return ordered_listings(members, master_id, caps)[0]
+def primary_listing(
+    members: list[Ticker],
+    master_id: int | None,
+    caps: dict[int, float] | None = None,
+    latest_dates: dict[int, date] | None = None,
+    active_days: int = ACTIVE_DAYS,
+) -> Ticker:
+    return ordered_listings(members, master_id, caps, latest_dates, active_days=active_days)[0]
 
 
-def company_market_cap(members: list[Ticker], master_id: int | None, caps: dict[int, float]) -> float | None:
-    """The primary listing's market cap, else the next listing (in primary order) that has one."""
-    for t in ordered_listings(members, master_id, caps):
+def is_home_listing(t: Ticker, members: list[Ticker], master_id: int | None) -> bool:
+    """Whether `t` trades in its company's home market (util.market_tier 0 or 1)."""
+    return tu.market_tier(_company_country(members, master_id), t.symbol, t.exchange) <= 1
+
+
+def company_market_cap(
+    members: list[Ticker],
+    master_id: int | None,
+    caps: dict[int, float],
+    latest_dates: dict[int, date] | None = None,
+) -> float | None:
+    """The primary listing's latest market cap, else the next listing (in primary order) that has one."""
+    for t in ordered_listings(members, master_id, caps, latest_dates):
         if caps.get(t.id):
             return caps[t.id]
     return None
 
 
-def region(members: list[Ticker], master_id: int | None) -> str:
-    """'US' when the primary listing trades on a US exchange — or when the company is US and we
-    simply don't hold its US listing — else 'International'."""
-    primary = primary_listing(members, master_id)
-    if primary.exchange in tu.US_LISTING_EXCHANGES:
+def cap_near_date(
+    members: list[Ticker],
+    master_id: int | None,
+    values: dict[int, dict[date, float]],
+    target: date,
+    window: int,
+) -> float | None:
+    """The company's market cap as of `target`: the value closest to `target` (within ±window
+    days) of the first listing, in primary order, that has one. Activity is judged as of
+    `target`, so a ticker that has since been renamed still counts on its own dates."""
+    latest_dates = {tid: max(d for d in vals if d <= target + timedelta(days=window))
+                    for tid, vals in values.items() if any(d <= target + timedelta(days=window) for d in vals)}
+    for t in ordered_listings(members, master_id, latest_dates=latest_dates, as_of=target):
+        series = values.get(t.id)
+        if series:
+            v = closest_value_for_date(series, target, window_days=window)
+            if v:
+                return v
+    return None
+
+
+def company_caps_as_of(master_ids: list[int], target: date, window: int) -> dict[int, float]:
+    """{master_id: the company's market cap as of `target`} (cap_near_date over all its listings'
+    stored values within ±window days). Masters with no listing value near the date are absent —
+    callers fall back to the stored company_market_cap."""
+    if not master_ids:
+        return {}
+    groups = ticker_obj.fetch_group_members(list(master_ids))
+    ids = [t.id for ms in groups.values() for t in ms]
+    values = ticker_value.fetch_market_caps_between(ids, target - timedelta(days=window), target + timedelta(days=window))
+    out: dict[int, float] = {}
+    for mid, members in groups.items():
+        if len(members) < 2:
+            continue
+        cap = cap_near_date(members, mid, {t.id: values[t.id] for t in members if t.id in values}, target, window)
+        if cap:
+            out[mid] = cap
+    return out
+
+
+def region(
+    members: list[Ticker],
+    master_id: int | None,
+    latest_dates: dict[int, date] | None = None,
+) -> str:
+    """'US' when the primary listing trades on a US exchange — or when a US company's primary
+    listing is on a venue with no country of its own (OTC, LSE's order book) — else
+    'International'. A US company whose best listing is on a foreign exchange is either an
+    unlinked foreign line or a wrong FMP domicile (CVC Capital Partners), never a US listing."""
+    primary = primary_listing(members, master_id, latest_dates=latest_dates)
+    if primary.exchange in tu.US_LISTING_EXCHANGES and not tu.is_iob_line(primary.symbol, primary.exchange):
         return US
-    homes = tu.home_countries(_company_country(members, master_id))
-    has_home_listing = tu.EXCHANGE_COUNTRY.get(primary.exchange or '') in homes
-    if not has_home_listing and _company_country(members, master_id) == US:
+    if tu.listing_country(primary.symbol, primary.exchange) is None and _company_country(members, master_id) == US:
         return US
     return INTERNATIONAL

@@ -7,7 +7,7 @@ atexit.register(cleanup)
 
 if __name__ == '__main__':
     try:
-        fund_id = 8  # <-- edit before each run
+        fund_id = 10  # <-- edit before each run
         inception_date = date(2026, 7, 1)
         weeks = 3  # <-- edit before each run (None = run to present)
         show_holdings = False  # <-- edit before each run (True = also show full holdings w/ %)

@@ -683,6 +683,8 @@ def daily_actions(account: account.Account, sim_date: date):
         symbol_weights = {h.symbol: h.weight for h in target_fund_holdings if h.weight is not None}
 
         fund_data = fund.fetch_fund(account.strategy_fund_id)
+        if fund_data is None:
+            raise Exception(f"Strategy fund {account.strategy_fund_id} not found for account {account.id}")
         strategy = getStrategyFromJson(fund_data.strategy)
         rebalance_mode = strategy.allocation_rebalance
         is_fund_update_day = (

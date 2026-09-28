@@ -101,16 +101,6 @@ class BestIdeaRanked:
     source_etf_id: int
     all_provider_ids: List[int]
 
-def fetch_best_ideas_by_ranking(ranking_level: int, style_type: str, cap_type: str, as_of_date: date, provider_etf_ids: list[int], exchanges: list[str] = [], esg_only: bool = False, country_type: str = 'all') -> List[BestIdeaRanked]:
-    try:
-        with db_pool_instance.get_connection() as conn:
-            with conn.cursor(row_factory=class_row(BestIdeaRanked)) as cur:
-                cur.execute('SELECT * FROM get_best_ideas_by_ranking(%s, %s, %s, %s, %s, %s, %s, %s);', (ranking_level, style_type, cap_type, as_of_date, provider_etf_ids, exchanges, esg_only, country_type))
-                items = cur.fetchall()
-        return items
-    except Error as e:
-        raise Exception(f"Error fetching the BestIdeaResult from the DB: {e}")
-
 def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
     """
     Load all best ideas within the lookback window for all benchmark modes,
@@ -118,10 +108,8 @@ def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
     Returned DataFrame columns: provider_etf_id, ticker_id, value_date, ranking,
     delta, benchmark_mode, style_type, exchange, country, region, esg_qualified, name,
     master_ticker_id, market_cap, etf_region.
-    market_cap is the company market cap when the ticker is a multi-listing company's master
-    (its primary listing's cap, maintained by master.refresh_company_data — latest, not as of
-    the date), else the listing's own latest cap within the window. A master's own listing can
-    be a secondary one with unreliable data, so its own cap is never used for the company.
+    market_cap is the listing's own latest cap within the window; funds_update.build_shared_context
+    replaces it with the company's cap as of the date for multi-listing companies' masters.
     Callers should filter by benchmark_mode to match each fund's strategy.
     """
     sql = """
@@ -158,7 +146,7 @@ def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
             t.esg_qualified,
             t.name,
             t.master_ticker_id,
-            COALESCE(t.company_market_cap, tv.market_cap) AS market_cap,
+            tv.market_cap,
             pe.region AS etf_region
         FROM latest_ideas li
         JOIN ticker t ON t.id = li.ticker_id

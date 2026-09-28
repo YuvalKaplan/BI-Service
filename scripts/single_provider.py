@@ -1,9 +1,10 @@
 import atexit
 from modules.object.exit import cleanup
-from modules.object import provider, provider_etf_holding
+from modules.object import provider, provider_etf_holding, ticker
 from modules.parse.url import scrape_provider
 from modules.parse.convert import load, map_data
 from modules.parse.download import process_provider
+from modules.ticker import pricing, valuation
 from modules.ticker.resolver import TickerResolver
 
 atexit.register(cleanup)
@@ -16,6 +17,7 @@ if __name__ == '__main__':
             # process_provider(p)
             downloads = scrape_provider(p)
             resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
+            resolved_ids: set[int] = set()
             for d in downloads:
                 try:
                     file_format = d.etf.file_format or d.provider.file_format
@@ -39,8 +41,14 @@ if __name__ == '__main__':
                         print("... ------------ ...")
                         print(df.tail())
                         provider_etf_holding.insert_all_holdings(d.etf.id, df)
+                        resolved_ids.update(int(i) for i in df['ticker_id'].unique())
                 except Exception as e:
                     print(e)
+
+            # Resolution registers the tickers; their values come from the valuation pass.
+            values = valuation.store_values(
+                valuation.targets_for_tickers(ticker.fetch_by_ids(list(resolved_ids))), pricing.latest_value_date())
+            print(f"Values: {values.validated} validated, {values.already_valued} already valued, {values.withheld} withheld")
 
     except Exception as e:
         print(f"Error in scraping and processing single provider: {e}")
