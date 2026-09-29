@@ -14,7 +14,7 @@ funds, their test profile - next to provider_etf's cap / style / region where we
 fund - followed by the provider_etf funds not on the list (index funds by their own filings, or
 not filed yet).
 
-Needs SEC_USER_AGENT (e.g. "BI-Service admin@example.com") in the environment.
+Needs SECRET_SEC_USER_AGENT (e.g. "BI-Service admin@example.com") in the environment.
 
 Usage:
     python scripts/current_sec_active_etfs.py --dev

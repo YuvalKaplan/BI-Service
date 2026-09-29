@@ -1,6 +1,6 @@
 """
 EDGAR access for the SEC modules. Every request carries the User-Agent the SEC's fair-access
-policy requires (SEC_USER_AGENT, e.g. "BI-Service admin@example.com" - requests without one are
+policy requires (SECRET_SEC_USER_AGENT, e.g. "BI-Service admin@example.com" - requests without one are
 refused with 403), asks for gzip, and is throttled to half the SEC's 10 requests per second.
 """
 import gzip
@@ -44,9 +44,9 @@ def _throttle() -> None:
 
 
 def _user_agent() -> str:
-    user_agent = os.getenv('SEC_USER_AGENT')
+    user_agent = os.getenv('SECRET_SEC_USER_AGENT')
     if not user_agent:
-        raise Exception("SEC_USER_AGENT is not set - the SEC refuses requests without a declared User-Agent "
+        raise Exception("SECRET_SEC_USER_AGENT is not set - the SEC refuses requests without a declared User-Agent "
                         "with a contact email (e.g. 'BI-Service admin@example.com')")
     return user_agent
 

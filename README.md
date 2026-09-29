@@ -425,7 +425,7 @@ Every registered fund files **Form N-CEN** with the SEC once a year, within 75 d
 
 ### 1. Finding the filings
 
-`modules/sec/edgar.py` reads EDGAR directly. Its quarterly form index lists every N-CEN / N-CEN/A filing – about 450 a quarter, about 1,900 in the first quarter (the December fiscal year ends). Each run reads the last five quarters' indexes (a full filing year, plus slack for late filers) and keeps the filings not read yet (`sec_ncen_filing`): the first run reads about 3,900 filings (15–25 minutes), a weekly run only the week's new ones. Downloads run four at a time, together at most 5 requests a second (half the SEC's limit), each carrying the `SEC_USER_AGENT` the SEC requires.
+`modules/sec/edgar.py` reads EDGAR directly. Its quarterly form index lists every N-CEN / N-CEN/A filing – about 450 a quarter, about 1,900 in the first quarter (the December fiscal year ends). Each run reads the last five quarters' indexes (a full filing year, plus slack for late filers) and keeps the filings not read yet (`sec_ncen_filing`): the first run reads about 3,900 filings (15–25 minutes), a weekly run only the week's new ones. Downloads run four at a time, together at most 5 requests a second (half the SEC's limit), each carrying the `SECRET_SEC_USER_AGENT` the SEC requires.
 
 Not the SEC's quarterly N-CEN data sets: they appear weeks after the quarter, and the 2025 Q4 set lacks 97 of the quarter's 598 filings (Amplify ETF Trust and Morgan Stanley ETF Trust among them). EDGAR has every filing the day after it's made.
 
@@ -567,7 +567,7 @@ All scripts are run from the project root with the virtual environment active. C
 
 | Script | What it does |
 |--------|--------------|
-| `scripts/current_sec_active_etfs.py` | Updates the [SEC active ETF list](#sec-active-etf-list) as the Sunday cron does – the N-CEN filings on EDGAR not read yet, then the FMP profiles due (equity funds to the test provider tables) – and writes `.output/sec_active_etfs.csv`: every current fund's strategy and, for the equity funds, their profile, next to `provider_etf`'s cap / style / region where we track the fund, followed by the `provider_etf` funds not on the list. `--reload` reads every filing in the window again; `--refresh-all` profiles every fund again. Needs `SEC_USER_AGENT`. |
+| `scripts/current_sec_active_etfs.py` | Updates the [SEC active ETF list](#sec-active-etf-list) as the Sunday cron does – the N-CEN filings on EDGAR not read yet, then the FMP profiles due (equity funds to the test provider tables) – and writes `.output/sec_active_etfs.csv`: every current fund's strategy and, for the equity funds, their profile, next to `provider_etf`'s cap / style / region where we track the fund, followed by the `provider_etf` funds not on the list. `--reload` reads every filing in the window again; `--refresh-all` profiles every fund again. Needs `SECRET_SEC_USER_AGENT`. |
 
 ### Database
 
@@ -592,7 +592,7 @@ Set in a `.env` file at the project root (loaded with `python-dotenv`; it's git-
 | `SECRET_MARKET_DATA_API_KEY` | FinancialModelingPrep API key (profiles, prices, market caps, screener, ESG, factors, FX). Calls are limited to 200 per minute by the client. |
 | `SECRET_MAILGUN_ENDPOINT` / `SECRET_MAILGUN_API_KEY` | Mailgun, for the admin emails. |
 | `SECRET_HOLDINGS_DATA_API_KEY` | FactSet – only for the one-off backtesting historical holdings download. |
-| `SEC_USER_AGENT` | The User-Agent sent to EDGAR (the [SEC active ETF list](#sec-active-etf-list)): a name and a contact email, e.g. `BI-Service admin@example.com`. The SEC refuses requests without one. |
+| `SECRET_SEC_USER_AGENT` | The User-Agent sent to EDGAR (the [SEC active ETF list](#sec-active-etf-list)): a name and a contact email, e.g. `BI-Service admin@example.com`. The SEC refuses requests without one. |
 | `SECRET_TOKEN_AUTH_SIGN` | Signing secret for `modules/core/token.py` (URL tokens). Not needed by the pipelines. |
 
 ---
