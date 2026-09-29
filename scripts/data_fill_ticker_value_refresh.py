@@ -28,6 +28,15 @@ Usage:
                                                                          # a wrong share count throughout, e.g. Uniper's
                                                                          # new XETRA line) - rewritten against the
                                                                          # profile's share count; one profile call each
+    python scripts/data_fill_ticker_value_refresh.py --shares-check      # only tickers whose verified share count is set,
+                                                                         # changed or cleared (refresh.verify_share_count:
+                                                                         # stored history 1.15-2.5x off the profile's count,
+                                                                         # confirmed by FMP's quarterly financials, e.g.
+                                                                         # Rocket Companies) - rewritten against it; one
+                                                                         # profile call each, one more for those flagged
+
+Every rewrite applies the ticker's verified share count (ticker.verified_shares), as the live
+valuation does, so the rewritten history and the next day's value agree.
 
 Writes a report (summary counts, tickers with mismatches, skipped tickers) to
 .output/data_fill_ticker_value_refresh_report.md.
@@ -35,7 +44,7 @@ Writes a report (summary counts, tickers with mismatches, skipped tickers) to
 import argparse
 import atexit
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 from modules.object.exit import cleanup
@@ -86,12 +95,40 @@ def tickers_off_their_profile(tickers: list[Ticker], resolver: TickerResolver) -
         return dict(r for r in executor.map(check, tickers) if r)
 
 
-def resync_ticker(t: Ticker, resolver: TickerResolver, end_date: date, dry_run: bool, reference_shares: float | None = None):
+def tickers_with_share_count_change(tickers: list[Ticker], resolver: TickerResolver) -> dict[int, float | None]:
+    """{ticker_id: its new verified_shares (None = cleared)} for the tickers whose verified share
+    count refresh.verify_share_count sets, changes or clears."""
+    today = date.today()
+    stored: dict = {}
+    for i in range(0, len(tickers), 500):
+        stored.update(fetch_price_and_cap_series_between([t.id for t in tickers[i:i + 500]], INCEPTION_DATE, today))
+
+    def check(t: Ticker) -> tuple[int, float | None] | None:
+        caps = stored.get(t.id, ({}, {}))[0]
+        if t.verified_shares is None and (len(caps) < refresh.SHARES_CHECK_POINTS or max(caps) < today - timedelta(days=30)):
+            return None  # can't trigger: too little recent history to judge (saves the profile call)
+        full_symbol = resolver.get_full_symbol(t)
+        profile = api_stocks.get_stock_profile(full_symbol)
+        if not isinstance(profile, dict):
+            return None
+        verified, why = refresh.verify_share_count(
+            t, full_symbol, profile, stored.get(t.id), tu.listing_currency(t.exchange, t.currency), today)
+        if not why:
+            return None
+        print(f"  {t.symbol}:{t.exchange} {why}")
+        return t.id, verified
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        return dict(r for r in executor.map(check, tickers) if r)
+
+
+def resync_ticker(t: Ticker, resolver: TickerResolver, end_date: date, dry_run: bool, reference_shares: float | None = None,
+                  verified_shares: float | None = None):
     """Returns (symbol, rows_written, mismatches, error)."""
     full_symbol = resolver.get_full_symbol(t)
     fetched = pricing.fetch_price_and_market_cap_history(
         full_symbol, INCEPTION_DATE, end_date, currency=tu.listing_currency(t.exchange, t.currency),
-        reference_shares=reference_shares,
+        reference_shares=reference_shares, verified_shares=verified_shares,
     )
     if isinstance(fetched, str):
         return full_symbol, 0, [], fetched
@@ -119,6 +156,8 @@ def main() -> None:
                         help="Only valid tickers whose stored market caps contain an FMP glitch.")
     parser.add_argument('--profile-check', action='store_true',
                         help="Only valid tickers with a stored market cap 2.5x+ off what their FMP profile's share count gives.")
+    parser.add_argument('--shares-check', action='store_true',
+                        help="Only valid tickers whose verified share count is set, changed or cleared (quote and financials against FMP's history).")
     args, _unknown = parser.parse_known_args()  # --prod/--dev are read directly from sys.argv by modules/core/db.py
 
     if args.symbol:
@@ -140,9 +179,15 @@ def main() -> None:
         print(f"Checking {len(candidates)} ticker(s) against their FMP profile...")
         references = tickers_off_their_profile(candidates, TickerResolver(TickerResolver.POPULATE_TICKER))
         tickers = [t for t in candidates if t.id in references]
+    elif args.shares_check:
+        candidates = ticker.fetch_all_valid()
+        print(f"Checking {len(candidates)} ticker(s)' stored share counts against their FMP quote and financials...")
+        verified = tickers_with_share_count_change(candidates, TickerResolver(TickerResolver.POPULATE_TICKER))
+        tickers = [t for t in candidates if t.id in verified]
     else:
         tickers = ticker.fetch_all_valid()
     references = references if args.profile_check else {}
+    verified = verified if args.shares_check else {}
 
     end_date = date.today()
     print(
@@ -156,6 +201,9 @@ def main() -> None:
             return
 
     resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
+    if not args.dry_run:
+        for tid, shares in verified.items():
+            ticker.update_verified_shares(tid, shares)
 
     processed = 0
     skipped = 0
@@ -165,7 +213,8 @@ def main() -> None:
     skipped_lines: list[str] = []
 
     with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(resync_ticker, t, resolver, end_date, args.dry_run, references.get(t.id)): t for t in tickers}
+        futures = {executor.submit(resync_ticker, t, resolver, end_date, args.dry_run, references.get(t.id),
+                                   verified.get(t.id, t.verified_shares)): t for t in tickers}
         for i, future in enumerate(futures, start=1):
             t = futures[future]
             try:

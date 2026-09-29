@@ -80,6 +80,21 @@ def get_stock_profile(symbol: str) -> dict[str,str] | str:
         log.record_error(message)
         return message
     
+def get_quarterly_weighted_shares(symbol: str) -> float | None:
+    """The weighted-average share count of the latest quarterly income statement (FMP's
+    financials — a source independent of its quote and its market-cap history), or None."""
+    try:
+        throttle_api_calls()
+        url = f"{FMP_API_URL}/income-statement?symbol={symbol}&period=quarter&limit=1&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        rows = get_jsonparsed_data(url)
+        if not isinstance(rows, list) or not rows:
+            return None
+        shares = rows[0].get('weightedAverageShsOut')
+        return float(shares) if shares else None
+    except Exception as e:
+        log.record_notice(f"Failed to get quarterly weighted shares for {symbol}: {e}")
+        return None
+
 def search_by_isin(isin: str) -> dict | None:
     try:
         throttle_api_calls()

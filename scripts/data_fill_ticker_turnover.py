@@ -1,7 +1,8 @@
 """
 Fills ticker.average_turnover (FMP profile averageVolume x price) now for every valid listing
-that shares its company, exchange and currency with another one — the only listings
-company.thin_lines compares — instead of waiting up to a week for the profile refresh.
+that shares its company with another one on the same country's exchanges, in the same currency
+(company.turnover_group_key — the only listings company.thin_lines compares), instead of
+waiting up to a week for the profile refresh.
 Run scripts/data_fill_master_tickers.py afterwards to move masters off the thin lines.
 """
 import atexit
@@ -21,10 +22,10 @@ if __name__ == '__main__':
     by_id = {t.id: t for t in valid}
     lines: dict[tuple, list] = defaultdict(list)
     for t in valid:
-        lines[(company.company_id(t, by_id), t.exchange, tu.listing_currency(t.exchange, t.currency))].append(t)
+        lines[(company.company_id(t, by_id), *company.turnover_group_key(t))].append(t)
     groups = [ts for ts in lines.values() if len(ts) > 1]
     todo = [t for ts in groups for t in ts]
-    print(f"{len(todo)} listing(s) in {len(groups)} company/exchange group(s) with more than one line")
+    print(f"{len(todo)} listing(s) in {len(groups)} company/market group(s) with more than one line")
 
     resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
     pairs: list[tuple[int, float]] = []

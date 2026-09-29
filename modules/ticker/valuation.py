@@ -19,6 +19,7 @@ class ValueTarget:
     exchange: str | None
     currency: str | None                    # FMP's currency for the listing (ticker.currency)
     reference_shares: float | None = None   # share count of FMP's live quote — the glitch filter's reference
+    verified_shares: float | None = None    # ticker.verified_shares — repairs a history on a wrong share count
 
 
 @dataclass
@@ -43,14 +44,16 @@ def summary(stats: ValuationStats) -> str:
 
 def targets_for_tickers(tickers: list[Ticker]) -> list[ValueTarget]:
     symbols = TickerResolver(TickerResolver.POPULATE_TICKER)
-    return [ValueTarget(t.id, symbols.get_full_symbol(t), t.exchange, t.currency) for t in tickers if not t.invalid]
+    return [ValueTarget(t.id, symbols.get_full_symbol(t), t.exchange, t.currency, verified_shares=t.verified_shares)
+            for t in tickers if not t.invalid]
 
 
 def targets_for_listings(listings: list[ScreenerListing]) -> list[ValueTarget]:
     """Registered screener lines, valued under the screener's own symbol with its quote's share count."""
     tickers_by_id = {t.id: t for t in ticker.fetch_by_ids([l.ticker_id for l in listings if l.ticker_id])}
     return [
-        ValueTarget(l.ticker_id, l.symbol, l.exchange, tickers_by_id[l.ticker_id].currency, l.quote_shares)
+        ValueTarget(l.ticker_id, l.symbol, l.exchange, tickers_by_id[l.ticker_id].currency, l.quote_shares,
+                    tickers_by_id[l.ticker_id].verified_shares)
         for l in listings
         if l.ticker_id in tickers_by_id and not tickers_by_id[l.ticker_id].invalid
     ]
@@ -83,7 +86,8 @@ def store_values(targets: list[ValueTarget], value_date: date, stats: ValuationS
 
     def value(t: ValueTarget) -> bool:
         v = pricing.store_validated_ticker_value(
-            t.ticker_id, t.full_symbol, value_date, exchange=t.exchange, currency=t.currency, reference_shares=t.reference_shares)
+            t.ticker_id, t.full_symbol, value_date, exchange=t.exchange, currency=t.currency,
+            reference_shares=t.reference_shares, verified_shares=t.verified_shares)
         return v is not None and v.market_cap is not None
 
     with ThreadPoolExecutor(max_workers=WORKERS) as executor:

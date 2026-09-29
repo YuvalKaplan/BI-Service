@@ -50,6 +50,7 @@ class Ticker:
     master_ticker_id: int | None = None
     company_market_cap: float | None = None
     average_turnover: float | None = None  # FMP profile averageVolume x price, quote currency (major unit)
+    verified_shares: float | None = None   # share count (FMP units) FMP's history is repaired to — see refresh.verify_share_count
     region: str | None = None
 
 
@@ -622,6 +623,15 @@ def update_average_turnover_bulk(pairs: list[tuple[int, float]]) -> None:
                 )
     except Error as e:
         raise Exception(f"Error bulk-updating average_turnover: {e}")
+
+
+def update_verified_shares(ticker_id: int, shares: float | None) -> None:
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE ticker SET verified_shares = %s WHERE id = %s", (shares, ticker_id))
+    except Error as e:
+        raise Exception(f"Error updating verified_shares for ticker {ticker_id}: {e}")
 
 
 def update_region_bulk(pairs: list[tuple[int, str]]) -> None:

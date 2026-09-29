@@ -11,7 +11,7 @@ candidate first, by:
      behind by a ticker change) ranks after every active one,
   2. share line — ordinary shares before preferred / note / depositary / when-issued / unit lines,
      and before a thin line (thin_lines: a sliver of the company's main line's turnover on the
-     same exchange — a unit, note or preferred FMP names like the company itself),
+     same country's exchanges — a unit, note or preferred FMP names like the company itself),
   3. market (util.market_tier) — the domicile country's own market, then a wider home market
      (Dutch/Luxembourg holding companies listed in Paris, Milan, …), then a US listing (US-listed,
      foreign-domiciled companies such as Eaton or Medtronic), then other countries' exchanges,
@@ -74,23 +74,30 @@ def is_secondary_line(t: Ticker) -> bool:
     return is_non_equity_line(t.symbol, t.name, t.exchange) or is_depositary_line(t.name)
 
 
+def turnover_group_key(t: Ticker) -> tuple:
+    """The lines a listing's turnover is compared with (thin_lines): the same country's exchanges
+    in the same currency — NYSE, NASDAQ and AMEX together, NSE with BSE, XETRA with Frankfurt —
+    or, on a venue with no country of its own (OTC, LSE's order book), that venue only."""
+    return (tu.listing_country(t.symbol, t.exchange) or t.exchange, tu.listing_currency(t.exchange, t.currency))
+
+
 def thin_lines(members: list[Ticker]) -> set[int]:
     """Ids of the company's listings trading under THIN_TURNOVER_SHARE of its busiest ordinary
-    line on the same exchange and currency (ticker.average_turnover). FMP names some unit, note
-    and preferred lines exactly like the company and stamps its whole market cap on them —
-    Southern Company's 2025 corporate units SOMN, ANZ's capital notes AN3PJ — so neither name
-    nor symbol tells them from the ordinary shares, but their turnover does. A thinly traded
-    share class (Carlsberg A, McCormick's voting shares) ranks behind the main one too. A line
-    with no turnover recorded is never thin."""
-    def key(t: Ticker):
-        return t.exchange, tu.listing_currency(t.exchange, t.currency)
-
+    line on the same country's exchanges, in the same currency (turnover_group_key,
+    ticker.average_turnover). FMP names some unit, note and preferred lines exactly like the
+    company and stamps its whole market cap on them — Southern Company's 2025 corporate units
+    SOMN, ANZ's capital notes AN3PJ, Comcast's exchangeable debentures CCZ (on NYSE, against the
+    shares on NASDAQ) — so neither name nor symbol tells them from the ordinary shares, but their
+    turnover does. A thinly traded share class (Carlsberg A, McCormick's voting shares) or venue
+    (BSE against NSE) ranks behind the main one too. A line with no turnover recorded is never thin."""
     busiest: dict[tuple, float] = {}
     for t in members:
         if t.average_turnover and not is_secondary_line(t):
-            busiest[key(t)] = max(busiest.get(key(t), 0.0), t.average_turnover)
+            key = turnover_group_key(t)
+            busiest[key] = max(busiest.get(key, 0.0), t.average_turnover)
     return {t.id for t in members
-            if t.average_turnover is not None and t.average_turnover < THIN_TURNOVER_SHARE * busiest.get(key(t), 0.0)}
+            if t.average_turnover is not None
+            and t.average_turnover < THIN_TURNOVER_SHARE * busiest.get(turnover_group_key(t), 0.0)}
 
 
 def is_foreign_currency_line(t: Ticker) -> bool:

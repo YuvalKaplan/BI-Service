@@ -136,6 +136,7 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
                     cutoff,
                     currency=tu.listing_currency(l.exchange, t.currency),
                     reference_shares=l.quote_shares,
+                    verified_shares=t.verified_shares,
                 )
                 if isinstance(fetched, str):
                     log.record_notice(f"Historic market cap unavailable for {l.symbol}: {fetched}")

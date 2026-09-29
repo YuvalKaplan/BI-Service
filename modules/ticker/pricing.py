@@ -86,6 +86,8 @@ REPAIR_REFERENCE_POINTS = 5    # good values nearest a glitch whose implied shar
 REFERENCE_TRIGGER_FACTOR = 2.0 # a cap move this large the price didn't make is worth checking against the profile
 REFERENCE_FACTOR = 2.5         # an implied share count this far off the profile's is a glitch (real share counts
                                # don't move 2.5x in a year; Alphabet's all-classes/class-A ratio is ~2.1)
+SHARE_COUNT_TOLERANCE = 1.15   # an implied share count this far off a listing's verified one (ticker.verified_shares)
+                               # is FMP's history on a wrong count (Rocket Companies: 3.79B against 2.82B)
 
 
 def _ratio(a: float, b: float) -> float:
@@ -236,7 +238,7 @@ def reference_shares(symbol: str) -> float | None:
 
 def clean_market_caps(
     series: dict[date, float], prices: dict[date, float] | None = None, symbol: str | None = None,
-    log_outliers: bool = True, reference: float | None = None,
+    log_outliers: bool = True, reference: float | None = None, verified_shares: float | None = None,
 ) -> dict[date, float]:
     """
     `series` (native currency, as FMP reports it) with its FMP glitches repaired where possible,
@@ -250,8 +252,23 @@ def clean_market_caps(
     fresh through a glitch lasting months. With no price, or a price scaled along with the cap
     (pence vs pounds), the value is dropped. Logged when `symbol` is given and log_outliers.
     A caller already holding the listing's profile passes its share count as `reference`.
+
+    With `verified_shares` (ticker.verified_shares: FMP's quote and financials agree on a count
+    its history doesn't — see refresh.verify_share_count), every value whose implied share count
+    is SHARE_COUNT_TOLERANCE-fold off it is first set to price x verified_shares — on every fetch,
+    so the daily validation compares like with like — and it serves as the reference.
     """
     prices = prices or {}
+    if verified_shares and prices:
+        off = sorted(d for d, v in series.items()
+                     if v and v > 0 and prices.get(d) and _ratio(v / prices[d], verified_shares) >= SHARE_COUNT_TOLERANCE)
+        if off:
+            series = {**series, **{d: prices[d] * verified_shares for d in off}}
+            if symbol and log_outliers:
+                log.record_notice(
+                    f"FMP market cap history on a wrong share count for {symbol}: {len(off)} value(s) set from "
+                    f"the verified {verified_shares:,.0f} shares ({off[0]} .. {off[-1]}).")
+        reference = reference or verified_shares
     if reference and prices:
         outliers = market_cap_outliers(series, prices, reference)
     else:
@@ -300,7 +317,7 @@ class Mismatch:
 
 def fetch_price_and_market_cap_history(
     symbol: str, start: date, end: date, currency: str | None = None, log_outliers: bool = True,
-    reference_shares: float | None = None,
+    reference_shares: float | None = None, verified_shares: float | None = None,
 ) -> dict[date, tuple[float, float]] | str:
     """Parallel-fetch historical price + market cap for `symbol` over [start, end].
     Returns {date: (price, market_cap)} for weekday dates present in BOTH series,
@@ -337,7 +354,7 @@ def fetch_price_and_market_cap_history(
     # FMP glitches are judged in FMP's own units (native currency), like the profile's reference.
     native_caps = clean_market_caps(
         {date.fromisoformat(row["date"]): float(row["marketCap"]) for row in market_caps_raw},
-        price_by_date, symbol, log_outliers, reference_shares,
+        price_by_date, symbol, log_outliers, reference_shares, verified_shares,
     )
 
     market_cap_by_date: dict[date, float] = {}
@@ -405,17 +422,19 @@ VALUE_HISTORY_START = date(2026, 1, 1)  # start of stored ticker_value history (
 
 def resync_value_history(
     ticker_id: int, symbol: str, currency: str | None, start: date = VALUE_HISTORY_START,
-    reference_shares: float | None = None,
+    reference_shares: float | None = None, verified_shares: float | None = None,
 ) -> int | str:
     """Rewrites a ticker's ticker_value history from `start` to today from FMP's historical
     endpoints, converted from `currency` and cleaned of FMP glitches — for a listing whose
     conversion currency changed (its FMP currency became known or changed), whose stored values
     were converted from the old one and would otherwise fail every validation (compare_overlap)
     until it's flagged invalid, or whose stored cap is far off its profile's (then the profile's
-    share count is passed as reference_shares). Existing rows are left untouched if FMP has no
-    data. Returns rows written, or the FMP error."""
+    share count is passed as reference_shares), or whose verified share count was set, changed
+    or cleared (verified_shares: the ticker's new value). Existing rows are left untouched if FMP
+    has no data. Returns rows written, or the FMP error."""
     end = date.today()
-    fetched = fetch_price_and_market_cap_history(symbol, start, end, currency=currency, reference_shares=reference_shares)
+    fetched = fetch_price_and_market_cap_history(
+        symbol, start, end, currency=currency, reference_shares=reference_shares, verified_shares=verified_shares)
     if isinstance(fetched, str):
         return fetched
     items = [TickerValue(ticker_id=ticker_id, value_date=d, stock_price=p, market_cap=mc) for d, (p, mc) in fetched.items()]
@@ -425,7 +444,7 @@ def resync_value_history(
 
 def store_validated_ticker_value(
     ticker_id: int, symbol: str, value_date: date, exchange: str | None = None, currency: str | None = None,
-    reference_shares: float | None = None,
+    reference_shares: float | None = None, verified_shares: float | None = None,
 ) -> TickerValue | None:
     """market_cap is converted to USD from the listing's currency: `currency` (FMP's own
     currency for the listing — ticker.currency or the profile's) when given, else the currency
@@ -436,13 +455,15 @@ def store_validated_ticker_value(
     value_date is recognised as one (market_cap_outliers) and stored repaired from the price,
     or withheld when it can't be (clean_market_caps); only the last HISTORY_LOOKBACK_DAYS are
     compared with the stored values. `reference_shares` — the listing's share count from FMP's
-    live quote, when the caller has it (the screener row) — is the glitch filter's reference."""
+    live quote, when the caller has it (the screener row) — is the glitch filter's reference;
+    `verified_shares` (ticker.verified_shares) repairs a history on a wrong share count
+    (clean_market_caps), the same way the stored history was rewritten."""
     try:
         currency = tu.listing_currency(exchange, currency)
         # Not logging repaired/dropped glitches here: the same old glitch would be reported daily for months.
         fetched = fetch_price_and_market_cap_history(
             symbol, value_date - timedelta(days=OUTLIER_CONTEXT_DAYS), value_date, currency=currency, log_outliers=False,
-            reference_shares=reference_shares,
+            reference_shares=reference_shares, verified_shares=verified_shares,
         )
         if isinstance(fetched, str):
             # Not logged: no data available for this ticker/date is a routine, expected
