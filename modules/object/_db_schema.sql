@@ -711,6 +711,7 @@ CREATE TABLE public.ticker (
     is_actively_trading boolean,
     master_ticker_id integer,
     company_market_cap double precision,
+    average_turnover double precision,
     region text,
     invalid text,
     CONSTRAINT ticker_master_ticker_id_not_self CHECK (((master_ticker_id IS NULL) OR (master_ticker_id <> id)))

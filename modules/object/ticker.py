@@ -49,6 +49,7 @@ class Ticker:
     invalid: str | None = None
     master_ticker_id: int | None = None
     company_market_cap: float | None = None
+    average_turnover: float | None = None  # FMP profile averageVolume x price, quote currency (major unit)
     region: str | None = None
 
 
@@ -254,8 +255,8 @@ def upsert_by_symbol(item: Ticker) -> tuple[int, bool]:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 query = """
-                    INSERT INTO ticker (symbol, isin, cusip, cik, name, exchange, industry, sector, country, currency, source, type_from, is_actively_trading)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO ticker (symbol, isin, cusip, cik, name, exchange, industry, sector, country, currency, source, type_from, is_actively_trading, average_turnover)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (symbol, exchange)
                     DO UPDATE
                     SET isin = COALESCE(EXCLUDED.isin, ticker.isin),
@@ -269,10 +270,11 @@ def upsert_by_symbol(item: Ticker) -> tuple[int, bool]:
                         currency = COALESCE(EXCLUDED.currency, ticker.currency),
                         source = EXCLUDED.source,
                         type_from = COALESCE(EXCLUDED.type_from, ticker.type_from),
-                        is_actively_trading = EXCLUDED.is_actively_trading
+                        is_actively_trading = EXCLUDED.is_actively_trading,
+                        average_turnover = COALESCE(EXCLUDED.average_turnover, ticker.average_turnover)
                     RETURNING id, (xmax = 0) AS is_new;
                 """
-                cur.execute(query, (item.symbol, item.isin, item.cusip, item.cik, item.name, item.exchange, item.industry, item.sector, item.country, item.currency, item.source, item.type_from, item.is_actively_trading))
+                cur.execute(query, (item.symbol, item.isin, item.cusip, item.cik, item.name, item.exchange, item.industry, item.sector, item.country, item.currency, item.source, item.type_from, item.is_actively_trading, item.average_turnover))
                 row = cur.fetchone()
                 if row is None:
                     raise Exception("INSERT ... RETURNING id returned no row")
@@ -298,11 +300,12 @@ def update(item: Ticker) -> None:
                         source               = %s,
                         type_from            = %s,
                         is_actively_trading  = %s,
+                        average_turnover     = COALESCE(%s, average_turnover),
                         updated_at           = NOW()
                     WHERE id = %s;
                 """, (item.isin, item.cusip, item.cik, item.name, item.exchange,
                       item.industry, item.sector, item.country, item.currency, item.source, item.type_from,
-                      item.is_actively_trading,
+                      item.is_actively_trading, item.average_turnover,
                       item.id))
     except Error as e:
         raise Exception(f"Error updating ticker {item.id}: {e}")
@@ -604,6 +607,21 @@ def update_company_market_cap_bulk(pairs: list[tuple[int, float | None]]) -> Non
                 )
     except Error as e:
         raise Exception(f"Error bulk-updating company_market_cap: {e}")
+
+
+def update_average_turnover_bulk(pairs: list[tuple[int, float]]) -> None:
+    """pairs: [(ticker_id, average_turnover), ...]"""
+    if not pairs:
+        return
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "UPDATE ticker SET average_turnover = %s WHERE id = %s",
+                    [(v, tid) for tid, v in pairs]
+                )
+    except Error as e:
+        raise Exception(f"Error bulk-updating average_turnover: {e}")
 
 
 def update_region_bulk(pairs: list[tuple[int, str]]) -> None:

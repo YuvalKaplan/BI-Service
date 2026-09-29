@@ -171,6 +171,7 @@ class TickerResolver:
             currency=profile.get('currency'),
             source='fmp',
             is_actively_trading=bool(is_active) if is_active is not None else None,
+            average_turnover=tu.profile_turnover(profile),
         )
         ticker_id, is_new = upsert_by_symbol(ticker)
 
@@ -184,6 +185,12 @@ class TickerResolver:
             return None
         if tu.is_unwanted_names(name):
             update_invalid(ticker_id, 'Fund or ETF')
+            return None
+        if is_active is not None and not is_active:
+            # Same rule as the profile refresh, applied at once: a symbol FMP stopped trading
+            # (NZYM-B after its change to NSIS-B) otherwise stays valid for up to a week, and
+            # FMP may keep serving it a frozen quote meanwhile.
+            update_invalid(ticker_id, 'Not actively trading')
             return None
 
         market_cap = profile.get('marketCap')

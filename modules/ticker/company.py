@@ -10,6 +10,8 @@ candidate first, by:
   1. activity — a listing with no market cap in the last ACTIVE_DAYS (e.g. an old ticker left
      behind by a ticker change) ranks after every active one,
   2. share line — ordinary shares before preferred / note / depositary / when-issued / unit lines,
+     and before a thin line (thin_lines: a sliver of the company's main line's turnover on the
+     same exchange — a unit, note or preferred FMP names like the company itself),
   3. market (util.market_tier) — the domicile country's own market, then a wider home market
      (Dutch/Luxembourg holding companies listed in Paris, Milan, …), then a US listing (US-listed,
      foreign-domiciled companies such as Eaton or Medtronic), then other countries' exchanges,
@@ -36,6 +38,9 @@ INTERNATIONAL = 'International'
 ACTIVE_DAYS = 30  # no market cap within this many days of "as of" = inactive (e.g. a ticker left behind by a rename).
                   # Generous on purpose: many listings only get a value from the weekly screener, and a
                   # missed week or two must not flip a company's primary listing (and so its region).
+THIN_TURNOVER_SHARE = 0.05  # see thin_lines. Hybrids trade 0.1-3.5% of their company's main line
+                            # (Southern's units SOMN 2.3%, PPL's PPLC 3.4%); share classes kept as
+                            # ordinary sit above (BRK-A 6.8%, FWONA 7.3%).
 
 # Lines that aren't the company's common equity. FMP reports the parent company's full market
 # cap on many of them (Bank of America on a Merrill Lynch note, Corteva on an EIDP preferred),
@@ -67,6 +72,25 @@ def is_depositary_line(name: str | None) -> bool:
 
 def is_secondary_line(t: Ticker) -> bool:
     return is_non_equity_line(t.symbol, t.name, t.exchange) or is_depositary_line(t.name)
+
+
+def thin_lines(members: list[Ticker]) -> set[int]:
+    """Ids of the company's listings trading under THIN_TURNOVER_SHARE of its busiest ordinary
+    line on the same exchange and currency (ticker.average_turnover). FMP names some unit, note
+    and preferred lines exactly like the company and stamps its whole market cap on them —
+    Southern Company's 2025 corporate units SOMN, ANZ's capital notes AN3PJ — so neither name
+    nor symbol tells them from the ordinary shares, but their turnover does. A thinly traded
+    share class (Carlsberg A, McCormick's voting shares) ranks behind the main one too. A line
+    with no turnover recorded is never thin."""
+    def key(t: Ticker):
+        return t.exchange, tu.listing_currency(t.exchange, t.currency)
+
+    busiest: dict[tuple, float] = {}
+    for t in members:
+        if t.average_turnover and not is_secondary_line(t):
+            busiest[key(t)] = max(busiest.get(key(t), 0.0), t.average_turnover)
+    return {t.id for t in members
+            if t.average_turnover is not None and t.average_turnover < THIN_TURNOVER_SHARE * busiest.get(key(t), 0.0)}
 
 
 def is_foreign_currency_line(t: Ticker) -> bool:
@@ -107,6 +131,7 @@ def ordered_listings(
     caps = caps or {}
     country = _company_country(members, master_id)
     cutoff = (as_of or date.today()) - timedelta(days=active_days)
+    thin = thin_lines(members)
 
     def inactive(t: Ticker) -> int:
         if latest_dates is None:
@@ -119,7 +144,7 @@ def ordered_listings(
         # Before a master exists (election), the foreign/OTC tiers fall back to the
         # highest-cap listing, as the election rule always did.
         within_tier = -(caps.get(t.id) or 0.0) if (master_id is None and tier >= 3) else 0.0
-        return (inactive(t), 1 if is_secondary_line(t) else 0, tier, 1 if is_foreign_currency_line(t) else 0,
+        return (inactive(t), 1 if is_secondary_line(t) or t.id in thin else 0, tier, 1 if is_foreign_currency_line(t) else 0,
                 0 if t.id == master_id else 1, within_tier, t.id)
 
     return sorted(members, key=key)

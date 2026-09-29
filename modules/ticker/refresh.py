@@ -71,6 +71,7 @@ def refresh_ticker_profiles(include_invalid: bool = False) -> tuple[int, int, in
             source=t.source,
             type_from=t.type_from,
             is_actively_trading=bool(is_active) if is_active is not None else None,
+            average_turnover=tu.profile_turnover(profile),
         )
         ticker.update(updated_ticker)  # stamps updated_at
 

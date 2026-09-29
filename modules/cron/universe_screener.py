@@ -128,6 +128,7 @@ def _fill_new_ticker_profile(symbol: str, exchange: str, full_symbol: str) -> No
         name=profile.get('companyName') or None, industry=profile.get('industry') or None,
         sector=profile.get('sector') or None, country=profile.get('country') or None,
         currency=profile.get('currency') or None, source='fmp', is_actively_trading=True,
+        average_turnover=tu.profile_turnover(profile),
     ))
 
 

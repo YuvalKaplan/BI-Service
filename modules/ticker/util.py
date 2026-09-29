@@ -160,6 +160,15 @@ def listing_currency(exchange: str | None, currency: str | None = None) -> str |
     exchange's currency."""
     return normalize_currency(currency) or currency_for_exchange(exchange)
 
+
+def profile_turnover(profile: dict) -> float | None:
+    """A listing's average daily turnover from its FMP profile — averageVolume x price, in the
+    major unit of its quote currency (a pence price is divided by 100) — or None when missing."""
+    volume, price = profile.get('averageVolume'), profile.get('price')
+    if volume is None or not price or price <= 0 or volume < 0:
+        return None
+    return volume * price / (100 if profile.get('currency') in _MINOR_CURRENCY_UNITS else 1)
+
 # Currencies and combination holdings (BRK - Berkshire Hathaway)
 EXCLUDED_TICKERS: set[str] = {'USD', 'BACKUSD', 'CAD', 'EUR', 'ISR', 'JPY', 'GBP', 'TICKER', 'BRK'}
 
