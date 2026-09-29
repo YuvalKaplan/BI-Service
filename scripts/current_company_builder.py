@@ -1,12 +1,12 @@
 import atexit
 from modules.object.exit import cleanup
-from modules.cron import universe_builder
+from modules.cron import company_builder
 
 atexit.register(cleanup)
 
 if __name__ == '__main__':
-    stats = universe_builder.run()
-    print(universe_builder.summary(stats))
+    stats = company_builder.run()
+    print(company_builder.summary(stats))
     for line in stats.non_equity:
         print(f"  note/preferred line left out: {line}")
     for line in stats.duplicate_companies:

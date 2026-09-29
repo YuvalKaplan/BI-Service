@@ -22,7 +22,7 @@ VALUE_DATE_CUT_OFF_HOUR = 17       # New York time: before it, the latest comple
 def latest_value_date(now: datetime | None = None) -> date:
     """The date today's values are stored for — the latest completed trading day: today in New
     York from 17:00 ET, else the previous day, stepped back over a weekend. Shared by the
-    holdings resolution and the universe screener, so a listing both see is validated once."""
+    holdings resolution and the screener, so a listing both see is validated once."""
     now_et = (now or datetime.now(ZoneInfo("America/New_York"))).astimezone(ZoneInfo("America/New_York"))
     d = (now_et if now_et.hour >= VALUE_DATE_CUT_OFF_HOUR else now_et - timedelta(days=1)).date()
     while d.weekday() >= 5:  # Saturday=5, Sunday=6

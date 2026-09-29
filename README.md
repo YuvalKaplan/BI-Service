@@ -18,9 +18,9 @@ The same codebase runs in three ways:
   - [Weekly schedule](#weekly-schedule)
   - [1. Providers and ETFs](#1-providers-and-etfs)
   - [2. Holdings collection](#2-holdings-collection)
-  - [3. Universe screener](#3-universe-screener)
+  - [3. Large-cap screener](#3-large-cap-screener)
   - [4. Ticker maintenance](#4-ticker-maintenance)
-  - [5. Large-cap universe](#5-large-cap-universe)
+  - [5. Screened companies](#5-screened-companies)
   - [6. Benchmark generation](#6-benchmark-generation)
   - [7. Best ideas](#7-best-ideas)
   - [8. Fund holdings formation](#8-fund-holdings-formation)
@@ -66,7 +66,7 @@ FMP screener ──► screener_listing ─────────────�
                           │                                             │  ▲
                           │                                             ▼  │  master sync: listings → companies
                           ▼                                             │
-                  universe_company ◄────────────────────────────────────┤
+                  screener_company ◄────────────────────────────────────┤
                           │                                             │
                           ▼                                             │
                   benchmark_holding ──────────► best_idea ◄─────────────┘
@@ -81,12 +81,12 @@ FMP screener ──► screener_listing ─────────────�
 
 | Day | Steps |
 |-----|-------|
-| Tue – Sat | Holdings collection (step 2) → universe screener (step 3) → ticker maintenance (step 4): profiles → values → companies → style |
+| Tue – Sat | Holdings collection (step 2) → large-cap screener (step 3) → ticker maintenance (step 4): profiles → values → companies → style |
 | Sun | Ticker maintenance, weekly part (step 4): categorization ETFs → ESG. Then the [SEC active ETF list](#sec-active-etf-list) takes in the week's new N-CEN filings (its own process, not a pipeline step) |
-| Wed | *after the Tue–Sat steps, whose screener also stores the screen that day:* [index funds and size breakpoints](#index-funds-and-size-breakpoints) → [free floats and float factors](#free-float) → large-cap universe (step 5) → benchmark generation (step 6) → best ideas (step 7) → fund updates (steps 8–9) |
+| Wed | *after the Tue–Sat steps, whose screener also stores the screen that day:* [index funds and size breakpoints](#index-funds-and-size-breakpoints) → [free floats and float factors](#free-float) → screened companies (step 5) → benchmark generation (step 6) → best ideas (step 7) → fund updates (steps 8–9) |
 | Mon | Nothing |
 
-Collection runs Tue–Sat because providers generally publish the previous trading day's holdings, so those runs pick up Monday to Friday. Every day, listings come in first – the holdings and the large-cap screener – and then the ticker maintenance goes over every ticker (profiles, values, companies, style – the [ticker utilities](#ticker-utilities)), so the Wednesday generators only use maintained tickers. Each step reads what the previous one stored, so any of them can be re-run on its own: on Wednesday the universe is built from the stored screen and the linked companies, and the benchmarks are formed on the same day the best ideas and funds consume them. If a step fails the cron stops and emails the admin: in particular the FMP screener is retried 3 times and then fails the run, and an empty universe or benchmark (no market cap could be validated) fails it too, so best ideas and funds never run on a partial or missing benchmark.
+Collection runs Tue–Sat because providers generally publish the previous trading day's holdings, so those runs pick up Monday to Friday. Every day, listings come in first – the holdings and the large-cap screener – and then the ticker maintenance goes over every ticker (profiles, values, companies, style – the [ticker utilities](#ticker-utilities)), so the Wednesday generators only use maintained tickers. Each step reads what the previous one stored, so any of them can be re-run on its own: on Wednesday the companies are built from the stored screen and the linked listings, and the benchmarks are formed on the same day the best ideas and funds consume them. If a step fails the cron stops and emails the admin: in particular the FMP screener is retried 3 times and then fails the run, and no companies or an empty benchmark (no market cap could be validated) fails it too, so best ideas and funds never run on a partial or missing benchmark.
 
 When the run finishes (or fails), an email summary goes to the admins (step 10).
 
@@ -112,11 +112,11 @@ Disabling a provider or ETF in the database removes it from every stage.
 
 The admin email lists, per provider, how many of its ETFs were downloaded.
 
-### 3. Universe screener
+### 3. Large-cap screener
 
-`modules/cron/universe_screener.py` – Tue–Sat, after holdings collection
+`modules/cron/screener.py` – Tue–Sat, after holdings collection
 
-The investable large-cap universe comes from the FMP company screener, from the lowest benchmark cutoff × 0.8 (the cutoffs are market-relative – [Index funds and size breakpoints](#index-funds-and-size-breakpoints); about $5.9B in September 2026: International's $7.4B × 0.8 – a company's whole cap is at least its float cap, so every company that can pass is screened). Every day its listings are registered in the `ticker` table alongside the ETF holdings' (step 2), so the ticker maintenance (step 4) covers everything the Wednesday generators use; on Wednesdays the screen is also stored for the large-cap universe (step 5).
+The investable large caps come from the FMP company screener, from the lowest benchmark cutoff × 0.8 (the cutoffs are market-relative – [Index funds and size breakpoints](#index-funds-and-size-breakpoints); about $5.9B in September 2026: International's $7.4B × 0.8 – a company's whole cap is at least its float cap, so every company that can pass is screened). Every day its listings are registered in the `ticker` table alongside the ETF holdings' (step 2), so the ticker maintenance (step 4) covers everything the Wednesday generators use; on Wednesdays the screen is also stored for the screened companies (step 5).
 
 1. The FMP company screener is paged through once per exchange: NYSE, NASDAQ, AMEX, TSX, LSE and 35 other international exchanges (Japan, Germany, Hong Kong, Australia, Switzerland, France, China, India, Taiwan, Korea, the Nordics, …). FMP compares `marketCapMoreThan` against each listing's **local-currency** market cap, so the USD threshold is first converted into the exchange's currency at the latest FX rate (an exchange with no known currency is skipped). The log shows each exchange's local threshold and smallest company returned, in USD.
 2. The screener returns **listings, not companies**, with the whole company's cap on most of them – foreign lines, depositary receipts, even preferred shares and notes. A company should enter through its **home-market ordinary listing**, so every line is classified:
@@ -138,31 +138,31 @@ The holdings (step 2) and the screener (step 3) register the tickers they read; 
 
 So by the time the Wednesday steps run, every listing they can use has a current profile, a validated value for the day, its company and a style.
 
-### 5. Large-cap universe
+### 5. Screened companies
 
-`modules/cron/universe_builder.py` – Wednesdays, after the Tue–Sat steps
+`modules/cron/company_builder.py` – Wednesdays, after the Tue–Sat steps
 
 Turns the stored screen (the latest on or before today) into one row per company, using the companies as the master sync left them (step 4, [Share-class consolidation](#share-class-consolidation-master-tickers)):
 
-1. **Home-market lines**, each at its latest validated market cap on the screen date or up to 5 days before – a market closed that day keeps its last close (all of JPX on a Japanese holiday). A listing without one (withheld all week) or flagged invalid is left out, and so is a note or preferred line by its current data – FMP reports no equity float for it (`ticker.free_float` = 0, see [Free float](#free-float)) or its FMP name is cut after a coupon ("TransCanada PipeLines Limited 6"). A company screened only through such a line – Algonquin through its notes `AQNB`, whose FMP cap is the note's price × Algonquin's shares (about $19B against a real $4B), Brookfield Renewable through `BEPI`, Santander UK through its preference shares – is not in the universe.
+1. **Home-market lines**, each at its latest validated market cap on the screen date or up to 5 days before – a market closed that day keeps its last close (all of JPX on a Japanese holiday). A listing without one (withheld all week) or flagged invalid is left out, and so is a note or preferred line by its current data – FMP reports no equity float for it (`ticker.free_float` = 0, see [Free float](#free-float)) or its FMP name is cut after a coupon ("TransCanada PipeLines Limited 6"). A company screened only through such a line – Algonquin through its notes `AQNB`, whose FMP cap is the note's price × Algonquin's shares (about $19B against a real $4B), Brookfield Renewable through `BEPI`, Santander UK through its preference shares – is left out.
 2. **Foreign lines** are admitted only when they duplicate no company already in – not a listing of one, no shared ISIN, no matching company name of the same domicile – and are quoted in their exchange's currency. What's left is a company listed only outside its domicile (dsm-firmenich in Amsterdam, Prada in Hong Kong); those lines are registered as in step 3 and valued as in [Prices and market caps](#prices-and-market-caps).
 3. **One row per company** – represented by its master, at its company market cap (`ticker.company_market_cap`, else the listing's own value), with its `ticker.region`.
 4. **Duplicate guard** – drops any company the sync failed to merge (same evidence as [Share-class consolidation](#share-class-consolidation-master-tickers), plus a matching name for a company not anchored in its home market), keeping home-market companies first, across both regions.
 
-The result is stored in `universe_company` for the screen date. No market-cap floor is applied here – each benchmark applies its own (step 6). Every skip and drop is logged and counted in the admin email; the sim prep report lists them.
+The result is stored in `screener_company` for the screen date. No market-cap floor is applied here – each benchmark applies its own (step 6). Every skip and drop is logged and counted in the admin email; the sim prep report lists them.
 
 ### 6. Benchmark generation
 
-`modules/cron/benchmark_generator.py` – Wednesdays, after the universe
+`modules/cron/benchmark_generator.py` – Wednesdays, after the company builder
 
-Forms every enabled benchmark of the `benchmark` table from the latest stored universe. Each row specifies which companies it holds:
+Forms every enabled benchmark of the `benchmark` table from the latest stored screened companies. Each row specifies which companies it holds:
 
 | Benchmark | `region` | `cap_type` | `style_type` | `market_coverage` | Cutoff (Sep 2026) |
 |-----------|----------|------------|--------------|-------------------|-------------------|
 | US Large Cap Blend | `US` | `large` | `blend` | 0.93 – the Russell 1000's share of the market | ~$10.1B (~720 companies) |
 | Intl Large Cap Blend | `International` | `large` | `blend` | 0.80 | ~$7.4B |
 
-The large-cap line is **relative to the market**, not a fixed amount: a benchmark's cutoff is its market's breakpoint at its `market_coverage` – the float cap at which the market's largest companies make up that share of its total float cap, per the index funds' latest snapshot ([Index funds and size breakpoints](#index-funds-and-size-breakpoints)). A benchmark holds the universe's companies of its `region` whose **whole company cap** reaches the cutoff with at least **10% floating** (`ticker.float_factor`; no factor known passes) – the S&P / Russell way: membership on the whole cap, a minimum float – and of its `style_type` (`blend`/`core`: any style; `value`/`growth`: the company's `ticker.style_type`). Each is weighted by the **whole company's** market cap (`weight = market cap / total`) – the size managers look at. The snapshot is stored in `benchmark_holding`, dated at the universe's screen date – Tuesday's close for the Wednesday run (a re-run replaces it); the cron email shows each benchmark's cutoff. An empty benchmark fails the run.
+The large-cap line is **relative to the market**, not a fixed amount: a benchmark's cutoff is its market's breakpoint at its `market_coverage` – the float cap at which the market's largest companies make up that share of its total float cap, per the index funds' latest snapshot ([Index funds and size breakpoints](#index-funds-and-size-breakpoints)). A benchmark holds the screened companies of its `region` whose **whole company cap** reaches the cutoff with at least **10% floating** (`ticker.float_factor`; no factor known passes) – the S&P / Russell way: membership on the whole cap, a minimum float – and of its `style_type` (`blend`/`core`: any style; `value`/`growth`: the company's `ticker.style_type`). Each is weighted by the **whole company's** market cap (`weight = market cap / total`) – the size managers look at. The snapshot is stored in `benchmark_holding`, dated at the companies' screen date – Tuesday's close for the Wednesday run (a re-run replaces it); the cron email shows each benchmark's cutoff. An empty benchmark fails the run.
 
 ### 7. Best ideas
 
@@ -177,11 +177,11 @@ A manager's best ideas are the stocks they hold at a **higher weight than the ma
 
    ```
    etf_weight       = company's market value in the ETF / ETF total market value
-   benchmark_weight = company's weight in the reference universe
+   benchmark_weight = company's weight in the reference benchmark
    delta            = etf_weight − benchmark_weight
    ```
 
-   Two reference universes are used, and both results are stored in `best_idea` with a `benchmark_mode`:
+   Two reference benchmarks are used, and both results are stored in `best_idea` with a `benchmark_mode`:
 
    | Mode | benchmark_weight | When |
    |------|------------------|------|
@@ -278,11 +278,11 @@ They usually run in this order, each building on the one before:
 5. [Style](#style-value--growth) – value or growth, per company (after the grouping, so a new listing isn't classified on its own).
 6. [ESG](#esg-qualification) – weekly, per company.
 7. [Index funds and size breakpoints](#index-funds-and-size-breakpoints) – weekly (Wednesday, before the free float): the index funds' holdings and where the market's size lines fall.
-8. [Free float](#free-float) – weekly (Wednesday, before the universe), per listing and per company.
+8. [Free float](#free-float) – weekly (Wednesday, before the company builder), per listing and per company.
 
 | Utility | Module | Used by |
 |---------|--------|---------|
-| Registration | `resolver.py` (holdings), `modules/cron/universe_screener.py::register_listings` (screen) | steps 2, 3 and 5 (foreign lines) |
+| Registration | `resolver.py` (holdings), `modules/cron/screener.py::register_listings` (screen) | steps 2, 3 and 5 (foreign lines) |
 | Profile refresh | `refresh.py` | step 4, `sim_prep_data.py`, `data_fill_ticker_profile.py` |
 | Prices and market caps | `valuation.py` (which tickers, once each), `pricing.py` (validation, glitches, USD) | step 4, step 5 (foreign lines), `sim_prep_data.py`, `current_ticker_values.py`, `single_provider*.py` |
 | Share-class consolidation | `master.py`, `company.py` (primary listing), `identity.py` (same-company evidence) | step 4, `sim_prep_data.py`, `data_fill_master_tickers.py` |
@@ -293,7 +293,7 @@ They usually run in this order, each building on the one before:
 
 ### Registration
 
-`modules/ticker/resolver.py` (holding lines), `modules/cron/universe_screener.py::register_listings` (screener lines)
+`modules/ticker/resolver.py` (holding lines), `modules/cron/screener.py::register_listings` (screener lines)
 
 Each holding line is matched to a company using the FinancialModelingPrep (FMP) API:
 
@@ -306,7 +306,7 @@ When a profile is found, the ticker is inserted or updated with its identifiers 
 
 Results are cached for the duration of a provider's run, so a stock held by many of its ETFs costs one lookup.
 
-The screener registers its lines by exchange and symbol instead (`universe_screener.register_listings`): a listing already known is used as it is, a new one is added with its FMP profile. Registration stores no value – see [Prices and market caps](#prices-and-market-caps).
+The screener registers its lines by exchange and symbol instead (`screener.register_listings`): a listing already known is used as it is, a new one is added with its FMP profile. Registration stores no value – see [Prices and market caps](#prices-and-market-caps).
 
 **Duplicate lines.** A ticker can still appear on several lines of one ETF on one date. When best ideas are computed, those lines are summed if they all imply the same share price (within 2%) – they are lots of the same security. If the prices disagree, they are most likely different securities that resolved to the same ticker, so all of that ticker's lines are **quarantined** (excluded) and reported.
 
@@ -320,7 +320,7 @@ Every day of the ticker maintenance (Tue–Sat), every ticker whose profile hasn
 
 `modules/ticker/valuation.py` (which tickers, once each, in parallel), `modules/ticker/pricing.py` (validation, glitches, USD)
 
-Once a day, in the ticker maintenance, every ticker in use gets its price and market cap for the latest completed trading day stored in `ticker_value` (`pricing.latest_value_date`: before 17:00 New York time that is the previous day, and a weekend steps back to Friday – the date every step stores and reads values under): the valid tickers in each active ETF's latest holdings from the last 7 days (the holdings best ideas can use; about 3,600) and, on Wednesdays, the registered lines of the stored screen (about 900 more). Each ticker is valued once however many ETFs hold it, 5 in parallel (FMP's rate limit of 200 calls a minute is the bound), and one already valued for the date is skipped. The universe builder values the few foreign lines it admits the same way, and `scripts/single_provider*.py` the tickers they just stored.
+Once a day, in the ticker maintenance, every ticker in use gets its price and market cap for the latest completed trading day stored in `ticker_value` (`pricing.latest_value_date`: before 17:00 New York time that is the previous day, and a weekend steps back to Friday – the date every step stores and reads values under): the valid tickers in each active ETF's latest holdings from the last 7 days (the holdings best ideas can use; about 3,600) and, on Wednesdays, the registered lines of the stored screen (about 900 more). Each ticker is valued once however many ETFs hold it, 5 in parallel (FMP's rate limit of 200 calls a minute is the bound), and one already valued for the date is skipped. The company builder values the few foreign lines it admits the same way, and `scripts/single_provider*.py` the tickers they just stored.
 
 FMP's profile endpoint occasionally returns wrong values, so the numbers are taken from FMP's **historical** price and market-cap endpoints and **validated**: the last 21 days fetched now are compared against what we stored before. If any overlapping day differs by more than 0.5% (price) or 1% (market cap), today's value is withheld. If a ticker has gone 5 days without a good value, it's marked invalid with the mismatch details.
 
@@ -407,13 +407,13 @@ The breakpoints are read by date (`index_funds.cutoff`): the benchmarks' cutoffs
 
 ### Free float
 
-`modules/ticker/free_float.py::refresh` – weekly, Wednesday, after the index funds and before the universe; `scripts/current_float_factors.py` runs it alone and writes a report (`.output/float_factors_report.md`).
+`modules/ticker/free_float.py::refresh` – weekly, Wednesday, after the index funds and before the company builder; `scripts/current_float_factors.py` runs it alone and writes a report (`.output/float_factors_report.md`).
 
 Benchmarks weigh each company by its **whole** market cap – the company's size, which is what managers look at. Free float and the holdings of the Vanguard index funds (their stored snapshot – [Index funds and size breakpoints](#index-funds-and-size-breakpoints)) are kept as **safeguards** around it:
 
-- **`ticker.free_float`** (every listing) – FMP's free float % (`shares-float-all`). FMP reports **0** for an exchange-traded note or preferred named like its issuer (`AQNB`, `BEPI`, `CCZ`): such a line counts as non-equity – it ranks behind the ordinary shares and is left out of the universe (step 5), so a company screened only through its notes (Algonquin: FMP puts it at $19B, the note's price × Algonquin's shares, against a real $4B) isn't in the benchmark. A 0 on a listing an index fund holds, or on one sharing its ISIN with a listing that is held or has a float (the same shares on another venue), is a data gap and kept empty instead.
+- **`ticker.free_float`** (every listing) – FMP's free float % (`shares-float-all`). FMP reports **0** for an exchange-traded note or preferred named like its issuer (`AQNB`, `BEPI`, `CCZ`): such a line counts as non-equity – it ranks behind the ordinary shares and is left out of the screened companies (step 5), so a company screened only through its notes (Algonquin: FMP puts it at $19B, the note's price × Algonquin's shares, against a real $4B) isn't in the benchmark. A 0 on a listing an index fund holds, or on one sharing its ISIN with a listing that is held or has a float (the same shares on another venue), is a data gap and kept empty instead.
 - **`ticker.float_factor`** (every company) – the investable share of its market cap – normally 0–1, above 1 when the index holds more than our cap (see the check below) – from the holdings of **VTI**, **VEA** and **VWO** (China A shares scaled up by their 25% inclusion), which hold nearly every listed company at its float-adjusted weight – a company more than one holds is measured by the fund of its region: a company's market value in the fund, summed over its share classes (GOOGL + GOOG), scaled to its float cap, over its company market cap (the scale per fund is set so the factors sit on FMP's free-float scale). A company no index fund holds – MLPs, BDCs, US-sanctioned Chinese companies, companies below the index's minimum float (Christian Dior) – takes its primary listing's FMP free float. No weight uses it (Microsoft 0.94, Tencent 0.70, Carvana 0.65, Interactive Brokers 0.25, SpaceX 0.04 in September 2026), but benchmark membership and the funds' large-cap filter require at least 0.10 (S&P's minimum float).
-- **Market-cap check** – an index fund can't hold more of a company than the whole company. For every company at or above its region's large-cap cutoff that an index fund holds, the fund's shares are valued at our own price on the date of our company cap (the funds' reported market values are often out of line with their share counts; valued this way fully floated companies come out at 0.97–1.01 of their cap), and a float cap 1.15× the company market cap or more means the company cap is on too few shares (as Bitmine's history was: 230M shares against 570M). The company is listed in the report and counted in the cron email. In September 2026 that flagged five: Omnicom and Devon Energy (histories still on their pre-merger share counts – FMP's quote and the index agree on the new ones), Equity Residential (a renamed ticker we still carry the old line of), and Standard Life and Delta Electronics (our caps agree with FMP's profile and financials – most likely the index holding the company under two lines). A flagged company's share count is then checked on the spot, with the index funds as a second source for the quote ([verified share count](#profile-refresh)): when the quote's cap agrees with the index, its count becomes the verified share count, the history's latest run is rewritten and the company caps are refreshed – before the universe is built. That fixed Omnicom (history on 205M shares, quote and index 274M: $15.6B → $20.6B) and Devon Energy (937M → 1,100M: $44.1B → $51.4B) in September 2026. Standard Life, Delta Electronics and Equity Residential stayed flagged for review – their quotes agree with our history, or there's no current quote. (A cap on too many shares – Rocket Companies' history on 3.79B against 2.82B – is caught by the verified share count's own check.)
+- **Market-cap check** – an index fund can't hold more of a company than the whole company. For every company at or above its region's large-cap cutoff that an index fund holds, the fund's shares are valued at our own price on the date of our company cap (the funds' reported market values are often out of line with their share counts; valued this way fully floated companies come out at 0.97–1.01 of their cap), and a float cap 1.15× the company market cap or more means the company cap is on too few shares (as Bitmine's history was: 230M shares against 570M). The company is listed in the report and counted in the cron email. In September 2026 that flagged five: Omnicom and Devon Energy (histories still on their pre-merger share counts – FMP's quote and the index agree on the new ones), Equity Residential (a renamed ticker we still carry the old line of), and Standard Life and Delta Electronics (our caps agree with FMP's profile and financials – most likely the index holding the company under two lines). A flagged company's share count is then checked on the spot, with the index funds as a second source for the quote ([verified share count](#profile-refresh)): when the quote's cap agrees with the index, its count becomes the verified share count, the history's latest run is rewritten and the company caps are refreshed – before the company builder runs. That fixed Omnicom (history on 205M shares, quote and index 274M: $15.6B → $20.6B) and Devon Energy (937M → 1,100M: $44.1B → $51.4B) in September 2026. Standard Life, Delta Electronics and Equity Residential stayed flagged for review – their quotes agree with our history, or there's no current quote. (A cap on too many shares – Rocket Companies' history on 3.79B against 2.82B – is caught by the verified share count's own check.)
 
 If the index funds' snapshot or the free floats can't be read, last week's values stay (logged).
 
@@ -479,13 +479,13 @@ The simulation replays the Wednesday logic (best ideas → fund) week by week ov
 Run against development, in this order:
 
 ```bash
-python scripts/sim_prep_data.py --dev    # 1. screen, refresh profiles, value, sync master tickers, build the universe
+python scripts/sim_prep_data.py --dev    # 1. screen, refresh profiles, value, sync master tickers, build the companies
 python scripts/sim_benchmark.py --dev    # 2. backfill weekly historical benchmarks (edit inception_date first)
 python scripts/sim_fund.py --dev         # 3. run the fund simulation (edit fund_id / inception_date / weeks first)
 ```
 
-1. **`sim_prep_data.py`** – the same steps as live, in the same order: universe screener (step 3, storing the screen), the ticker maintenance's profile refresh, values and master-ticker sync (step 4), and the large-cap universe (step 5). The screen is dated at the latest date FMP has published data for (a few days behind today) rather than the latest trading day, and a listing whose value can't be validated on that date stays in the universe (the backfill fetches its whole history anyway). It asks whether to also retry tickers previously marked invalid. It's safe to re-run; it only picks up what's stale or new. Report: `.output/sim_prep_data_report.md` – including the duplicate companies dropped and the foreign / non-equity lines skipped or admitted.
-2. **`sim_benchmark.py`** – forms every enabled benchmark for every Wednesday from `inception_date` to the latest date FMP has published data for. The FMP screener has no history, so the universe stored by step 1 is used; each of its companies' screened listings needs a **historical** market cap near every Wednesday. The stored `ticker_value` history is used when it has one for every Wednesday (about 96% of listings – ETF holdings are valued daily); only the rest is fetched from FMP (converted to USD at each date's exchange rate, glitches repaired as in step 4). Per date, each company takes its primary listing's value (never a sum of listings) and the benchmarks are formed exactly as in step 6 – each benchmark's cutoff for that date (its market's breakpoint in the index funds' snapshot on or before it – the earliest one for dates before snapshots were kept) applied to that date's values, with today's float factors. Report: `.output/sim_benchmark_report.md` – every snapshot.
+1. **`sim_prep_data.py`** – the same steps as live, in the same order: large-cap screener (step 3, storing the screen), the ticker maintenance's profile refresh, values and master-ticker sync (step 4), and the screened companies (step 5). The screen is dated at the latest date FMP has published data for (a few days behind today) rather than the latest trading day, and a listing whose value can't be validated on that date stays in the screened companies (the backfill fetches its whole history anyway). It asks whether to also retry tickers previously marked invalid. It's safe to re-run; it only picks up what's stale or new. Report: `.output/sim_prep_data_report.md` – including the duplicate companies dropped and the foreign / non-equity lines skipped or admitted.
+2. **`sim_benchmark.py`** – forms every enabled benchmark for every Wednesday from `inception_date` to the latest date FMP has published data for. The FMP screener has no history, so the companies stored by step 1 are used; each of its companies' screened listings needs a **historical** market cap near every Wednesday. The stored `ticker_value` history is used when it has one for every Wednesday (about 96% of listings – ETF holdings are valued daily); only the rest is fetched from FMP (converted to USD at each date's exchange rate, glitches repaired as in step 4). Per date, each company takes its primary listing's value (never a sum of listings) and the benchmarks are formed exactly as in step 6 – each benchmark's cutoff for that date (its market's breakpoint in the index funds' snapshot on or before it – the earliest one for dates before snapshots were kept) applied to that date's values, with today's float factors. Report: `.output/sim_benchmark_report.md` – every snapshot.
 3. **`sim_fund.py`** – for the chosen fund:
    - **erases** its existing `fund_holding`, `fund_holding_change` and `fund_analysis` rows (it refuses to run against production for this reason);
    - starting on the first Wednesday on or after `inception_date` (the live recalculation day, and the date of the `sim_benchmark.py` snapshots) and then every `recalc_frequency_days`, generates best ideas as of that date for all ETFs and recalculates the fund;
@@ -523,13 +523,13 @@ All scripts are run from the project root with the virtual environment active. C
 |--------|--------------|
 | `service_cron.py` | The full daily cron. Runs whatever is scheduled for today's weekday. |
 | `scripts/current_categorize_tickers.py` | The categorization ETF download, then the style assignment chain (step 4; [Style](#style-value--growth)). |
-| `scripts/current_universe_screener.py` | Registers the FMP large-cap screen's home-market listings and stores the screen for the latest completed trading day (step 3, the Wednesday mode – follow with `current_ticker_values.py` to value it); `--register-only` only registers them (the other days). |
+| `scripts/current_screener.py` | Registers the FMP large-cap screen's home-market listings and stores the screen for the latest completed trading day (step 3, the Wednesday mode – follow with `current_ticker_values.py` to value it); `--register-only` only registers them (the other days). |
 | `scripts/current_ticker_values.py` | The valuation pass of the ticker maintenance (step 4; [Prices and market caps](#prices-and-market-caps)): every ticker in use, and the lines of a screen stored for the day, valued for the latest completed trading day. |
 | `scripts/data_fill_master_tickers.py` | The master-ticker sync of the ticker maintenance (step 4; [Share-class consolidation](#share-class-consolidation-master-tickers)) – see [Ticker data maintenance](#ticker-data-maintenance). |
 | `scripts/current_index_funds.py` | Downloads the index funds' holdings (VTI, VEA, VWO), stores the snapshot and the market's size breakpoints ([Index funds and size breakpoints](#index-funds-and-size-breakpoints)), as the Wednesday cron does before the free float, and prints the breakpoints and each benchmark's cutoff. |
-| `scripts/current_float_factors.py` | Refreshes every listing's free float and every company's float factor ([Free float](#free-float)), as the Wednesday cron does before the universe, and reports the large-cap market caps below the index funds' float cap (too low – worth checking), the universe's companies without a factor, the lowest factors, and the listings found with no equity float. Report: `.output/float_factors_report.md`. |
-| `scripts/current_universe_builder.py` | Builds the large-cap company universe from the latest stored screen (step 5) and lists the duplicates dropped and foreign lines admitted. Run the master sync first. |
-| `scripts/current_benchmark_generator.py` | Forms every enabled benchmark from the latest stored universe (step 6). |
+| `scripts/current_float_factors.py` | Refreshes every listing's free float and every company's float factor ([Free float](#free-float)), as the Wednesday cron does before the company builder, and reports the large-cap market caps below the index funds' float cap (too low – worth checking), the screened companies without a factor, the lowest factors, and the listings found with no equity float. Report: `.output/float_factors_report.md`. |
+| `scripts/current_company_builder.py` | Builds the screened companies (one row per company) from the latest stored screen (step 5) and lists the duplicates dropped and foreign lines admitted. Run the master sync first. |
+| `scripts/current_benchmark_generator.py` | Forms every enabled benchmark from the latest stored screened companies (step 6). |
 | `scripts/current_best_ideas.py` | Generates best ideas for all ETFs as of now (step 7) and prints the problems. |
 | `scripts/current_model_fund.py` | Recalculates all funds as of today (steps 8–9). |
 
@@ -558,7 +558,7 @@ All scripts are run from the project root with the virtual environment active. C
 
 | Script | What it does |
 |--------|--------------|
-| `scripts/sim_prep_data.py` | Simulation step 1 – screen, ticker profiles, values, master sync and universe; see [Simulation](#simulation). |
+| `scripts/sim_prep_data.py` | Simulation step 1 – screen, ticker profiles, values, master sync and company builder; see [Simulation](#simulation). |
 | `scripts/sim_benchmark.py` | Simulation step 2 – historical weekly benchmarks. |
 | `scripts/sim_fund.py` | Simulation step 3 – replays one fund. Development only. |
 | `scripts/report_fund_methodology.py` | Read-only. For a `fund_id` and date (default: the fund's inception), writes to `.output/methodology/<fund>_<id>_<date>/`: `README.md` (strategy, constants, methodology), `etfs/<etf>_<id>.xlsx` (each ETF's holdings and active-weight calculation), `benchmark.xlsx`, `best_ideas.xlsx` (every idea and which fund filter it passed or failed) and `fund.xlsx` (holdings with their justification, and the candidates not selected). |
@@ -702,7 +702,7 @@ The authoritative schema is `modules/object/_db_schema.sql` (live) and `modules/
 | `ticker_value` | Daily validated price and market cap (USD) |
 | `categorize_etf`, `categorize_etf_holding`, `categorize_ticker` | Style reference ETFs, their holdings and constituents with factors |
 | `screener_listing` | The weekly FMP large-cap screen: every line with its type, quote and (once registered) ticker |
-| `universe_company` | The weekly large-cap company universe: one row per company with its region and USD market cap |
+| `screener_company` | The weekly screen by company (built by the company builder): one row per company with its region and USD market cap |
 | `benchmark`, `benchmark_holding` | Benchmark definitions (region, cap, style, minimum market cap) and their weekly weights |
 | `best_idea` | Top 10 active-weight ideas per ETF, date and benchmark mode |
 | `fund`, `fund_holding`, `fund_holding_change`, `fund_analysis` | Model funds, their holdings, buys/sells and the calculation snapshot |

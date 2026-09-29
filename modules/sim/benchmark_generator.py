@@ -1,6 +1,6 @@
 import log
 from datetime import date, timedelta
-from modules.object import batch_run, benchmark, ticker, ticker_value, screener_listing, universe_company
+from modules.object import batch_run, benchmark, ticker, ticker_value, screener_listing, screener_company
 from modules.object.screener_listing import ScreenerListing
 from modules.ticker import company, pricing
 from modules.ticker import util as tu
@@ -67,29 +67,29 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
     price/market-cap data yet for the most recent few days) — otherwise the same weekday the
     live cron refreshes the benchmarks on.
 
-    The universe is the one scripts/sim_prep_data.py stored (it screens, syncs masters and builds
-    it, dated at the data cutoff — the screener has no historical mode, so today's large-cap
-    universe is used); failing that, the latest stored one.
+    The companies are the ones scripts/sim_prep_data.py stored (it screens, syncs masters and
+    builds them, dated at the data cutoff — the screener has no historical mode, so today's
+    large caps are used); failing that, the latest stored ones.
     Each company's screened listings then get their historical market-cap series — the stored
     values when they cover every Wednesday, else FMP's history — and for each Wednesday every
     company takes its primary listing's value; the benchmarks are formed with the same selection
     and weighting as live (select_holdings, store_holdings).
 
-    Returns the universe's screen date and a (benchmark_name, holding_date, num_holdings) row per
+    Returns the companies' screen date and a (benchmark_name, holding_date, num_holdings) row per
     snapshot stored, for callers that report on it (scripts/sim_benchmark.py).
     """
     batch_run_id = batch_run.insert(batch_run.BatchRun(process='sim_benchmark_gen', activation='auto'))
     log.record_status(f"Starting Sim Benchmark Generator batch job ID {batch_run_id}")
     try:
-        # The universe sim_prep_data.py built (dated at the data cutoff), else the latest one.
+        # The companies sim_prep_data.py built (dated at the data cutoff), else the latest ones.
         cutoff = data_cutoff_date()
-        screen_date = universe_company.fetch_latest_date(up_to=cutoff) or universe_company.fetch_latest_date()
+        screen_date = screener_company.fetch_latest_date(up_to=cutoff) or screener_company.fetch_latest_date()
         if screen_date is None:
-            raise Exception("No stored universe — run scripts/sim_prep_data.py first.")
+            raise Exception("No stored companies — run scripts/sim_prep_data.py first.")
 
-        # The universe's companies (through their current masters) and the screened listings of
+        # The screened companies (through their current masters) and the screened listings of
         # each: registered home-market lines and admitted foreign lines.
-        companies = current_companies(universe_company.fetch_for_date(screen_date))
+        companies = current_companies(screener_company.fetch_for_date(screen_date))
         region_lookup = {cid: region for cid, region, _mc in companies}
         listings = [l for l in screener_listing.fetch_for_date(screen_date) if l.ticker_id]
         masters = ticker.fetch_master_info_by_ids([l.ticker_id for l in listings])

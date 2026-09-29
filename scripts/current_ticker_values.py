@@ -1,7 +1,7 @@
 """
 Runs the valuation pass by hand: stores the validated price and market cap, for the latest
 completed trading day, of every ticker in use — the tickers in the ETFs' recent holdings, and the
-registered lines of the screen stored for that date (after scripts/current_universe_screener.py).
+registered lines of the screen stored for that date (after scripts/current_screener.py).
 
 Usage:
     python scripts/current_ticker_values.py --dev

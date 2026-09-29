@@ -296,7 +296,7 @@ def get_fx_rate(from_currency: str, to_currency: str = 'USD') -> float | str:
         return message
 
 # ------------------------------------------------------------------
-# Fetch company list and factors forr use in classification universe
+# Fetch company list and factors for use in classification
 # ------------------------------------------------------------------
 def fetch_company_factors(symbol: str) -> tuple[Dict, Dict]:
     apikey = os.getenv('SECRET_MARKET_DATA_API_KEY')
@@ -438,7 +438,7 @@ def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = SC
     also filtered to a single exchange. FMP's unfiltered screener results are heavily
     US/Canada-biased and don't meaningfully surface most other exchanges at all (confirmed
     empirically: an unfiltered call returns a handful of XETRA-listed companies, while an
-    explicit exchange=XETRA call returns the full ~300-company German large-cap universe) —
+    explicit exchange=XETRA call returns the full ~300-company German large-cap list) —
     callers that want broad international coverage need to loop this over a list of exchanges.
     Returns the list of company dicts ([] past the last page).
     Expected fields per item: symbol, marketCap, country, exchangeShortName, companyName.

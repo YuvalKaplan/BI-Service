@@ -7,7 +7,7 @@ from psycopg.rows import class_row
 from modules.core.db import db_pool_instance
 
 LINE_HOME = 'home'              # the company's home market, a US exchange, or an unscreened domicile — registered by the screener
-LINE_FOREIGN = 'foreign'        # outside the company's home market — decided by the universe builder, after the master sync
+LINE_FOREIGN = 'foreign'        # outside the company's home market — decided by the company builder, after the master sync
 LINE_NON_EQUITY = 'non_equity'  # preferred / note / warrant / unit / participation line — never used
 LINE_ORDER_BOOK = 'order_book'  # LSE International Order Book mirror — never used
 
@@ -17,8 +17,8 @@ class ScreenerListing:
     """
     One line of the FMP large-cap screener on a screen date, as returned (symbol with its
     exchange suffix, e.g. TD.TO; market cap and price in the listing's local currency), with its
-    line_type and, once registered, its ticker_id. Written by modules/cron/universe_screener.py,
-    read by modules/cron/universe_builder.py and the sim benchmark backfill.
+    line_type and, once registered, its ticker_id. Written by modules/cron/screener.py,
+    read by modules/cron/company_builder.py and the sim benchmark backfill.
     """
     screen_date: date
     symbol: str

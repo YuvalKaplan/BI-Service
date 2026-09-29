@@ -1,17 +1,17 @@
 import log
 from dataclasses import dataclass, field
 from datetime import date
-from modules.object import batch_run, benchmark, ticker, universe_company
+from modules.object import batch_run, benchmark, ticker, screener_company
 from modules.object.benchmark import Benchmark
-from modules.object.universe_company import UniverseCompany
+from modules.object.screener_company import ScreenerCompany
 from modules.ticker import index_funds
 
 NO_STYLE_FILTER = ('blend', 'core')
 
 
-def current_companies(rows: list[UniverseCompany]) -> list[tuple[int, str, float]]:
-    """(company_ticker_id, region, market_cap) per universe company, read through the current
-    master — a later master sync may have moved a company's master since the universe was built."""
+def current_companies(rows: list[ScreenerCompany]) -> list[tuple[int, str, float]]:
+    """(company_ticker_id, region, market_cap) per screened company, read through the current
+    master — a later master sync may have moved a company's master since the company builder ran."""
     masters = ticker.fetch_master_info_by_ids([r.ticker_id for r in rows])
     out: dict[int, tuple[int, str, float]] = {}
     for r in rows:
@@ -91,20 +91,20 @@ def summary(stats: BenchmarkRunStats) -> str:
 
 def run(screen_date: date | None = None) -> BenchmarkRunStats:
     """
-    Forms every enabled benchmark in the benchmark table from the stored large-cap universe (the
-    latest on or before today by default; built by modules/cron/universe_builder.py) and stores
-    each as a market-cap-weighted benchmark_holding snapshot dated at the universe's screen date.
+    Forms every enabled benchmark in the benchmark table from the stored screened companies (the
+    latest on or before today by default; built by modules/cron/company_builder.py) and stores
+    each as a market-cap-weighted benchmark_holding snapshot dated at their screen date.
 
-    Raises — so the cron stops before best ideas/funds — when there's no stored universe or any
+    Raises — so the cron stops before best ideas/funds — when there are no stored companies or any
     benchmark would come out empty (existing snapshots are then left unchanged).
     """
     batch_run_id = batch_run.insert(batch_run.BatchRun(process='benchmark_generator', activation='auto'))
     log.record_status(f"Starting Benchmark Generator batch job ID {batch_run_id}")
     try:
-        screen_date = screen_date or universe_company.fetch_latest_date(up_to=date.today())
+        screen_date = screen_date or screener_company.fetch_latest_date(up_to=date.today())
         if screen_date is None:
-            raise Exception("No stored universe — run the universe builder first.")
-        companies = current_companies(universe_company.fetch_for_date(screen_date))
+            raise Exception("No stored companies — run the company builder first.")
+        companies = current_companies(screener_company.fetch_for_date(screen_date))
         benchmarks = benchmark.fetch_all()
         if not benchmarks:
             raise Exception("No enabled benchmarks in the benchmark table.")
@@ -116,7 +116,7 @@ def run(screen_date: date | None = None) -> BenchmarkRunStats:
         if empty:
             raise Exception(
                 f"Benchmark(s) would be empty on {screen_date}: {', '.join(empty)} "
-                f"({len(companies)} companies in the universe). Existing snapshots left unchanged."
+                f"({len(companies)} screened companies). Existing snapshots left unchanged."
             )
 
         stats = BenchmarkRunStats(holding_date=screen_date)

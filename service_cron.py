@@ -5,7 +5,7 @@ from modules.object.exit import cleanup
 from modules.core.db import db_pool_instance, ENVIRONMENT
 from modules.core import sender
 from modules.calc.model_fund import results_to_string
-from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, benchmark_generator, universe_screener, universe_builder
+from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, benchmark_generator, screener, company_builder
 from modules.ticker import esg, free_float, index_funds, master, refresh, style, valuation
 from modules.sec import etf_profile, ncen
 
@@ -45,12 +45,12 @@ if __name__ == '__main__':
             message_actions += BREAKER_LINE
 
             try:
-                screen = universe_screener.run(store=(weekday == 2))
+                screen = screener.run(store=(weekday == 2))
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the FMP large-cap screener with error:\n{e}\n\n")
                 raise e
 
-            message_actions += universe_screener.summary(screen) + "\n"
+            message_actions += screener.summary(screen) + "\n"
             message_actions += BREAKER_LINE
 
             message_actions += f"Ticker Maintenance\n" + SEPERATOR_LINE
@@ -129,10 +129,10 @@ if __name__ == '__main__':
         if weekday == 2: # Wednesday
             # The generators, after the Tue–Sat steps above (which stored and valued the screen): the
             # listings' free floats and companies' float factors (the note/preferred lines the
-            # universe leaves out, and a check of the market caps against the index funds), then the
-            # universe is built from the stored screen and the linked companies, then benchmarks,
+            # company builder leaves out, and a check of the market caps against the index funds), then
+            # the companies are built from the stored screen and the listings' links, then benchmarks,
             # best ideas, funds — each reading what the previous step stored. A failed step stops
-            # the rest: the FMP screener fails after its retries, and an empty universe or
+            # the rest: the FMP screener fails after its retries, and no companies or an empty
             # benchmark fails too, so the generators never run on partial data. A failed float
             # download keeps last week's values (logged) rather than stopping the run.
             # First the index funds (VTI, VEA, VWO): their holdings snapshot and the market's size
@@ -154,12 +154,12 @@ if __name__ == '__main__':
             message_actions += free_float.summary(floats) + "\n"
 
             try:
-                universe = universe_builder.run()
+                companies = company_builder.run()
             except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the large-cap universe with error:\n{e}\n\n")
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the company builder with error:\n{e}\n\n")
                 raise e
 
-            message_actions += universe_builder.summary(universe) + "\n"
+            message_actions += company_builder.summary(companies) + "\n"
             message_actions += BREAKER_LINE
 
             try:

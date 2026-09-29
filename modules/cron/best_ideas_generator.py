@@ -155,7 +155,7 @@ def compute_active_weights(inputs: EtfInputs, benchmark_weights: dict[int, float
         # full_universe: the benchmark only covers stocks >= the large-cap threshold, so a
         # holding that has since dropped below it has no real weight to look up. Rather than
         # building a fund-specific benchmark for this rare/borderline case, we assume such a
-        # stock's true weight in the large-cap universe would be negligible anyway and default
+        # stock's true weight in the large-cap benchmark would be negligible anyway and default
         # it to 0.0. This inflates its delta to its full ETF weight, which — on its own — would
         # make it look like a top idea to any fund that doesn't already hold it. That false
         # positive is prevented downstream in model_fund._filter_and_aggregate, which only lets

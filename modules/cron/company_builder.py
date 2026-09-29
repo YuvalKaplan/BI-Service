@@ -2,12 +2,12 @@ import log
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from modules.core import api_stocks
-from modules.cron import universe_screener
-from modules.cron.universe_screener import SCREENER_EXCHANGES, describe, row_symbol
-from modules.object import batch_run, ticker, ticker_value, screener_listing, universe_company
+from modules.cron import screener
+from modules.cron.screener import SCREENER_EXCHANGES, describe, row_symbol
+from modules.object import batch_run, ticker, ticker_value, screener_listing, screener_company
 from modules.object.screener_listing import ScreenerListing, LINE_HOME, LINE_FOREIGN
 from modules.object.ticker import Ticker
-from modules.object.universe_company import UniverseCompany
+from modules.object.screener_company import ScreenerCompany
 from modules.ticker import company, identity, valuation
 from modules.ticker import util as tu
 
@@ -16,7 +16,7 @@ VALUE_WINDOW_DAYS = 5  # a listing's value may be this many days older than the 
 
 
 @dataclass
-class UniverseRunStats:
+class CompanyBuildStats:
     screen_date: date
     home_lines: int = 0
     no_value: list[str] = field(default_factory=list)            # left out: no market cap stored for the screen date
@@ -29,10 +29,10 @@ class UniverseRunStats:
     intl_companies: int = 0
 
 
-def summary(stats: UniverseRunStats) -> str:
+def summary(stats: CompanyBuildStats) -> str:
     """One line for the cron email."""
     return (
-        f"Universe {stats.screen_date}: {stats.us_companies} US and {stats.intl_companies} International companies — "
+        f"Company builder {stats.screen_date}: {stats.us_companies} US and {stats.intl_companies} International companies — "
         f"{len(stats.no_value)} listings without a validated value (or invalid) and {len(stats.non_equity)} note/preferred "
         f"lines left out; skipped "
         f"{len(stats.foreign_duplicates)} foreign duplicate and {len(stats.foreign_currency)} other-currency lines; "
@@ -44,7 +44,7 @@ def _listing_caps(
     listings: list[ScreenerListing],
     screen_date: date,
     require_value: bool,
-    stats: UniverseRunStats,
+    stats: CompanyBuildStats,
 ) -> dict[int, tuple[str, float]]:
     """
     {ticker_id: (exchange, market cap in USD)} for the registered listings: the latest validated
@@ -94,11 +94,11 @@ def _company_index(tickers: list[Ticker]) -> tuple[dict[int, Ticker], dict[int, 
 def _screen_foreign_lines(
     foreign: list[ScreenerListing],
     admitted_ids: set[int],
-    stats: UniverseRunStats,
+    stats: CompanyBuildStats,
 ) -> list[ScreenerListing]:
     """
-    Returns the foreign lines (LINE_FOREIGN) to admit: those whose company isn't already in the
-    universe — not a listing of an admitted company (after the master sync), no ISIN shared with
+    Returns the foreign lines (LINE_FOREIGN) to admit: those whose company isn't already in —
+    not a listing of an admitted company (after the master sync), no ISIN shared with
     one, no company name (depositary descriptors cut) matching one of the same domicile — and
     whose FMP currency is their exchange's (a line quoted in another currency is a mirror of
     another market's data: Toyota on LSE in JPY). What's left is a company listed only outside
@@ -178,7 +178,7 @@ def _one_row_per_company(listing_caps: dict[int, tuple[str, float]]) -> list[tup
 
 def drop_duplicate_companies(
     rows: list[tuple[int, str, float]],
-    stats: UniverseRunStats | None = None,
+    stats: CompanyBuildStats | None = None,
     as_of: date | None = None,
 ) -> list[tuple[int, str, float]]:
     """
@@ -221,7 +221,7 @@ def drop_duplicate_companies(
         if hit:
             k, ev = hit
             msg = f"{v.name} ({v.country}, {row[1]}, ${row[2] / 1e9:,.1f}B) — duplicate of {views[k].name} ({ev})"
-            log.record_notice(f"Universe duplicate guard: {msg}")
+            log.record_notice(f"Company duplicate guard: {msg}")
             if stats is not None:
                 stats.duplicate_companies.append(msg)
             continue
@@ -231,30 +231,30 @@ def drop_duplicate_companies(
     return kept
 
 
-def run(screen_date: date | None = None, require_value: bool = True) -> UniverseRunStats:
+def run(screen_date: date | None = None, require_value: bool = True) -> CompanyBuildStats:
     """
-    Builds the large-cap company universe from the stored screen (the latest on or before today
-    by default) and stores it in universe_company. Must follow the master sync, which links the
+    Builds the screened companies (one row per company) from the stored screen (the latest on or before today
+    by default) and stores it in screener_company. Must follow the master sync, which links the
     listings the screener registered to their companies:
       1. the home-market lines with a recent market cap as of the screen date (_listing_caps);
       2. the foreign lines that duplicate no company already in (_screen_foreign_lines),
-         registered and valued here (universe_screener.register_listings, valuation.store_values);
+         registered and valued here (screener.register_listings, valuation.store_values);
       3. one row per company, at its company market cap and region (_one_row_per_company);
       4. the duplicate guard across all companies (drop_duplicate_companies).
     No market-cap floor is applied here: each benchmark applies its own cutoff (its market's
     breakpoint at its market_coverage — benchmark_generator.select_holdings).
 
-    Raises — so the cron stops before the generators — when there's no stored screen or the
-    universe comes out empty (the stored universe is then left unchanged).
+    Raises — so the cron stops before the generators — when there's no stored screen or no
+    company comes out (the stored companies are then left unchanged).
     """
-    batch_run_id = batch_run.insert(batch_run.BatchRun(process='universe_builder', activation='auto'))
-    log.record_status(f"Starting Universe Builder batch job ID {batch_run_id}")
+    batch_run_id = batch_run.insert(batch_run.BatchRun(process='company_builder', activation='auto'))
+    log.record_status(f"Starting Company Builder batch job ID {batch_run_id}")
     try:
         screen_date = screen_date or screener_listing.fetch_latest_date(up_to=date.today())
         if screen_date is None:
-            raise Exception("No stored screen — run the universe screener first.")
+            raise Exception("No stored screen — run the screener first.")
         listings = screener_listing.fetch_for_date(screen_date)
-        stats = UniverseRunStats(screen_date=screen_date)
+        stats = CompanyBuildStats(screen_date=screen_date)
         home = [l for l in listings if l.line_type == LINE_HOME]
         foreign = [l for l in listings if l.line_type == LINE_FOREIGN]
         stats.home_lines = len(home)
@@ -262,7 +262,7 @@ def run(screen_date: date | None = None, require_value: bool = True) -> Universe
         caps = _listing_caps(home, screen_date, require_value, stats)
         extra = _screen_foreign_lines(foreign, set(caps), stats)
         if extra:
-            universe_screener.register_listings(extra)
+            screener.register_listings(extra)
             valuation.store_values(valuation.targets_for_listings(extra), screen_date)
             caps.update(_listing_caps(extra, screen_date, require_value, stats))
         log.record_status(
@@ -276,20 +276,20 @@ def run(screen_date: date | None = None, require_value: bool = True) -> Universe
         if len(kept) < len(rows):
             log.record_status(f"Dropped {len(rows) - len(kept)} duplicate companies (see notices).")
         if not kept:
-            raise Exception(f"The universe would be empty — no market caps could be validated for {screen_date}. Stored universe left unchanged.")
+            raise Exception(f"No companies to store — no market caps could be validated for {screen_date}. Stored companies left unchanged.")
 
-        universe_company.replace_for_date(screen_date, [
-            UniverseCompany(screen_date=screen_date, ticker_id=cid, region=region, market_cap=cap)
+        screener_company.replace_for_date(screen_date, [
+            ScreenerCompany(screen_date=screen_date, ticker_id=cid, region=region, market_cap=cap)
             for cid, region, cap in kept
         ])
         stats.us_companies = sum(1 for _cid, region, _cap in kept if region == company.US)
         stats.intl_companies = len(kept) - stats.us_companies
-        log.record_status(f"Universe {screen_date}: {stats.us_companies} US, {stats.intl_companies} International companies.")
+        log.record_status(f"Companies {screen_date}: {stats.us_companies} US, {stats.intl_companies} International.")
 
         batch_run.update_completed_at(batch_run_id)
-        log.record_status("Universe Builder completed.\n")
+        log.record_status("Company Builder completed.\n")
         return stats
 
     except Exception as e:
-        log.record_error(f"Error in universe_builder: {e}")
+        log.record_error(f"Error in company_builder: {e}")
         raise

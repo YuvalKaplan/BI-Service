@@ -10,7 +10,7 @@ from modules.ticker import company, index_funds, pricing
 from modules.ticker import util as tu
 
 # FMP's screener has to be queried per exchange to get real international coverage (an
-# unfiltered call is heavily US/Canada-biased and mixes currencies), so the universe is the
+# unfiltered call is heavily US/Canada-biased and mixes currencies), so the screen is the
 # union of these exchanges' large caps.
 US_SCREENER_EXCHANGES = ['NYSE', 'NASDAQ', 'AMEX']
 INTERNATIONAL_EXCHANGES = [
@@ -106,10 +106,10 @@ def _classify(symbol: str, exchange: str, name: str, country: str | None) -> str
         the issuer's home-market data — never used.
       - LINE_HOME: the domicile's home market (util.market_tier 0/1), a US exchange (US-listed
         foreign companies such as Linde; ADRs are merged into their company by the master sync
-        or dropped by the universe's duplicate guard), or any exchange for a company domiciled
+        or dropped by the company builder's duplicate guard), or any exchange for a company domiciled
         where we screen no exchange (Bermuda, Cayman, Hungary, …) — registered here.
       - LINE_FOREIGN: a line outside the company's home market (Exxon on XETRA, Cisco's Canadian
-        depositary receipt, Toyota mirrored on LSE) — admitted by the universe builder only when
+        depositary receipt, Toyota mirrored on LSE) — admitted by the company builder only when
         it duplicates no company already in, which needs the master sync first.
     """
     bare = row_symbol(symbol)
@@ -163,7 +163,7 @@ def register_listings(listings: list[ScreenerListing], save: bool = True) -> Non
     """
     Registers each listing as a ticker (new ones with their FMP profile), setting its ticker_id;
     with `save`, the ticker_id is also saved on the stored line. Used by this step for the
-    home-market lines and by the universe builder for the foreign lines it admits. Values come
+    home-market lines and by the company builder for the foreign lines it admits. Values come
     from the valuation pass (modules/ticker/valuation.py), which values a stored screen's lines.
 
     A symbol can have rows on multiple exchanges — either already in the DB, or across
@@ -234,7 +234,7 @@ def summary(stats: ScreenerRunStats) -> str:
         )
     return (
         f"Screener {stats.screen_date} (stored): {stats.screened} listings — {stats.registered} of {stats.home} "
-        f"home-market lines registered, {stats.foreign} foreign lines stored for the universe, {len(stats.non_equity)} "
+        f"home-market lines registered, {stats.foreign} foreign lines stored for the company builder, {len(stats.non_equity)} "
         f"non-equity and {stats.order_book} order-book lines skipped"
     )
 
@@ -244,7 +244,7 @@ def run(screen_date: date | None = None, store: bool = False) -> ScreenerRunStat
     Screens FMP's large caps (every line classified, _classify) and registers the home-market
     lines as tickers, so the daily ticker maintenance covers every listing the Wednesday
     generators will use. With `store` (Wednesdays, the sim, by hand) the screen is also stored in
-    screener_listing — foreign lines included, decided by the universe builder after the master
+    screener_listing — foreign lines included, decided by the company builder after the master
     sync — and the valuation pass (modules/ticker/valuation.py) then values its registered lines
     for screen_date. Registering takes about a minute; valuing the screen is what's weekly.
 
@@ -255,8 +255,8 @@ def run(screen_date: date | None = None, store: bool = False) -> ScreenerRunStat
     still fails after its retries.
     """
     screen_date = screen_date or pricing.latest_value_date()
-    batch_run_id = batch_run.insert(batch_run.BatchRun(process='universe_screener', activation='auto'))
-    log.record_status(f"Starting Universe Screener batch job ID {batch_run_id} for {screen_date} ({'stored' if store else 'registration only'})")
+    batch_run_id = batch_run.insert(batch_run.BatchRun(process='screener', activation='auto'))
+    log.record_status(f"Starting Screener batch job ID {batch_run_id} for {screen_date} ({'stored' if store else 'registration only'})")
     try:
         stats = ScreenerRunStats(screen_date=screen_date, stored=store)
         listings: list[ScreenerListing] = []
@@ -293,9 +293,9 @@ def run(screen_date: date | None = None, store: bool = False) -> ScreenerRunStat
         log.record_status(f"Registered {stats.registered} home-market listings.")
 
         batch_run.update_completed_at(batch_run_id)
-        log.record_status("Universe Screener completed.\n")
+        log.record_status("Screener completed.\n")
         return stats
 
     except Exception as e:
-        log.record_error(f"Error in universe_screener: {e}")
+        log.record_error(f"Error in screener: {e}")
         raise

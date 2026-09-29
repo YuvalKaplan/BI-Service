@@ -10,7 +10,7 @@ class MarketBreakpoint:
     """
     The float cap at which a market's largest companies make up `coverage` of its total float cap,
     per the index funds' holdings on as_of_date (modules/ticker/index_funds.py). The benchmarks'
-    cutoffs (benchmark.market_coverage), the funds' large-cap filter, the universe screener and the
+    cutoffs (benchmark.market_coverage), the funds' large-cap filter, the screener and the
     SEC ETF profiles' size classes read it by date.
     """
     as_of_date: date

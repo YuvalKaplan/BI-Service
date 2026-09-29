@@ -51,6 +51,7 @@ BEGIN
 		public.provider,
 		public.provider_etf,
 		public.provider_etf_holding,
+		public.screener_company,
 		public.screener_listing,
 		public.sec_active_etf,
 		public.sec_etf_classification,
@@ -60,7 +61,6 @@ BEGIN
 		public.test_provider_etf_holding,
 		public.ticker,
 		public.ticker_value,
-		public.universe_company,
 		public.universe_etf,
 		public.universe_etf_holding
 		CASCADE;
@@ -1005,10 +1005,10 @@ CREATE TABLE public.ticker_value (
 ALTER TABLE public.ticker_value OWNER TO admin;
 
 --
--- Name: universe_company; Type: TABLE; Schema: public; Owner: admin
+-- Name: screener_company; Type: TABLE; Schema: public; Owner: admin
 --
 
-CREATE TABLE public.universe_company (
+CREATE TABLE public.screener_company (
     screen_date date NOT NULL,
     ticker_id integer NOT NULL,
     region text NOT NULL,
@@ -1016,7 +1016,7 @@ CREATE TABLE public.universe_company (
 );
 
 
-ALTER TABLE public.universe_company OWNER TO admin;
+ALTER TABLE public.screener_company OWNER TO admin;
 
 --
 -- TOC entry 4949 (class 2604 OID 73846)
@@ -1157,11 +1157,11 @@ ALTER TABLE ONLY public.sec_ncen_filing
 
 
 --
--- Name: universe_company universe_company_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
+-- Name: screener_company screener_company_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
-ALTER TABLE ONLY public.universe_company
-    ADD CONSTRAINT universe_company_pkey PRIMARY KEY (screen_date, ticker_id);
+ALTER TABLE ONLY public.screener_company
+    ADD CONSTRAINT screener_company_pkey PRIMARY KEY (screen_date, ticker_id);
 
 
 --
@@ -1468,11 +1468,11 @@ ALTER TABLE ONLY public.screener_listing
 
 
 --
--- Name: universe_company fk_universe_company_ticker_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
+-- Name: screener_company fk_screener_company_ticker_id; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
-ALTER TABLE ONLY public.universe_company
-    ADD CONSTRAINT fk_universe_company_ticker_id FOREIGN KEY (ticker_id) REFERENCES public.ticker(id) ON UPDATE CASCADE ON DELETE CASCADE;
+ALTER TABLE ONLY public.screener_company
+    ADD CONSTRAINT fk_screener_company_ticker_id FOREIGN KEY (ticker_id) REFERENCES public.ticker(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --

@@ -122,7 +122,7 @@ def _fix_flagged(flagged: list[int], by_id: dict[int, Ticker], resolver: TickerR
                  caps: dict[int, float | None]) -> list[str]:
     """Runs the share-count verification (refresh.verify_share_count, the index funds as a
     witness) on each flagged company's own row now, rather than at its next weekly profile
-    refresh, so the corrected cap is in place before the universe is built. A company whose count
+    refresh, so the corrected cap is in place before the company builder runs. A company whose count
     is verified gets its history rewritten, then the company caps are refreshed and its float
     factor measured again against the new cap."""
     today = date.today()

@@ -268,7 +268,7 @@ def _write_benchmark_file(ctx: _Context, out_dir: str) -> str:
                 etfs = ", ".join(ctx.etf_label(a) for a in sorted({a.provider_etf_id for a in ctx.analysis if a.benchmark_id == bm_id}))
                 _write_sheet(w, _sheet_name(bm.name, used), df, {'Market cap': MONEY, 'Weight': PCT}, [
                     ('Benchmark', f"{bm.name} ({bm.id})"), ('Region', bm.region), ('Snapshot date', bm_date),
-                    ('Universe', f"{bm.cap_type} {bm.style_type}, USD company cap >= {index_funds.cutoff(bm.region, bm.market_coverage, bm_date):,.0f} "
+                    ('Membership', f"{bm.cap_type} {bm.style_type}, USD company cap >= {index_funds.cutoff(bm.region, bm.market_coverage, bm_date):,.0f} "
                                  f"(its market's float-cap breakpoint at {bm.market_coverage:.0%} coverage, from the index funds) with at least "
                                  f"{index_funds.MIN_FLOAT_FACTOR:.0%} floating, market-cap weighted, one row per company (its primary listing's cap), region by primary listing"),
                     ('Constituents', len(df)), ('Used for ETFs', etfs),
@@ -435,7 +435,7 @@ def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
     s = ctx.strategy
     bm_text = (
         "each ETF's configured external benchmark (see `benchmark.xlsx`): a synthetic large-cap, market-cap-weighted "
-        "universe built from the FMP screener"
+        "benchmark built from the companies screened on FMP"
         if ctx.mode == 'full_universe' else
         "each ETF's own holdings, weighted by market cap (see `benchmark.xlsx`)"
     )
