@@ -137,6 +137,12 @@ class _Context:
         t = self.tickers.get(ticker_id) if ticker_id else None
         return (t.name or '') if t else ''
 
+    def float_factor(self, ticker_id: int | None) -> float:
+        """The company's float factor (ticker.float_factor) — the investable share of its cap that
+        benchmark weights use; 1 when it has none. Today's value: the sim applies it to every date."""
+        t = self.tickers.get(ticker_id) if ticker_id else None
+        return t.float_factor if t and t.float_factor is not None else 1.0
+
     def exchange(self, ticker_id: int | None) -> str:
         t = self.tickers.get(ticker_id) if ticker_id else None
         return (t.exchange or '') if t else ''
@@ -203,6 +209,7 @@ def _write_etf_files(ctx: _Context, out_dir: str) -> list[str]:
             'Master used': 'Y' if a.master_used else 'N',
             'Market value': per_company['market_value'].get(ctx.sym(a.ticker_id)) if not per_company.empty else None,
             'Market cap used': a.market_cap,
+            'Float factor': ctx.float_factor(a.ticker_id),
             'ETF weight': a.etf_weight,
             'Benchmark weight': a.benchmark_weight,
             'Delta': a.delta,
@@ -217,13 +224,13 @@ def _write_etf_files(ctx: _Context, out_dir: str) -> list[str]:
             ('Provider', p.name if p else pe.provider_id),
             ('Region', pe.region),
             ('Holdings date', ctx.etf_dates[etf_id]),
-            ('Benchmark', f"{bm.name} ({bm.id}) as of {rows[0].benchmark_date}" if bm else "self (ETF's own holdings, market-cap weighted)"),
+            ('Benchmark', f"{bm.name} ({bm.id}) as of {rows[0].benchmark_date}" if bm else "self (ETF's own holdings, float-adjusted market-cap weighted)"),
             ('Best ideas', f"top {big.MAX_BEST_IDEAS_PER_FUND} by delta = ETF weight - benchmark weight, delta > 0 and <= {big.HOLDING_DELTA_LIMIT_DROP_OFF:.0%}"),
         ]
         path = os.path.join(etf_dir, f"{_safe(pe.name or 'ETF')}_{pe.id}.xlsx")
         with pd.ExcelWriter(path, engine='openpyxl') as w:
             _write_sheet(w, 'Companies', company, {
-                'Market value': MONEY, 'Market cap used': MONEY, 'ETF weight': PCT, 'Benchmark weight': PCT, 'Delta': PCT,
+                'Market value': MONEY, 'Market cap used': MONEY, 'Float factor': NUM, 'ETF weight': PCT, 'Benchmark weight': PCT, 'Delta': PCT,
             }, header)
             _write_sheet(w, 'Listings', listings.sort_values(['Company', 'Listing']) if not listings.empty else listings,
                          {'Shares': NUM, 'Market value': MONEY, 'Provider weight': PCT})
@@ -257,13 +264,13 @@ def _write_benchmark_file(ctx: _Context, out_dir: str) -> str:
                     'Country': ctx.tickers[r.ticker_id].country if r.ticker_id in ctx.tickers else '',
                     'Region': ctx.tickers[r.ticker_id].region if r.ticker_id in ctx.tickers else '',
                     'Exchange': ctx.exchange(r.ticker_id),
-                    'Market cap': r.market_cap, 'Weight': r.weight,
+                    'Market cap': r.market_cap, 'Float factor': ctx.float_factor(r.ticker_id), 'Weight': r.weight,
                     'Held by a fund ETF': 'Y' if r.ticker_id in held else '',
                 } for r in rows]).sort_values('Weight', ascending=False)
                 etfs = ", ".join(ctx.etf_label(a) for a in sorted({a.provider_etf_id for a in ctx.analysis if a.benchmark_id == bm_id}))
-                _write_sheet(w, _sheet_name(bm.name, used), df, {'Market cap': MONEY, 'Weight': PCT}, [
+                _write_sheet(w, _sheet_name(bm.name, used), df, {'Market cap': MONEY, 'Float factor': NUM, 'Weight': PCT}, [
                     ('Benchmark', f"{bm.name} ({bm.id})"), ('Region', bm.region), ('Snapshot date', bm_date),
-                    ('Universe', f"{bm.cap_type} {bm.style_type}, USD market cap >= {bm.market_cap_min:,}, market-cap weighted, one row per company (its primary listing's cap), region by primary listing"),
+                    ('Universe', f"{bm.cap_type} {bm.style_type}, USD market cap >= {bm.market_cap_min:,}, weighted by market cap x float factor (the investable share, from the index funds' holdings or FMP's free float), one row per company (its primary listing's cap), region by primary listing"),
                     ('Constituents', len(df)), ('Used for ETFs', etfs),
                 ])
         else:
@@ -272,10 +279,10 @@ def _write_benchmark_file(ctx: _Context, out_dir: str) -> str:
                 df = pd.DataFrame([{
                     'Symbol': ctx.sym(a.ticker_id), 'Name': ctx.tname(a.ticker_id),
                     'Exchange': ctx.exchange(a.ticker_id),
-                    'Market cap used': a.market_cap, 'Weight': a.benchmark_weight,
+                    'Market cap used': a.market_cap, 'Float factor': ctx.float_factor(a.ticker_id), 'Weight': a.benchmark_weight,
                 } for a in rows]).sort_values('Weight', ascending=False)
-                _write_sheet(w, _sheet_name(ctx.etfs[etf_id].name or str(etf_id), used), df, {'Market cap used': MONEY, 'Weight': PCT}, [
-                    ('Benchmark', f"self — {ctx.etf_label(etf_id)} holdings, market-cap weighted"),
+                _write_sheet(w, _sheet_name(ctx.etfs[etf_id].name or str(etf_id), used), df, {'Market cap used': MONEY, 'Float factor': NUM, 'Weight': PCT}, [
+                    ('Benchmark', f"self — {ctx.etf_label(etf_id)} holdings, weighted by market cap x float factor"),
                     ('Holdings date', ctx.etf_dates[etf_id]),
                 ])
     return path
@@ -427,10 +434,11 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
 def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
     s = ctx.strategy
     bm_text = (
-        "each ETF's configured external benchmark (see `benchmark.xlsx`): a synthetic large-cap, market-cap-weighted "
-        "universe built from the FMP screener"
+        "each ETF's configured external benchmark (see `benchmark.xlsx`): a synthetic large-cap universe built from the "
+        "FMP screener, weighted by market cap x float factor (the investable share of each company, as the index funds "
+        "managers are measured against weight it)"
         if ctx.mode == 'full_universe' else
-        "each ETF's own holdings, weighted by market cap (see `benchmark.xlsx`)"
+        "each ETF's own holdings, weighted by market cap x float factor (see `benchmark.xlsx`)"
     )
     lines = [
         f"# {ctx.fund.name} — holdings methodology",

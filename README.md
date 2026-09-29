@@ -33,6 +33,7 @@ The same codebase runs in three ways:
   - [Share-class consolidation (master tickers)](#share-class-consolidation-master-tickers)
   - [Style (value / growth)](#style-value--growth)
   - [ESG qualification](#esg-qualification)
+  - [Free float](#free-float)
 - [Simulation](#simulation)
 - [Backtesting](#backtesting)
 - [Scripts](#scripts)
@@ -75,7 +76,7 @@ FMP screener ──► screener_listing ─────────────�
 |-----|-------|
 | Tue – Sat | Holdings collection (step 2) → universe screener (step 3) → ticker maintenance (step 4): profiles → values → companies → style |
 | Sun | Ticker maintenance, weekly part (step 4): categorization ETFs → ESG |
-| Wed | *after the Tue–Sat steps, whose screener also stores the screen that day:* large-cap universe (step 5) → benchmark generation (step 6) → best ideas (step 7) → fund updates (steps 8–9) |
+| Wed | *after the Tue–Sat steps, whose screener also stores the screen that day:* [free floats and float factors](#free-float) → large-cap universe (step 5) → benchmark generation (step 6) → best ideas (step 7) → fund updates (steps 8–9) |
 | Mon | Nothing |
 
 Collection runs Tue–Sat because providers generally publish the previous trading day's holdings, so those runs pick up Monday to Friday. Every day, listings come in first – the holdings and the large-cap screener – and then the ticker maintenance goes over every ticker (profiles, values, companies, style – the [ticker utilities](#ticker-utilities)), so the Wednesday generators only use maintained tickers. Each step reads what the previous one stored, so any of them can be re-run on its own: on Wednesday the universe is built from the stored screen and the linked companies, and the benchmarks are formed on the same day the best ideas and funds consume them. If a step fails the cron stops and emails the admin: in particular the FMP screener is retried 3 times and then fails the run, and an empty universe or benchmark (no market cap could be validated) fails it too, so best ideas and funds never run on a partial or missing benchmark.
@@ -136,7 +137,7 @@ So by the time the Wednesday steps run, every listing they can use has a current
 
 Turns the stored screen (the latest on or before today) into one row per company, using the companies as the master sync left them (step 4, [Share-class consolidation](#share-class-consolidation-master-tickers)):
 
-1. **Home-market lines**, each at its latest validated market cap on the screen date or up to 5 days before – a market closed that day keeps its last close (all of JPX on a Japanese holiday). A listing without one (withheld all week) or flagged invalid is left out.
+1. **Home-market lines**, each at its latest validated market cap on the screen date or up to 5 days before – a market closed that day keeps its last close (all of JPX on a Japanese holiday). A listing without one (withheld all week) or flagged invalid is left out, and so is a note or preferred line by its current data – FMP reports no equity float for it (`ticker.free_float` = 0, see [Free float](#free-float)) or its FMP name is cut after a coupon ("TransCanada PipeLines Limited 6"). A company screened only through such a line – Algonquin through its notes `AQNB`, whose FMP cap is the note's price × Algonquin's shares (about $19B against a real $4B), Brookfield Renewable through `BEPI`, Santander UK through its preference shares – is not in the universe.
 2. **Foreign lines** are admitted only when they duplicate no company already in – not a listing of one, no shared ISIN, no matching company name of the same domicile – and are quoted in their exchange's currency. What's left is a company listed only outside its domicile (dsm-firmenich in Amsterdam, Prada in Hong Kong); those lines are registered as in step 3 and valued as in [Prices and market caps](#prices-and-market-caps).
 3. **One row per company** – represented by its master, at its company market cap (`ticker.company_market_cap`, else the listing's own value), with its `ticker.region`.
 4. **Duplicate guard** – drops any company the sync failed to merge (same evidence as [Share-class consolidation](#share-class-consolidation-master-tickers), plus a matching name for a company not anchored in its home market), keeping home-market companies first, across both regions.
@@ -154,7 +155,7 @@ Forms every enabled benchmark of the `benchmark` table from the latest stored un
 | US Large Cap Blend | `US` | `large` | `blend` | $10B |
 | Intl Large Cap Blend | `International` | `large` | `blend` | $10B |
 
-A benchmark holds the universe's companies of its `region` with a company market cap of at least `market_cap_min` (USD) and of its `style_type` (`blend`/`core`: any style; `value`/`growth`: the company's `ticker.style_type`). Each is weighted by market cap (`weight = market cap / total`) and the snapshot is stored in `benchmark_holding`, dated at the universe's screen date – Tuesday's close for the Wednesday run (a re-run replaces it). The universe only holds companies screened at $10B and up, so a benchmark with a lower `market_cap_min` would be incomplete – a notice is logged. An empty benchmark fails the run.
+A benchmark holds the universe's companies of its `region` with a company market cap of at least `market_cap_min` (USD) and of its `style_type` (`blend`/`core`: any style; `value`/`growth`: the company's `ticker.style_type`). Each is weighted by **float-adjusted** market cap – `weight = market cap × float factor / total` – the investable share of each company, the way the indices managers are measured against weigh it ([Free float](#free-float)); the `market_cap` stored stays the whole company's, and `market_cap_min` applies to it. The snapshot is stored in `benchmark_holding`, dated at the universe's screen date – Tuesday's close for the Wednesday run (a re-run replaces it). The universe only holds companies screened at $10B and up, so a benchmark with a lower `market_cap_min` would be incomplete – a notice is logged. An empty benchmark fails the run.
 
 ### 7. Best ideas
 
@@ -177,7 +178,7 @@ A manager's best ideas are the stocks they hold at a **higher weight than the ma
 
    | Mode | benchmark_weight | When |
    |------|------------------|------|
-   | `self` | the company's market cap ÷ total market cap of the ETF's own holdings (what the ETF would look like if it were market-cap weighted) | always |
+   | `self` | the company's float-adjusted market cap (market cap × float factor) ÷ the total over the ETF's own holdings (what the ETF would look like if it were weighted like an index) | always |
    | `full_universe` | the company's weight in the ETF's linked benchmark (step 6); 0 if not in it | only when the ETF has a `benchmark_id` |
 
 5. **Selection** – companies with a positive delta, ranked from highest delta down. A delta above **20%** is treated as abnormal and dropped. The top **10** per ETF are stored, with their rank.
@@ -269,6 +270,7 @@ They usually run in this order, each building on the one before:
 4. [Share-class consolidation](#share-class-consolidation-master-tickers) – which listings are one company, and its market cap and region (from the values).
 5. [Style](#style-value--growth) – value or growth, per company (after the grouping, so a new listing isn't classified on its own).
 6. [ESG](#esg-qualification) – weekly, per company.
+7. [Free float](#free-float) – weekly (Wednesday, before the universe), per listing and per company.
 
 | Utility | Module | Used by |
 |---------|--------|---------|
@@ -278,6 +280,7 @@ They usually run in this order, each building on the one before:
 | Share-class consolidation | `master.py`, `company.py` (primary listing), `identity.py` (same-company evidence) | step 4, `sim_prep_data.py`, `data_fill_master_tickers.py` |
 | Style | `style.py`, `modules/calc/classification.py` | step 4, `current_categorize_tickers.py` |
 | ESG | `esg.py`, `modules/calc/esg.py` | step 4 (Sunday), registration of a new ticker |
+| Free float | `free_float.py` | Wednesday before step 5, `sim_prep_data.py`, `current_float_factors.py` |
 
 ### Registration
 
@@ -330,7 +333,7 @@ Some companies trade as more than one listing (Alphabet as `GOOGL` and `GOOG`, a
   - two different CIKs are never merged, except a dual-listed company sharing an ISIN under the identical name (Rio Tinto plc / Ltd).
 - Each group's **master** is its **primary listing** (below): a new group elects it, and an existing group whose master isn't its primary listing is moved to it (`align_masters_to_primary` – e.g. Bank of America from `0Q16`, its LSE order-book line, to `BAC`). The current master wins ties and a listing needs a market cap in the last 90 days to take over, so masters don't swap back and forth; market-cap moves never change a master. Every other member points at it through `ticker.master_ticker_id`. Ids stored under an earlier master (benchmark snapshots, fund holdings) are resolved to the current master when read.
 - A sibling that's no longer tied to its company – by CIK, by ISIN (names agreeing or same domicile), by identical name, or (same domicile) by matching or depositary-receipt names, to the master or any other listing of the group – is unlinked first (e.g. after a profile correction), so it can be regrouped in the same run; a CIK that differs from the master's unlinks unless the company is dual-listed. Chained or circular links are flattened.
-- **Primary listing** – listings are ranked: active ones first (a market cap in the last 30 days, so an old ticker left behind by a ticker change drops out), ordinary shares before preferred, note, depositary, when-issued and unit lines (including Korean preferred codes, which don't end in 0) and before *thin* lines – a line whose average daily turnover (`ticker.average_turnover`, FMP's average volume × price) is under 5% of the company's busiest ordinary line on the same country's exchanges, in the same currency (NYSE, NASDAQ and AMEX together; NSE with BSE; XETRA with Frankfurt; OTC only with OTC). FMP names some units, notes and preferreds exactly like the company and stamps its whole market cap on them – The Southern Company's 2025 corporate units `SOMN`, ANZ's capital notes `AN3PJ` (whose cap FMP computes at the note's price, 2.7× ANZ's), Comcast's exchangeable debentures `CCZ` on NYSE (against its shares, `CMCSA`, on NASDAQ) – so only their turnover gives them away (they trade 0.1–3.5% of the ordinary shares); a thinly traded share class (Carlsberg A, McCormick's voting shares) or venue (BSE against NSE) ranks behind the main one too. Then by market – the domicile country's exchanges (HK counts as home for Chinese companies), then for Dutch and Luxembourg holding companies the other continental exchanges they typically list on (Airbus and Euronext in Paris, Stellantis and Tenaris in Milan, argenx in Brussels), then a US listing (for US-listed, foreign-domiciled companies such as Eaton or Medtronic), then other countries' exchanges, then OTC and LSE's International Order Book – then lines quoted in their exchange's own currency before others (Tencent's HKD line before its RMB counter), then the master. The first is the primary listing.
+- **Primary listing** – listings are ranked: active ones first (a market cap in the last 30 days, so an old ticker left behind by a ticker change drops out), ordinary shares before preferred, note, depositary, when-issued and unit lines (including Korean preferred codes, which don't end in 0, lines FMP reports with no equity float, and FMP names cut after a coupon or series number – "Southern Company (The) Series 2", "KKR Group Finance Co. IX LLC 4.") and before *thin* lines – a line whose average daily turnover (`ticker.average_turnover`, FMP's average volume × price) is under 5% of the company's busiest ordinary line on the same country's exchanges, in the same currency (NYSE, NASDAQ and AMEX together; NSE with BSE; XETRA with Frankfurt; OTC only with OTC). FMP names some units, notes and preferreds exactly like the company and stamps its whole market cap on them – The Southern Company's 2025 corporate units `SOMN`, ANZ's capital notes `AN3PJ` (whose cap FMP computes at the note's price, 2.7× ANZ's), Comcast's exchangeable debentures `CCZ` on NYSE (against its shares, `CMCSA`, on NASDAQ) – so only their turnover gives them away (they trade 0.1–3.5% of the ordinary shares); a thinly traded share class (Carlsberg A, McCormick's voting shares) or venue (BSE against NSE) ranks behind the main one too. Then by market – the domicile country's exchanges (HK counts as home for Chinese companies), then for Dutch and Luxembourg holding companies the other continental exchanges they typically list on (Airbus and Euronext in Paris, Stellantis and Tenaris in Milan, argenx in Brussels), then a US listing (for US-listed, foreign-domiciled companies such as Eaton or Medtronic), then other countries' exchanges, then OTC and LSE's International Order Book – then lines quoted in their exchange's own currency before others (Tencent's HKD line before its RMB counter), then the master. The first is the primary listing.
 - `ticker.company_market_cap` (master only) is the primary listing's latest market cap. FMP reports the **whole company's** market cap on every listing, so listings are never summed. It counts every share class, listed or not, and an Up-C company's LLC units (Carvana: Class A plus the unlisted Class B, ~1.1B shares, where sources quoting the listed class alone count ~0.72B and show a cap about a third lower; Alphabet's unlisted Class B likewise). Best ideas and funds measure a company **as of the holdings date** instead: the first listing in the same ranking with a value near that date, so historical (sim) dates use that date's values.
 - `ticker.region` (every listing) is the company's region: `US` when the primary listing trades on NYSE/NASDAQ/AMEX (or, for a US company, on OTC), else `International`. TSM, ASML, SAP, Shopify, STMicroelectronics and ArcelorMittal are International; Eaton, Medtronic, Linde and ARM (an ADR with no UK listing) are US.
 
@@ -367,6 +370,17 @@ On Sundays (and immediately for any new ticker), the FMP ESG disclosure and ESG 
 A company with no ESG data at all is not qualified. The raw factors are stored alongside the flag. Funds with `esg_only` only pick qualified companies.
 
 ---
+
+### Free float
+
+`modules/ticker/free_float.py::refresh` – weekly, first of the Wednesday steps (before the universe); `scripts/current_float_factors.py` runs it alone and reports on the latest universe (`.output/float_factors_report.md`).
+
+The benchmarks compare what a manager holds with what the market holds, and managers – and the indices they're measured against – hold a company in proportion to its **free float**, not its whole market cap. An Up-C company's unlisted units (Interactive Brokers, Carvana, Blackstone), a founder's or parent's unlisted class, a fresh IPO's locked-up shares (SpaceX, about 12% floated) or a controlling family's stake (Walmart) aren't bought. Weighted by the whole company, SpaceX was 2.7% of the US benchmark while the ETFs held it at a twentieth of that, so every holder looked deeply underweight; broad ETFs held the Up-C companies at their listed class's weight. So:
+
+- **`ticker.free_float`** (every listing) – FMP's free float % (`shares-float-all`). FMP reports **0** for an exchange-traded note or preferred named like its issuer (`AQNB`, `BEPI`, `CCZ`): such a line counts as non-equity (it ranks behind the ordinary shares and is left out of the universe). A 0 on a listing an index fund holds, or on one sharing its ISIN with a listing that is held or has a float (the same shares on another venue), is a data gap and kept empty instead.
+- **`ticker.float_factor`** (every company) – the investable share of its market cap, 0–1, from the holdings of the Vanguard total-market index funds: **VTI** (CRSP US Total Market) and **VXUS** (FTSE Global All Cap ex US), which hold nearly every listed company at its float-adjusted weight. A company's market value in the fund, summed over its share classes (GOOGL + GOOG), is scaled to its float cap and divided by its company market cap; the scale per fund is set so the factors sit on FMP's free-float scale. A company both funds hold is measured by the fund of its region. A company no index fund holds – MLPs, BDCs, US-sanctioned Chinese companies, companies below the index's minimum float (Christian Dior), some US listings of foreign companies – takes its primary listing's FMP free float; with neither it has no factor and counts in full. Examples (September 2026): Microsoft 0.94, Apple 0.89, Alphabet 0.82, Tencent 0.70, Blackstone 0.71, Carvana 0.65, Rocket Companies 0.36, Interactive Brokers 0.25, Symbotic 0.08, SpaceX 0.04, Saudi Aramco 0.03.
+
+The float factor only sets **weights**: the benchmarks' (step 6) and best ideas' `self` mode (step 7). A company's size – the $10B benchmark floor, the funds' large-cap filter and market-cap allocation – still uses its whole market cap. The simulation applies today's factors to every historical Wednesday (floats change slowly). If an index fund's holdings or the free floats can't be downloaded, last week's values stay (logged).
 
 ## Simulation
 
@@ -422,6 +436,7 @@ All scripts are run from the project root with the virtual environment active. C
 | `scripts/current_universe_screener.py` | Registers the FMP large-cap screen's home-market listings and stores the screen for the latest completed trading day (step 3, the Wednesday mode – follow with `current_ticker_values.py` to value it); `--register-only` only registers them (the other days). |
 | `scripts/current_ticker_values.py` | The valuation pass of the ticker maintenance (step 4; [Prices and market caps](#prices-and-market-caps)): every ticker in use, and the lines of a screen stored for the day, valued for the latest completed trading day. |
 | `scripts/data_fill_master_tickers.py` | The master-ticker sync of the ticker maintenance (step 4; [Share-class consolidation](#share-class-consolidation-master-tickers)) – see [Ticker data maintenance](#ticker-data-maintenance). |
+| `scripts/current_float_factors.py` | Refreshes every listing's free float and every company's float factor ([Free float](#free-float)), as the Wednesday cron does before the universe, and reports on the latest universe: companies without a factor, the lowest factors, and the listings found with no equity float. Report: `.output/float_factors_report.md`. |
 | `scripts/current_universe_builder.py` | Builds the large-cap company universe from the latest stored screen (step 5) and lists the duplicates dropped and foreign lines admitted. Run the master sync first. |
 | `scripts/current_benchmark_generator.py` | Forms every enabled benchmark from the latest stored universe (step 6). |
 | `scripts/current_best_ideas.py` | Generates best ideas for all ETFs as of now (step 7) and prints the problems. |
@@ -585,7 +600,7 @@ The authoritative schema is `modules/object/_db_schema.sql` (live) and `modules/
 |-------|----------|
 | `provider`, `provider_etf` | Scraping configuration and ETF metadata |
 | `provider_etf_holding` | Downloaded holdings, one row per line per date |
-| `ticker` | Companies/listings: identifiers, sector, country, style, ESG, invalid reason, master ticker, combined market cap |
+| `ticker` | Companies/listings: identifiers, sector, country, style, ESG, invalid reason, master ticker, company market cap, turnover, verified share count, free float and float factor |
 | `ticker_value` | Daily validated price and market cap (USD) |
 | `categorize_etf`, `categorize_etf_holding`, `categorize_ticker` | Style reference ETFs, their holdings and constituents with factors |
 | `screener_listing` | The weekly FMP large-cap screen: every line with its type, quote and (once registered) ticker |

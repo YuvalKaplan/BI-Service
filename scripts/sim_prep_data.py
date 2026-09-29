@@ -3,7 +3,8 @@ Prepares ticker data needed before a historical simulation, in the live Wednesda
 screens today's FMP large-cap universe (stored, dated at the data cutoff), refreshes stale ticker
 profile data (cik/isin/name/etc., needed for master-ticker grouping), values the tickers in use
 and the screen for that date, groups listings into companies (master tickers) and refreshes
-company_market_cap and region, then builds the large-cap company universe. Follow with
+company_market_cap and region, refreshes free floats and float factors (modules/ticker/free_float.py),
+then builds the large-cap company universe. Follow with
 scripts/sim_benchmark.py (historical benchmark backfill), then sim_fund.py.
 
 Every step is idempotent, so it's safe to re-run this even if the live pipeline has already
@@ -22,7 +23,7 @@ from datetime import datetime
 from modules.object.exit import cleanup
 from modules.cron import universe_screener, universe_builder
 from modules.sim.benchmark_generator import data_cutoff_date
-from modules.ticker import master, refresh, valuation
+from modules.ticker import free_float, master, refresh, valuation
 
 atexit.register(cleanup)
 
@@ -70,6 +71,12 @@ if __name__ == '__main__':
         print(f"\n{groups_report}")
         report_sections.append(groups_report)
 
+        floats = free_float.refresh()
+        print(free_float.summary(floats))
+        report_sections.append("\n".join(
+            ["", "## Free Float", "", free_float.summary(floats)]
+            + _section("Listings with no equity float (notes / preferreds, left out of the universe)", floats.zero_float)))
+
         # require_value=False: the backfill re-fetches every listing's history, so a withheld or
         # failed value on the screen date mustn't drop a company from every historical Wednesday.
         universe = universe_builder.run(screen_date=screen_date, require_value=False)
@@ -77,6 +84,7 @@ if __name__ == '__main__':
         report_sections.append("\n".join(
             ["", "## Large-Cap Universe", "", universe_builder.summary(universe)]
             + _section("Companies dropped by the duplicate guard", universe.duplicate_companies)
+            + _section("Note / preferred lines left out", universe.non_equity)
             + _section("Foreign lines admitted (company found only outside its home market)", universe.foreign_admitted)
             + _section("Foreign lines skipped as duplicates of a company already in", universe.foreign_duplicates)
             + _section("Foreign lines skipped as quoted in another currency (mirrored data)", universe.foreign_currency)

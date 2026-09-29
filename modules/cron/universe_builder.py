@@ -20,6 +20,7 @@ class UniverseRunStats:
     screen_date: date
     home_lines: int = 0
     no_value: list[str] = field(default_factory=list)            # left out: no market cap stored for the screen date
+    non_equity: list[str] = field(default_factory=list)          # left out: a note / preferred line (company.is_non_equity_line)
     foreign_duplicates: list[str] = field(default_factory=list)  # skipped: foreign line of a company already in
     foreign_currency: list[str] = field(default_factory=list)    # skipped: foreign line quoted in another currency
     foreign_admitted: list[str] = field(default_factory=list)    # foreign line admitted (company not found elsewhere)
@@ -32,7 +33,8 @@ def summary(stats: UniverseRunStats) -> str:
     """One line for the cron email."""
     return (
         f"Universe {stats.screen_date}: {stats.us_companies} US and {stats.intl_companies} International companies — "
-        f"{len(stats.no_value)} listings without a validated value (or invalid) left out; skipped "
+        f"{len(stats.no_value)} listings without a validated value (or invalid) and {len(stats.non_equity)} note/preferred "
+        f"lines left out; skipped "
         f"{len(stats.foreign_duplicates)} foreign duplicate and {len(stats.foreign_currency)} other-currency lines; "
         f"admitted {len(stats.foreign_admitted)} foreign lines; dropped {len(stats.duplicate_companies)} duplicate companies"
     )
@@ -51,10 +53,15 @@ def _listing_caps(
     in its grace period all week) the listing is left out when require_value (live: a snapshot
     needs a genuinely validated value); the sim passes False and falls back to the latest stored
     value — it re-fetches each listing's whole history anyway, so one bad data point mustn't
-    throw a company out of every historical Wednesday. A listing flagged invalid is always left out.
+    throw a company out of every historical Wednesday. A listing flagged invalid is always left out,
+    and so is a note or preferred line by its current data (company.is_non_equity_line: FMP reports
+    no equity float for it, or its name is cut after a coupon) — the screener classified it by the
+    screen's name alone, and a company screened only through such a line (Algonquin via its
+    notes AQNB, whose FMP cap is the note's price x the company's shares) isn't a large-cap company.
     """
     ids = [l.ticker_id for l in listings if l.ticker_id]
-    invalid = {t.id: t.invalid for t in ticker.fetch_by_ids(ids) if t.invalid}
+    tickers_by_id = {t.id: t for t in ticker.fetch_by_ids(ids)}
+    invalid = {tid: t.invalid for tid, t in tickers_by_id.items() if t.invalid}
     recent = ticker_value.fetch_market_caps_between(ids, screen_date - timedelta(days=VALUE_WINDOW_DAYS), screen_date)
     latest = {} if require_value else ticker_value.fetch_latest_values(ids)
     out: dict[int, tuple[str, float]] = {}
@@ -63,6 +70,10 @@ def _listing_caps(
             continue
         if l.ticker_id in invalid:
             stats.no_value.append(f"{describe(l)} — invalid: {invalid[l.ticker_id][:80]}")
+            continue
+        t = tickers_by_id.get(l.ticker_id)
+        if t and company.is_non_equity_line(t.symbol, t.name, t.exchange, t.free_float):
+            stats.non_equity.append(f"{describe(l)} — {t.name}" + (" (no equity float)" if t.free_float == 0 else ""))
             continue
         values = recent.get(l.ticker_id)
         cap = values[max(values)] if values else None

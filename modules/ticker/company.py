@@ -50,18 +50,30 @@ _NON_EQUITY_NAME = re.compile(
     r'when[- ]issued|warrants?|rights|units|partizipationsschein|partizipsch|participation|genussschein)\b|%',
     re.IGNORECASE)
 _NON_EQUITY_SYMBOL = re.compile(r'-P[A-Z]?$')  # preferred series, e.g. FITB-PM, ENB-PA
+# FMP cuts some note / preferred names right after a coupon or series number, leaving a bare
+# number behind a legal-form or security word: "TransCanada PipeLines Limited 6" (its 6.50%
+# notes), "KKR Group Finance Co. IX LLC 4.", "Southern Company (The) Series 2", "... PARRS A 2029",
+# "... PFD 1". A company named with a number ("Phillips 66") doesn't have such a word before it.
+_TRUNCATED_COUPON_NAME = re.compile(
+    r'\b(limited|ltd|llc|inc|corp|corporation|company|co|series|nts?|pfd|due|[a-z])\.?\s+\d+(\.\d*)?$', re.IGNORECASE)
 _DEPOSITARY_NAME = re.compile(r'\b(depositary|depository|adrs?|ads|gdrs?|cdrs?|sdrs?|edrs?)\b', re.IGNORECASE)
 
 _KRX_EXCHANGES = {'KSC', 'KOE'}
 
 
-def is_non_equity_line(symbol: str | None, name: str | None, exchange: str | None) -> bool:
+def is_non_equity_line(symbol: str | None, name: str | None, exchange: str | None, free_float: float | None = None) -> bool:
     """Preferred, note/bond, when-issued, warrant/right, unit or participation-certificate line
     rather than the company's ordinary shares. Korean preferred shares carry no marker in their
-    FMP name; by KRX convention they're the codes not ending in 0 (005935 vs common 005930, 02826K)."""
+    FMP name; by KRX convention they're the codes not ending in 0 (005935 vs common 005930, 02826K).
+    FMP names some notes exactly like their issuer (Algonquin's AQNB, Brookfield Renewable's BEPI)
+    but reports no equity float for them: a listing's `free_float` (ticker.free_float) of 0 marks
+    one — the only sign when the issuer's own shares aren't registered to compare turnover with."""
     if exchange in _KRX_EXCHANGES and symbol and not symbol.endswith('0'):
         return True
-    return bool((name and _NON_EQUITY_NAME.search(name)) or (symbol and _NON_EQUITY_SYMBOL.search(symbol)))
+    if free_float == 0:
+        return True
+    return bool((name and (_NON_EQUITY_NAME.search(name) or _TRUNCATED_COUPON_NAME.search(name)))
+                or (symbol and _NON_EQUITY_SYMBOL.search(symbol)))
 
 
 def is_depositary_line(name: str | None) -> bool:
@@ -71,7 +83,7 @@ def is_depositary_line(name: str | None) -> bool:
 
 
 def is_secondary_line(t: Ticker) -> bool:
-    return is_non_equity_line(t.symbol, t.name, t.exchange) or is_depositary_line(t.name)
+    return is_non_equity_line(t.symbol, t.name, t.exchange, t.free_float) or is_depositary_line(t.name)
 
 
 def turnover_group_key(t: Ticker) -> tuple:

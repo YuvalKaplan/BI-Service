@@ -51,6 +51,8 @@ class Ticker:
     company_market_cap: float | None = None
     average_turnover: float | None = None  # FMP profile averageVolume x price, quote currency (major unit)
     verified_shares: float | None = None   # share count (FMP units) FMP's history is repaired to — see refresh.verify_share_count
+    free_float: float | None = None        # FMP freeFloat % of the listing; 0 = no equity float (a note / preferred) — see free_float.refresh
+    float_factor: float | None = None      # company's investable share of its cap, 0-1 (masters); None = 1 — see free_float.refresh
     region: str | None = None
 
 
@@ -623,6 +625,49 @@ def update_average_turnover_bulk(pairs: list[tuple[int, float]]) -> None:
                 )
     except Error as e:
         raise Exception(f"Error bulk-updating average_turnover: {e}")
+
+
+def update_free_float_bulk(pairs: list[tuple[int, float | None]]) -> None:
+    """pairs: [(ticker_id, free_float %), ...] — only rows whose value actually changes are written."""
+    if not pairs:
+        return
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "UPDATE ticker SET free_float = %s WHERE id = %s AND free_float IS DISTINCT FROM %s",
+                    [(v, tid, v) for tid, v in pairs]
+                )
+    except Error as e:
+        raise Exception(f"Error bulk-updating free_float: {e}")
+
+
+def update_float_factor_bulk(pairs: list[tuple[int, float | None]]) -> None:
+    """pairs: [(company ticker_id, float_factor), ...] — only rows whose value actually changes are written."""
+    if not pairs:
+        return
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "UPDATE ticker SET float_factor = %s WHERE id = %s AND float_factor IS DISTINCT FROM %s",
+                    [(v, tid, v) for tid, v in pairs]
+                )
+    except Error as e:
+        raise Exception(f"Error bulk-updating float_factor: {e}")
+
+
+def fetch_float_factors(company_ids: list[int]) -> dict[int, float]:
+    """{company ticker_id: float_factor} for those with one (the rest count as fully floated)."""
+    if not company_ids:
+        return {}
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, float_factor FROM ticker WHERE id = ANY(%s) AND float_factor IS NOT NULL;", (list(company_ids),))
+                return {tid: f for tid, f in cur.fetchall()}
+    except Error as e:
+        raise Exception(f"Error fetching float factors: {e}")
 
 
 def update_verified_shares(ticker_id: int, shares: float | None) -> None:

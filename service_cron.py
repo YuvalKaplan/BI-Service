@@ -6,7 +6,7 @@ from modules.core.db import db_pool_instance, ENVIRONMENT
 from modules.core import sender
 from modules.calc.model_fund import results_to_string
 from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, benchmark_generator, universe_screener, universe_builder
-from modules.ticker import esg, master, refresh, style, valuation
+from modules.ticker import esg, free_float, master, refresh, style, valuation
 
 SEPERATOR_LINE = "-" * 20 + "\n"
 BREAKER_LINE = "=" * 20 + "\n\n"
@@ -106,10 +106,21 @@ if __name__ == '__main__':
 
         if weekday == 2: # Wednesday
             # The generators, after the Tue–Sat steps above (which stored and valued the screen): the
+            # listings' free floats and companies' float factors (the note/preferred lines the
+            # universe leaves out, and the investable share benchmark weights use), then the
             # universe is built from the stored screen and the linked companies, then benchmarks,
             # best ideas, funds — each reading what the previous step stored. A failed step stops
             # the rest: the FMP screener fails after its retries, and an empty universe or
-            # benchmark fails too, so the generators never run on partial data.
+            # benchmark fails too, so the generators never run on partial data. A failed float
+            # download keeps last week's values (logged) rather than stopping the run.
+            try:
+                floats = free_float.refresh()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the free float refresh with error:\n{e}\n\n")
+                raise e
+
+            message_actions += free_float.summary(floats) + "\n"
+
             try:
                 universe = universe_builder.run()
             except Exception as e:

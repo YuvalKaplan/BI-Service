@@ -50,12 +50,22 @@ def select_holdings(
 
 
 def store_holdings(b: Benchmark, items: list[tuple[int, float]], holding_date: date) -> float:
-    """Weights the companies by market cap and stores them as the benchmark's snapshot for
-    holding_date (replacing one already there). Returns the total market cap."""
+    """Weights the companies by float-adjusted market cap — market cap x ticker.float_factor, the
+    investable share managers and their indices hold (modules/ticker/free_float.py; a company
+    without a factor counts in full) — and stores them as the benchmark's snapshot for
+    holding_date (replacing one already there), each with its whole market cap. Returns the total
+    market cap."""
+    factors = ticker.fetch_float_factors([cid for cid, _ in items])
     total = sum(mc for _, mc in items)
-    rows = [(ticker_id, mc, mc / total) for ticker_id, mc in items]
+    investable = {cid: mc * factors.get(cid, 1.0) for cid, mc in items}
+    total_investable = sum(investable.values())
+    if total_investable <= 0:  # no float data at all: plain market-cap weights
+        investable, total_investable = {cid: mc for cid, mc in items}, total
+    rows = [(ticker_id, mc, investable[ticker_id] / total_investable) for ticker_id, mc in items]
     benchmark.insert_holdings(b.id, holding_date, rows)
-    log.record_status(f"  {b.name} (id={b.id}) on {holding_date}: {len(rows)} holdings, total market cap ${total/1e12:.2f}T")
+    log.record_status(
+        f"  {b.name} (id={b.id}) on {holding_date}: {len(rows)} holdings, total market cap ${total/1e12:.2f}T "
+        f"(${total_investable/1e12:.2f}T float-adjusted)")
     return total
 
 
@@ -77,7 +87,7 @@ def run(screen_date: date | None = None) -> BenchmarkRunStats:
     """
     Forms every enabled benchmark in the benchmark table from the stored large-cap universe (the
     latest on or before today by default; built by modules/cron/universe_builder.py) and stores
-    each as a market-cap-weighted benchmark_holding snapshot dated at the universe's screen date.
+    each as a float-adjusted market-cap-weighted benchmark_holding snapshot dated at the universe's screen date.
 
     Raises — so the cron stops before best ideas/funds — when there's no stored universe or any
     benchmark would come out empty (existing snapshots are then left unchanged).

@@ -80,6 +80,39 @@ def get_stock_profile(symbol: str) -> dict[str,str] | str:
         log.record_error(message)
         return message
     
+def get_etf_holdings(symbol: str) -> list[dict]:
+    """A fund's full holdings (asset = FMP symbol, isin, securityCusip, marketValue,
+    weightPercentage, sharesNumber) — [] on failure. Used for the index funds whose weights are
+    float-adjusted caps (modules/ticker/free_float.py)."""
+    try:
+        throttle_api_calls()
+        url = f"{FMP_API_URL}/etf/holdings?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        rows = get_jsonparsed_data(url)
+        return rows if isinstance(rows, list) else []
+    except Exception as e:
+        log.record_notice(f"Failed to get ETF holdings for {symbol}: {e}")
+        return []
+
+SHARES_FLOAT_PAGE_LIMIT = 5000
+
+def get_all_shares_float() -> list[dict]:
+    """FMP's free float for every listing it has (symbol = FMP full symbol, freeFloat %,
+    floatShares, outstandingShares), paged until a short page. Raises when a page fails, so a
+    partial list is never taken for the whole."""
+    out: list[dict] = []
+    page = 0
+    while True:
+        throttle_api_calls()
+        url = (f"{FMP_API_URL}/shares-float-all?page={page}&limit={SHARES_FLOAT_PAGE_LIMIT}"
+               f"&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        rows = get_jsonparsed_data(url)
+        if not isinstance(rows, list):
+            raise Exception(f"Unexpected shares-float-all response on page {page}: {str(rows)[:200]}")
+        out.extend(rows)
+        if len(rows) < SHARES_FLOAT_PAGE_LIMIT:
+            return out
+        page += 1
+
 def get_quarterly_weighted_shares(symbol: str) -> float | None:
     """The weighted-average share count of the latest quarterly income statement (FMP's
     financials — a source independent of its quote and its market-cap history), or None."""

@@ -27,6 +27,7 @@ class EtfInputs:
     market_cap_values: list
     master_info: dict[int, tuple[int | None, float | None]]
     unpriced_ticker_ids: list[int] = field(default_factory=list)
+    float_factors: dict[int, float] = field(default_factory=dict)  # company id -> ticker.float_factor (self mode's weights)
     quarantined: list[QuarantinedHolding] = field(default_factory=list)
     total_holdings: int = 0                        # after aggregation, excluding quarantined
 
@@ -79,6 +80,7 @@ def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = N
         master_info[mid] = (None, cap)
 
     priced_ids = {v.ticker_id for v in market_cap_values}
+    company_ids = {mid or tid for tid, (mid, _cap) in master_info.items()}
     return EtfInputs(
         etf=pe,
         holding_date=holding_date,
@@ -88,6 +90,7 @@ def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = N
         unpriced_ticker_ids=[h.ticker_id for h in holdings if h.ticker_id and h.ticker_id not in priced_ids],
         quarantined=quarantined,
         total_holdings=len(holdings),
+        float_factors=ticker.fetch_float_factors(list(company_ids)),
     )
 
 
@@ -167,9 +170,10 @@ def compute_active_weights(inputs: EtfInputs, benchmark_weights: dict[int, float
         # the lookup key here must already be the effective (master) id.
         grouped["benchmark_weight"] = grouped["ticker_id"].map(benchmark_weights).fillna(0.0)
     else:
-        # self: market-cap weight within the ETF's own holdings, one row per company already.
-        total_market_cap = grouped["market_cap"].sum()
-        grouped["benchmark_weight"] = grouped["market_cap"] / total_market_cap
+        # self: float-adjusted market-cap weight within the ETF's own holdings (company cap x
+        # ticker.float_factor, as the full-universe benchmark is weighted), one row per company.
+        investable = grouped["market_cap"] * grouped["ticker_id"].map(lambda t: inputs.float_factors.get(int(t), 1.0))
+        grouped["benchmark_weight"] = investable / investable.sum()
 
     grouped["delta"] = grouped["etf_weight"] - grouped["benchmark_weight"]
     return grouped
