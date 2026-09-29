@@ -6,10 +6,18 @@ from typing import List, Dict
 from datetime import date
 from collections import deque
 from threading import Lock
+from urllib.parse import quote
 from urllib.request import urlopen
 import json
 
 FMP_API_URL = 'https://financialmodelingprep.com/stable'
+
+
+def _q(value) -> str:
+    """A URL query value, encoded. Symbols can hold '&' (NSE's M&M, J&KBANK; MEX's PE&OLES): left
+    as is it ends the parameter and FMP answers for what comes before it - M&M.NS got Macy's (M)
+    profile, prices and market caps."""
+    return quote(str(value), safe='')
 
 CALLS_PER_MINUTE = 200
 WINDOW_SECONDS = 60.0
@@ -65,7 +73,7 @@ def get_jsonparsed_data(url: str) -> dict:
 def get_stock_profile(symbol: str) -> dict[str,str] | str:
     try:
         throttle_api_calls()
-        url = (f"{FMP_API_URL}/profile?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        url = (f"{FMP_API_URL}/profile?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
         array = get_jsonparsed_data(url)
         
         if not isinstance(array, list) or len(array) == 0:
@@ -86,7 +94,7 @@ def get_etf_holdings(symbol: str) -> list[dict]:
     float-adjusted caps (modules/ticker/free_float.py)."""
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/etf/holdings?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{FMP_API_URL}/etf/holdings?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         rows = get_jsonparsed_data(url)
         return rows if isinstance(rows, list) else []
     except Exception as e:
@@ -99,7 +107,7 @@ def get_etf_info(symbol: str) -> dict | None:
     etf/sector-weightings), or None when FMP has none. Raises when the call fails, so a failure
     isn't taken for a fund FMP doesn't carry."""
     throttle_api_calls()
-    url = f"{FMP_API_URL}/etf/info?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+    url = f"{FMP_API_URL}/etf/info?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
     rows = get_jsonparsed_data(url)
     if not isinstance(rows, list):
         raise Exception(f"Unexpected FMP etf/info response for {symbol}: {str(rows)[:200]}")
@@ -130,7 +138,7 @@ def get_quarterly_weighted_shares(symbol: str) -> float | None:
     financials — a source independent of its quote and its market-cap history), or None."""
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/income-statement?symbol={symbol}&period=quarter&limit=1&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{FMP_API_URL}/income-statement?symbol={_q(symbol)}&period=quarter&limit=1&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         rows = get_jsonparsed_data(url)
         if not isinstance(rows, list) or not rows:
             return None
@@ -143,7 +151,7 @@ def get_quarterly_weighted_shares(symbol: str) -> float | None:
 def search_by_isin(isin: str) -> dict | None:
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/search-isin?isin={isin}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{FMP_API_URL}/search-isin?isin={_q(isin)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         result = get_jsonparsed_data(url)
         if not isinstance(result, list) or len(result) == 0:
             return None
@@ -155,7 +163,7 @@ def search_by_isin(isin: str) -> dict | None:
 def search_by_symbol(query: str) -> list[dict]:
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/search-symbol?query={query}&limit=1000&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{FMP_API_URL}/search-symbol?query={_q(query)}&limit=1000&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         result = get_jsonparsed_data(url)
         if not isinstance(result, list):
             return []
@@ -167,7 +175,7 @@ def search_by_symbol(query: str) -> list[dict]:
 def search_by_name(query: str) -> list[dict]:
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/search-name?query={query}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{FMP_API_URL}/search-name?query={_q(query)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         result = get_jsonparsed_data(url)
         if not isinstance(result, list):
             return []
@@ -191,7 +199,7 @@ def fetch_available_exchanges() -> list[dict]:
 def get_symbol_historic_prices(symbol: str, start: date, end: date) -> list[dict[str,str]] | str:
     try:
         throttle_api_calls()
-        url = (f"{FMP_API_URL}/historical-price-eod/light?symbol={symbol}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        url = (f"{FMP_API_URL}/historical-price-eod/light?symbol={_q(symbol)}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
         array = get_jsonparsed_data(url)
         
         if not isinstance(array, list) or len(array) == 0:
@@ -209,7 +217,7 @@ def get_symbol_historic_prices(symbol: str, start: date, end: date) -> list[dict
 def get_stock_historic_dividend(symbol: str) -> list[dict[str,str]] | str:
     try:
         throttle_api_calls()
-        url = (f"{FMP_API_URL}/dividends?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        url = (f"{FMP_API_URL}/dividends?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
         array = get_jsonparsed_data(url)
         
         if not isinstance(array, list):
@@ -227,7 +235,7 @@ def get_stock_historic_dividend(symbol: str) -> list[dict[str,str]] | str:
 def get_stock_historic_splits(symbol: str) -> list[dict[str,str]] | str:
     try:
         throttle_api_calls()
-        url = (f"{FMP_API_URL}/splits?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        url = (f"{FMP_API_URL}/splits?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
         array = get_jsonparsed_data(url)
         
         if not isinstance(array, list):
@@ -245,7 +253,7 @@ def get_stock_historic_splits(symbol: str) -> list[dict[str,str]] | str:
 def get_stock_historic_market_cap(symbol: str, start: date, end: date) -> list[dict[str,str]] | str:
     try:
         throttle_api_calls()
-        url = (f"{FMP_API_URL}/historical-market-capitalization?symbol={symbol}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        url = (f"{FMP_API_URL}/historical-market-capitalization?symbol={_q(symbol)}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
         array = get_jsonparsed_data(url)
         
         if not isinstance(array, list) or len(array) == 0:
@@ -283,7 +291,7 @@ def get_fx_rate(from_currency: str, to_currency: str = 'USD') -> float | str:
     symbol = f"{from_currency}{to_currency}"
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/quote-short?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{FMP_API_URL}/quote-short?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         array = get_jsonparsed_data(url)
         if not isinstance(array, list) or len(array) == 0:
             message = f"Invalid FX rate response for '{symbol}': empty result"
@@ -307,12 +315,12 @@ def fetch_company_factors(symbol: str) -> tuple[Dict, Dict]:
 
     try:
         endpoints = {
-            "profile": f"{FMP_API_URL}/profile?symbol={symbol}&apikey={apikey}",
-            "growth": f"{FMP_API_URL}/financial-growth?symbol={symbol}&apikey={apikey}",
-            "ratios": f"{FMP_API_URL}/ratios-ttm?symbol={symbol}&apikey={apikey}",
-            "metrics": f"{FMP_API_URL}/key-metrics-ttm?symbol={symbol}&apikey={apikey}",
-            "income": f"{FMP_API_URL}/income-statement?symbol={symbol}&limit=1&apikey={apikey}",
-            "cashflow": f"{FMP_API_URL}/cash-flow-statement?symbol={symbol}&limit=1&apikey={apikey}",
+            "profile": f"{FMP_API_URL}/profile?symbol={_q(symbol)}&apikey={apikey}",
+            "growth": f"{FMP_API_URL}/financial-growth?symbol={_q(symbol)}&apikey={apikey}",
+            "ratios": f"{FMP_API_URL}/ratios-ttm?symbol={_q(symbol)}&apikey={apikey}",
+            "metrics": f"{FMP_API_URL}/key-metrics-ttm?symbol={_q(symbol)}&apikey={apikey}",
+            "income": f"{FMP_API_URL}/income-statement?symbol={_q(symbol)}&limit=1&apikey={apikey}",
+            "cashflow": f"{FMP_API_URL}/cash-flow-statement?symbol={_q(symbol)}&limit=1&apikey={apikey}",
         }
 
         results = {}
@@ -409,8 +417,8 @@ def fetch_esg_data(symbol: str) -> tuple[Dict, Dict]:
 
     try:
         endpoints = {
-            "disclosure": f"{FMP_API_URL}/esg-disclosures?symbol={symbol}&apikey={apikey}",
-            "rating":     f"{FMP_API_URL}/esg-ratings?symbol={symbol}&apikey={apikey}",
+            "disclosure": f"{FMP_API_URL}/esg-disclosures?symbol={_q(symbol)}&apikey={apikey}",
+            "rating":     f"{FMP_API_URL}/esg-ratings?symbol={_q(symbol)}&apikey={apikey}",
         }
         results = {}
         with ThreadPoolExecutor(max_workers=2) as executor:

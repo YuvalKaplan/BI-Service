@@ -136,7 +136,7 @@ Both the company builder (feeding `benchmark_holding`) and `best_ideas_generator
 | Path | Purpose |
 |------|---------|
 | `modules/core/db.py` | `DatabasePoolSingleton` — connection pools for live and BT DBs |
-| `modules/core/api_stocks.py` | FinancialModelingPrep API client with token-bucket rate limiting (200 req/min) |
+| `modules/core/api_stocks.py` | FinancialModelingPrep API client with token-bucket rate limiting (200 req/min). Query values go through `_q` (URL-encoded): an unencoded `&` (NSE's `M&M.NS`) made FMP answer for `M` (Macy's) — `scripts/data_fix_symbol_encoding.py` repaired the tickers that got another company's data |
 | `modules/core/sender.py` | Admin email notifications via Mailgun |
 | `modules/cron/best_ideas_generator.py` | Core algorithm: active weight = ETF% − benchmark weight (`prepare_etf_inputs` → `compute_active_weights` → `select_best_ideas`) |
 | `modules/calc/classification.py` | Scikit-learn GradientBoosting value/growth classifier — used by live (`etf_downloader`) and BT |
