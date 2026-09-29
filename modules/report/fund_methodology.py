@@ -15,7 +15,6 @@ import json
 from datetime import date, timedelta
 import pandas as pd
 from openpyxl.utils import get_column_letter
-from modules.const import LARGE_CAP_THRESHOLD
 from modules.calc import model_fund
 from modules.cron import best_ideas_generator as big
 from modules.cron import funds_update
@@ -24,8 +23,14 @@ from modules.object import (
     provider, provider_etf, ticker,
 )
 from modules.object.provider_etf_holding import DUP_PRICE_TOLERANCE, aggregate_holdings, fetch_latest_holdings_for_etf, implied_price
+from modules.ticker import index_funds
 
 OUTPUT_ROOT = os.path.join('.output', 'methodology')
+
+
+def _num(value) -> float | None:
+    """A DataFrame cell as a float, or None for a missing (NaN) one."""
+    return None if value is None or pd.isna(value) else float(value)
 
 PCT = '0.00%'
 MONEY = '#,##0'
@@ -263,7 +268,9 @@ def _write_benchmark_file(ctx: _Context, out_dir: str) -> str:
                 etfs = ", ".join(ctx.etf_label(a) for a in sorted({a.provider_etf_id for a in ctx.analysis if a.benchmark_id == bm_id}))
                 _write_sheet(w, _sheet_name(bm.name, used), df, {'Market cap': MONEY, 'Weight': PCT}, [
                     ('Benchmark', f"{bm.name} ({bm.id})"), ('Region', bm.region), ('Snapshot date', bm_date),
-                    ('Universe', f"{bm.cap_type} {bm.style_type}, USD market cap >= {bm.market_cap_min:,}, market-cap weighted, one row per company (its primary listing's cap), region by primary listing"),
+                    ('Universe', f"{bm.cap_type} {bm.style_type}, USD company cap >= {index_funds.cutoff(bm.region, bm.market_coverage, bm_date):,.0f} "
+                                 f"(its market's float-cap breakpoint at {bm.market_coverage:.0%} coverage, from the index funds) with at least "
+                                 f"{index_funds.MIN_FLOAT_FACTOR:.0%} floating, market-cap weighted, one row per company (its primary listing's cap), region by primary listing"),
                     ('Constituents', len(df)), ('Used for ETFs', etfs),
                 ])
         else:
@@ -334,7 +341,7 @@ def _write_best_ideas_file(ctx: _Context, out_dir: str) -> str:
         'Delta': r['delta'],
         'Style': r['style_type'],
         'Market cap': r['market_cap'],
-        'Large cap': 'Y' if pd.notna(r['market_cap']) and r['market_cap'] >= LARGE_CAP_THRESHOLD else 'N',
+        'Large cap': 'Y' if index_funds.passes_large(_num(r['market_cap']), _num(r.get('float_factor')), _num(r.get('large_cap_min'))) else 'N',
         'Country': r['country'],
         'Region': r['region'],
         'Exchange': r['exchange'],
@@ -464,7 +471,10 @@ def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
         "## Constants",
         "",
         f"- Best ideas per ETF: {big.MAX_BEST_IDEAS_PER_FUND}; delta limit: {big.HOLDING_DELTA_LIMIT_DROP_OFF:.0%}",
-        f"- Large-cap threshold: {LARGE_CAP_THRESHOLD:,}",
+        "- Large-cap cutoffs (whole company cap, with at least "
+        f"{index_funds.MIN_FLOAT_FACTOR:.0%} floating; each region's full-universe benchmark coverage of its market's float cap, per the index funds): "
+        + ", ".join(f"{region} ${cut:,.0f} ({index_funds.full_universe_coverage()[region]:.0%})"
+                    for region, cut in index_funds.large_cutoffs(ctx.as_of_date).items()),
         f"- Duplicate-line price tolerance: {DUP_PRICE_TOLERANCE}",
         f"- Market-cap weighting: alpha {model_fund.MC_WEIGHT_ALPHA}, cap {model_fund.MC_WEIGHT_CAP:.0%}, floor {model_fund.MC_WEIGHT_FLOOR:.0%}",
         "",

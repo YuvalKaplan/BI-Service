@@ -1,10 +1,10 @@
 import log
 from dataclasses import dataclass, field
 from datetime import date
-from modules.const import LARGE_CAP_THRESHOLD
 from modules.object import batch_run, benchmark, ticker, universe_company
 from modules.object.benchmark import Benchmark
 from modules.object.universe_company import UniverseCompany
+from modules.ticker import index_funds
 
 NO_STYLE_FILTER = ('blend', 'core')
 
@@ -27,22 +27,37 @@ def company_styles(company_ids: list[int], benchmarks: list[Benchmark]) -> dict[
     return {t.id: t.style_type for t in ticker.fetch_by_ids(company_ids)}
 
 
+def company_float_factors(company_ids: list[int]) -> dict[int, float | None]:
+    """{company_id: float_factor} — the float share benchmark membership requires a minimum of."""
+    return {t.id: t.float_factor for t in ticker.fetch_by_ids(company_ids)}
+
+
+def benchmark_cutoffs(benchmarks: list[Benchmark], as_of: date) -> dict[int, float]:
+    """{benchmark_id: large-cap cutoff} as of the date: its market's breakpoint at its
+    market_coverage (index_funds.cutoff)."""
+    return {b.id: index_funds.cutoff(b.region, b.market_coverage, as_of) for b in benchmarks}
+
+
 def select_holdings(
     companies: list[tuple[int, str, float]],  # (company_ticker_id, region, market_cap)
     benchmarks: list[Benchmark],
+    cutoffs: dict[int, float],                # benchmark_id -> large-cap cutoff (benchmark_cutoffs)
+    float_factors: dict[int, float | None],   # company_ticker_id -> float_factor
     styles: dict[int, str | None] | None = None,
 ) -> dict[int, list[tuple[int, float]]]:
     """
     {benchmark_id: [(company_ticker_id, market_cap)]}: the companies each benchmark row
-    specifies — its region, a company market cap of at least its market_cap_min (USD), and its
-    style_type ('blend'/'core': any style; 'value'/'growth': the company's ticker.style_type).
+    specifies — its region; a whole company cap at its market's breakpoint for its
+    market_coverage and at least index_funds.MIN_FLOAT_FACTOR floating (index_funds.passes_large —
+    the S&P / Russell way); and its style_type ('blend'/'core': any style; 'value'/'growth': the
+    company's ticker.style_type).
     """
     if styles is None:
         styles = company_styles([cid for cid, _r, _mc in companies], benchmarks)
     return {
         b.id: [
             (cid, mc) for cid, region, mc in companies
-            if region == b.region and mc >= b.market_cap_min
+            if region == b.region and index_funds.passes_large(mc, float_factors.get(cid), cutoffs[b.id])
             and (b.style_type in NO_STYLE_FILTER or styles.get(cid) == b.style_type)
         ]
         for b in benchmarks
@@ -62,14 +77,15 @@ def store_holdings(b: Benchmark, items: list[tuple[int, float]], holding_date: d
 @dataclass
 class BenchmarkRunStats:
     holding_date: date
-    benchmarks: list[tuple[str, int, float]] = field(default_factory=list)  # (name, companies, total market cap)
+    benchmarks: list[tuple[str, int, float, float, float]] = field(default_factory=list)  # (name, companies, total market cap, coverage, cutoff)
 
 
 def summary(stats: BenchmarkRunStats) -> str:
     """One line per benchmark for the cron email."""
     return "\n".join(
-        f"{name} {stats.holding_date}: {count} companies, total market cap ${total / 1e12:.2f}T"
-        for name, count, total in stats.benchmarks
+        f"{name} {stats.holding_date}: {count} companies (cutoff ${cut / 1e9:,.1f}B at {coverage:.0%} of its market), "
+        f"total market cap ${total / 1e12:.2f}T"
+        for name, count, total, coverage, cut in stats.benchmarks
     )
 
 
@@ -92,14 +108,10 @@ def run(screen_date: date | None = None) -> BenchmarkRunStats:
         benchmarks = benchmark.fetch_all()
         if not benchmarks:
             raise Exception("No enabled benchmarks in the benchmark table.")
-        for b in benchmarks:
-            if b.market_cap_min < LARGE_CAP_THRESHOLD:
-                log.record_notice(
-                    f"{b.name}: market_cap_min ${b.market_cap_min / 1e9:,.1f}B is below the screened universe's "
-                    f"${LARGE_CAP_THRESHOLD / 1e9:,.0f}B — it will miss smaller companies."
-                )
+        cutoffs = benchmark_cutoffs(benchmarks, screen_date)
+        float_factors = company_float_factors([cid for cid, _r, _mc in companies])
 
-        selected = select_holdings(companies, benchmarks)
+        selected = select_holdings(companies, benchmarks, cutoffs, float_factors)
         empty = [b.name for b in benchmarks if not selected[b.id]]
         if empty:
             raise Exception(
@@ -110,7 +122,7 @@ def run(screen_date: date | None = None) -> BenchmarkRunStats:
         stats = BenchmarkRunStats(holding_date=screen_date)
         for b in benchmarks:
             total = store_holdings(b, selected[b.id], screen_date)
-            stats.benchmarks.append((b.name, len(selected[b.id]), total))
+            stats.benchmarks.append((b.name, len(selected[b.id]), total, b.market_coverage, cutoffs[b.id]))
 
         batch_run.update_completed_at(batch_run_id)
         log.record_status("Benchmark Generator completed.\n")

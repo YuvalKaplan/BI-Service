@@ -4,7 +4,8 @@ from modules.object import batch_run, benchmark, ticker, ticker_value, screener_
 from modules.object.screener_listing import ScreenerListing
 from modules.ticker import company, pricing
 from modules.ticker import util as tu
-from modules.cron.benchmark_generator import current_companies, company_styles, select_holdings, store_holdings
+from modules.cron.benchmark_generator import (benchmark_cutoffs, company_float_factors, current_companies, company_styles,
+                                              select_holdings, store_holdings)
 
 WINDOW_DAYS = 5    # how far from a Wednesday to search for the closest available market cap
 DATA_LAG_DAYS = 3  # FMP's historical price/market-cap endpoints don't have data yet for the most recent days
@@ -46,8 +47,8 @@ def _company_caps_for_date(
     One (company_id, region, market_cap) row per company for a single historical date. FMP
     reports the whole company's cap on every listing, so listings are never summed: the cap is
     the primary listing's value closest to that date, falling back to the next listing (in
-    primary order) with data. Each benchmark's market_cap_min is applied per date by
-    select_holdings.
+    primary order) with data. Each benchmark's cutoff for the date (its market's breakpoint at its
+    market_coverage) is applied by select_holdings.
     """
     rows: list[tuple[int, str, float]] = []
     for cid, listing_ids in listing_order.items():
@@ -113,7 +114,7 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
         # the live path's fetch (pricing.fetch_price_and_market_cap_history): USD at each date's
         # own historical FX rate, and FMP glitches repaired from the price or dropped
         # (pricing.clean_market_caps: Compass at 1/100 for two weeks would otherwise fall out of
-        # the $10B benchmark on those dates), with history from before inception as context and
+        # the benchmark on those dates), with history from before inception as context and
         # the screener quote's share count as the reference.
         listing_ids = [l.ticker_id for ms in members.values() for l in ms if l.ticker_id in tickers_by_id]
         stored = ticker_value.fetch_market_caps_between(
@@ -161,12 +162,15 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
 
         benchmarks = benchmark.fetch_all()
         styles = company_styles(list(listing_order), benchmarks)
+        float_factors = company_float_factors(list(listing_order))  # today's: no history of them is kept
         log.record_status(f"Backfilling {len(wednesdays)} historical Wednesdays from {inception_date} to {cutoff}.")
 
         benchmarks_created: list[tuple[str, date, int]] = []
         for wednesday in wednesdays:
             rows = _company_caps_for_date(wednesday, history, listing_order, region_lookup)
-            selected = select_holdings(rows, benchmarks, styles)
+            # The breakpoints of the index funds' snapshot on or before the Wednesday - the earliest
+            # stored one for a Wednesday before snapshots were kept.
+            selected = select_holdings(rows, benchmarks, benchmark_cutoffs(benchmarks, wednesday), float_factors, styles)
             for b in benchmarks:
                 if selected[b.id]:
                     store_holdings(b, selected[b.id], wednesday)

@@ -9,19 +9,21 @@ Weekly (refresh):
      an exchange-traded note or preferred named like its issuer (Algonquin's AQNB, Brookfield
      Renewable's BEPI): company.is_non_equity_line treats such a listing as non-equity. A listing
      an index fund holds is equity whatever FMP says, and keeps no value instead of 0.
-  2. ticker.float_factor (company level) — from the index funds' float-adjusted holdings
-     (INDEX_FUNDS): a company's market value in the fund, summed over its share classes
+  2. ticker.float_factor (company level) — from the index funds' float-adjusted holdings (the
+     stored snapshot of universe_etf: VTI, VEA, VWO — modules/ticker/index_funds.py, downloaded
+     before this step): a company's market value in the fund, summed over its share classes
      (GOOGL + GOOG), scaled to its float cap, over its company cap. The scale per fund is set so
      the factors sit on FMP's free-float scale (median over held companies of free float x cap /
      market value). A company no index fund holds — MLPs, BDCs, US-sanctioned Chinese companies,
      companies below the index's minimum float (Christian Dior), some US listings of foreign
      companies — takes its primary listing's free float; with neither it has no factor.
-     Information only: weights don't use it.
-  3. Cap check — an index fund can't hold more of a company than the whole company: for one
-     worth LARGE_CAP_THRESHOLD or more, a float cap CAP_CHECK_FACTOR x its company cap or more
-     means the company cap is on too few shares (Bitmine's history ran on 230M shares against
-     570M). Flagged in FloatRunStats.cap_checks (cron email, scripts/current_float_factors.py);
-     nothing is changed automatically. (A cap on too many shares — Rocket Companies' 3.79B
+     Benchmark membership and the funds' large-cap filter require a factor of at least
+     index_funds.MIN_FLOAT_FACTOR; weights don't use it.
+  3. Cap check — an index fund can't hold more of a company than the whole company: for one at
+     or above its region's large-cap cutoff (index_funds.large_cutoffs), a float cap
+     CAP_CHECK_FACTOR x its company cap or more means the company cap is on too few shares
+     (Bitmine's history ran on 230M shares against 570M). Flagged in FloatRunStats.cap_checks
+     (cron email, scripts/current_float_factors.py); nothing is changed automatically. (A cap on too many shares — Rocket Companies' 3.79B
      against 2.82B — is refresh.verify_share_count's case: FMP's quote and financials against
      its history.)
 """
@@ -31,18 +33,13 @@ import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from modules.const import LARGE_CAP_THRESHOLD
 from modules.core import api_stocks
 from modules.object import ticker, ticker_value
 from modules.object.ticker import Ticker
-from modules.ticker import company, master, pricing, refresh as profile_refresh
+from modules.ticker import company, index_funds, master, pricing, refresh as profile_refresh
 from modules.ticker import util as tu
 from modules.ticker.resolver import TickerResolver
 
-# Vanguard Total Stock Market (CRSP US Total Market) and Total International Stock (FTSE Global
-# All Cap ex US): together nearly every listed company, each held at its float-adjusted weight.
-INDEX_FUNDS = ('VTI', 'VXUS')
-US_FUND = 'VTI'  # a company both hold is measured by the fund of its region
 CAP_CHECK_FACTOR = 1.15  # an index float cap this many times the company cap flags the cap as too low
                          # (fully floated companies sit at 0.97-1.01 — see _value_holdings)
 VALUE_LOOKBACK_DAYS = 14  # stored prices and caps a holding is valued from
@@ -70,17 +67,6 @@ def summary(stats: FloatRunStats) -> str:
         f"index funds: {funds or 'none'}; company float factors by source: {sources or 'not updated'}; "
         f"{len(stats.cap_checks)} large-cap market cap(s) below the index funds' float cap, {len(stats.cap_fixes)} fixed"
     )
-
-
-def _index(valid: list[Ticker], full_symbol: dict[int, str]) -> tuple[dict, dict, dict]:
-    by_sym, by_isin, by_cusip = defaultdict(set), defaultdict(set), defaultdict(set)
-    for t in valid:
-        by_sym[full_symbol[t.id]].add(t.id)
-        if t.isin:
-            by_isin[t.isin].add(t.id)
-        if t.cusip:
-            by_cusip[t.cusip].add(t.id)
-    return by_sym, by_isin, by_cusip
 
 
 def _value_holdings(fund_lines: dict[str, dict[int, list[tuple[int, float, float]]]],
@@ -182,14 +168,21 @@ def refresh() -> FloatRunStats:
     resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
     full_symbol = {t.id: resolver.get_full_symbol(t) for t in valid}
     company_of = {t.id: company.company_id(t, by_id) for t in valid}
-    by_sym, by_isin, by_cusip = _index(valid, full_symbol)
+    by_sym, by_isin, by_cusip = company.listing_index(valid, full_symbol)
 
-    # 1. Index funds: each company's holding lines (the listing, the fund's shares, their value),
-    #    and which listings they hold.
+    # 1. Index funds (their stored snapshot - index_funds.refresh, before this step on Wednesdays):
+    #    each company's holding lines (the listing, the fund's shares, their value), and which
+    #    listings they hold.
+    try:
+        funds = index_funds.snapshot()
+        cutoffs = index_funds.large_cutoffs()
+    except Exception as e:
+        log.record_notice(f"Free float: index funds unavailable ({e}) — float factors left as they were.")
+        funds, cutoffs = {}, {}
+    us_funds = [f for f, (market, _rows) in funds.items() if market == index_funds.US]
     held_listings: set[int] = set()
     fund_lines: dict[str, dict[int, list[tuple[int, float, float]]]] = {}
-    for fund in INDEX_FUNDS:
-        rows = api_stocks.get_etf_holdings(fund)
+    for fund, (_market, rows) in funds.items():
         if not rows:
             log.record_notice(f"Free float: no holdings for index fund {fund} — float factors left as they were.")
             continue
@@ -206,7 +199,8 @@ def refresh() -> FloatRunStats:
             held_listings |= listings
             cid = next(iter(companies))
             listing = next(iter(by_symbol)) if by_symbol else (cid if cid in listings else min(listings))
-            lines[cid].append((listing, r.get('sharesNumber') or 0.0, r['marketValue']))
+            inc = index_funds.inclusion(r)  # China A shares are held at a fraction of their float
+            lines[cid].append((listing, (r.get('sharesNumber') or 0.0) / inc, r['marketValue'] / inc))
         fund_lines[fund] = lines
         stats.index_holdings[fund] = (len(rows), matched)
 
@@ -238,7 +232,7 @@ def refresh() -> FloatRunStats:
                                   for tid, v in free.items() if v == 0)
 
     # 3. Float factor per company.
-    if len(fund_lines) < len(INDEX_FUNDS):
+    if not funds or len(fund_lines) < len(funds):
         return stats  # a fund is missing: keep last week's factors rather than mix sources
     members: dict[int, list[Ticker]] = defaultdict(list)
     for t in valid:
@@ -264,17 +258,15 @@ def refresh() -> FloatRunStats:
     flagged: list[int] = []
     for cid in members:
         cap = caps.get(cid)
-        held_in = [f for f in INDEX_FUNDS if cid in fund_value[f] and stats.scale.get(f)]
+        held_in = [f for f in funds if cid in fund_value[f] and stats.scale.get(f)]
         if held_in and cap:
-            if len(held_in) > 1:
-                region_fund = US_FUND if by_id[cid].region == company.US else next(f for f in held_in if f != US_FUND)
-                fund = region_fund if region_fund in held_in else held_in[0]
-            else:
-                fund = held_in[0]
+            # A company more than one fund holds is measured by the fund of its region.
+            in_region = [f for f in held_in if (f in us_funds) == (by_id[cid].region == company.US)]
+            fund = (in_region or held_in)[0]
             float_cap = stats.scale[fund] * fund_value[fund][cid]
             factor = float_cap / cap  # above 1: the index holds more than our whole cap (see the cap check)
             sources[fund] += 1
-            if cap >= LARGE_CAP_THRESHOLD and float_cap >= CAP_CHECK_FACTOR * cap:
+            if index_funds.passes_large(cap, None, cutoffs.get(by_id[cid].region)) and float_cap >= CAP_CHECK_FACTOR * cap:
                 t = by_id[cid]
                 flagged.append(cid)
                 checks.append((float_cap / cap,

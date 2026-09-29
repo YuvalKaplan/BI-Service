@@ -93,6 +93,18 @@ def get_etf_holdings(symbol: str) -> list[dict]:
         log.record_notice(f"Failed to get ETF holdings for {symbol}: {e}")
         return []
 
+def get_etf_info(symbol: str) -> dict | None:
+    """A fund's FMP profile (assetClass, etfCompany, description, website, assetsUnderManagement,
+    nav, navCurrency, expenseRatio, inceptionDate, isin, sectorsList - the same weights as
+    etf/sector-weightings), or None when FMP has none. Raises when the call fails, so a failure
+    isn't taken for a fund FMP doesn't carry."""
+    throttle_api_calls()
+    url = f"{FMP_API_URL}/etf/info?symbol={symbol}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+    rows = get_jsonparsed_data(url)
+    if not isinstance(rows, list):
+        raise Exception(f"Unexpected FMP etf/info response for {symbol}: {str(rows)[:200]}")
+    return rows[0] if rows else None
+
 SHARES_FLOAT_PAGE_LIMIT = 5000
 
 def get_all_shares_float() -> list[dict]:

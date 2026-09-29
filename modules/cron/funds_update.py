@@ -6,7 +6,7 @@ from modules.object import batch_run
 from modules.object import best_idea, fund, fund_analysis, fund_holding, fund_holding_change, provider_etf, ticker
 from modules.calc import model_fund
 from modules.cron import best_ideas_generator
-from modules.ticker import company
+from modules.ticker import company, index_funds
 
 COMPANY_CAP_WINDOW_DAYS = 10  # matches best_idea.fetch_all_as_df's market-cap lookback
 
@@ -31,6 +31,16 @@ def build_shared_context(as_of_date: date) -> tuple[pd.DataFrame, dict]:
             all_best_ideas_df['market_cap'] = [
                 company_caps.get(int(t), mc) for t, mc in zip(all_best_ideas_df['ticker_id'], all_best_ideas_df['market_cap'])
             ]
+
+    # The large-cap line (model_fund._eligibility_masks): the company's whole cap against its
+    # region's full-universe benchmark cutoff as of the date (index_funds.large_cutoffs), with at
+    # least index_funds.MIN_FLOAT_FACTOR of it floating - the same rule as the benchmark's.
+    cutoffs = index_funds.large_cutoffs(as_of_date)
+    all_best_ideas_df['large_cap_min'] = all_best_ideas_df['region'].map(cutoffs) if not all_best_ideas_df.empty else []
+    company_ids = [int(c) for c in all_best_ideas_df['canonical_ticker_id'].dropna().unique()] if not all_best_ideas_df.empty else []
+    factors = {t.id: t.float_factor for t in ticker.fetch_by_ids(company_ids)} if company_ids else {}
+    all_best_ideas_df['float_factor'] = [factors.get(int(c)) if pd.notna(c) else None
+                                         for c in all_best_ideas_df['canonical_ticker_id']] if not all_best_ideas_df.empty else []
 
     canonical_rows = all_best_ideas_df[
         all_best_ideas_df['ticker_id'] == all_best_ideas_df['canonical_ticker_id']

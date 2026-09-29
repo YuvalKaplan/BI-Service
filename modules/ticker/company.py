@@ -24,6 +24,7 @@ A company's cap on a given date is the first listing in that order with a value 
 (cap_near_date); company_market_cap is the same rule applied to each listing's latest value.
 """
 import re
+from collections import defaultdict
 from collections.abc import Container
 from datetime import date, timedelta
 from modules.object import ticker as ticker_obj
@@ -134,6 +135,19 @@ def company_id(t: Ticker, known_ids: Container[int]) -> int:
     or the master isn't among known_ids (e.g. an invalid master filtered out)."""
     mid = t.master_ticker_id
     return mid if mid is not None and mid in known_ids else t.id
+
+
+def listing_index(listings: list[Ticker], full_symbol: dict[int, str]) -> tuple[dict, dict, dict]:
+    """Listing ids by FMP full symbol, ISIN and CUSIP - how an FMP fund holding line (asset,
+    isin, securityCusip) is matched to our listings, in that order."""
+    by_sym, by_isin, by_cusip = defaultdict(set), defaultdict(set), defaultdict(set)
+    for t in listings:
+        by_sym[full_symbol[t.id]].add(t.id)
+        if t.isin:
+            by_isin[t.isin].add(t.id)
+        if t.cusip:
+            by_cusip[t.cusip].add(t.id)
+    return by_sym, by_isin, by_cusip
 
 
 def ordered_listings(

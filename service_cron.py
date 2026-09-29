@@ -6,7 +6,8 @@ from modules.core.db import db_pool_instance, ENVIRONMENT
 from modules.core import sender
 from modules.calc.model_fund import results_to_string
 from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, benchmark_generator, universe_screener, universe_builder
-from modules.ticker import esg, free_float, master, refresh, style, valuation
+from modules.ticker import esg, free_float, index_funds, master, refresh, style, valuation
+from modules.sec import etf_profile, ncen
 
 SEPERATOR_LINE = "-" * 20 + "\n"
 BREAKER_LINE = "=" * 20 + "\n\n"
@@ -85,7 +86,7 @@ if __name__ == '__main__':
 
             message_actions += BREAKER_LINE
 
-        if weekday == 6:  # Sunday — ticker maintenance, Sunday part: style reference data, then ESG
+        if weekday == 6:  # Sunday — ticker maintenance, Sunday part: style reference data, then ESG; then the SEC active ETF list
             try:
                 total_etfs = categorize_downloader.run()
             except Exception as e:
@@ -104,6 +105,27 @@ if __name__ == '__main__':
             message_actions += f"ESG tickers refreshed: {total_esg}\n"
             message_actions += BREAKER_LINE
 
+            # The week's new Form N-CEN filings on EDGAR -> the list of actively managed ETFs.
+            # Nothing else reads it, so it runs last.
+            try:
+                ncen_stats = ncen.run()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the SEC active ETF list (N-CEN) with error:\n{e}\n\n")
+                raise e
+
+            message_actions += ncen.summary(ncen_stats) + "\n"
+
+            # Then the listed funds' FMP profiles: the actively managed equity ones go to the test
+            # provider tables (disabled until approved), sized against the index funds' snapshot.
+            try:
+                profile_stats = etf_profile.run()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the SEC ETF profiles (FMP) with error:\n{e}\n\n")
+                raise e
+
+            message_actions += etf_profile.summary(profile_stats) + "\n"
+            message_actions += BREAKER_LINE
+
         if weekday == 2: # Wednesday
             # The generators, after the Tue–Sat steps above (which stored and valued the screen): the
             # listings' free floats and companies' float factors (the note/preferred lines the
@@ -113,6 +135,16 @@ if __name__ == '__main__':
             # the rest: the FMP screener fails after its retries, and an empty universe or
             # benchmark fails too, so the generators never run on partial data. A failed float
             # download keeps last week's values (logged) rather than stopping the run.
+            # First the index funds (VTI, VEA, VWO): their holdings snapshot and the market's size
+            # breakpoints - the float factors, benchmark cutoffs and funds' large-cap line use them.
+            try:
+                index_stats = index_funds.refresh()
+            except Exception as e:
+                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the index funds download with error:\n{e}\n\n")
+                raise e
+
+            message_actions += index_funds.summary(index_stats) + "\n"
+
             try:
                 floats = free_float.refresh()
             except Exception as e:

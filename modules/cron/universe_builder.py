@@ -241,7 +241,8 @@ def run(screen_date: date | None = None, require_value: bool = True) -> Universe
          registered and valued here (universe_screener.register_listings, valuation.store_values);
       3. one row per company, at its company market cap and region (_one_row_per_company);
       4. the duplicate guard across all companies (drop_duplicate_companies).
-    No market-cap floor is applied here: each benchmark applies its own market_cap_min.
+    No market-cap floor is applied here: each benchmark applies its own cutoff (its market's
+    breakpoint at its market_coverage — benchmark_generator.select_holdings).
 
     Raises — so the cron stops before the generators — when there's no stored screen or the
     universe comes out empty (the stored universe is then left unchanged).

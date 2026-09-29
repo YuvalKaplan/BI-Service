@@ -4,9 +4,8 @@ from datetime import date
 from typing import Any, List, Optional, cast
 from dataclasses import dataclass
 from pydantic import BaseModel
-from modules.const import LARGE_CAP_THRESHOLD
 from modules.object import best_idea, ticker
-from modules.ticker import company
+from modules.ticker import company, index_funds
 
 
 # ── Shared strategy models ──────────────────────────────────────────────────
@@ -172,6 +171,15 @@ def resolve_canonical_ticker_ids(df: pd.DataFrame) -> pd.DataFrame:
     return df.assign(canonical_ticker_id=pd.array(canonical, dtype='int64'))
 
 
+def large_cap_mask(df: pd.DataFrame) -> pd.Series:
+    """Rows whose company is large cap: its whole cap at or above its region's cutoff
+    (large_cap_min) with at least index_funds.MIN_FLOAT_FACTOR floating (float_factor; unknown
+    passes) - index_funds.passes_large, as the benchmarks apply it. Both columns are added by
+    funds_update.build_shared_context."""
+    float_ok = df['float_factor'].isna() | (pd.to_numeric(df['float_factor'], errors='coerce') >= index_funds.MIN_FLOAT_FACTOR)
+    return (pd.to_numeric(df['market_cap'], errors='coerce') >= pd.to_numeric(df['large_cap_min'], errors='coerce')) & float_ok
+
+
 def _eligibility_masks(
     df: pd.DataFrame,
     provider_etf_ids: list[int],
@@ -195,17 +203,19 @@ def _eligibility_masks(
     masks['etf'] = df['provider_etf_id'].isin(etf_set) if etf_set else all_true
     masks['style'] = df['style_type'] == style_type if style_type not in (None, 'core', 'blend') else all_true
     if cap_type == 'large':
-        # A stock that has dropped below the large-cap threshold since it was bought is still
+        # A stock that has dropped below the large-cap cutoff since it was bought is still
         # let through here if it's already one of this fund's current holdings (held_ticker_ids),
         # so it stays eligible to be ranked/kept rather than being force-sold purely for falling
-        # below the threshold — it will still be sold once its ranking genuinely drops out. This
+        # below the cutoff — it will still be sold once its ranking genuinely drops out. This
         # only ever widens the pool for a fund that already holds the ticker; funds that don't
         # already hold it still can't pick it up as a fresh buy. See the matching comment in
         # best_ideas_generator.compute_active_weights for why the full_universe benchmark_weight
         # defaults to 0.0 for these instead of dropping the row outright.
-        masks['cap'] = (df['market_cap'] >= LARGE_CAP_THRESHOLD) | df[key].isin(held_ticker_ids or set())
+        masks['cap'] = large_cap_mask(df) | df[key].isin(held_ticker_ids or set())
     elif cap_type == 'mid_small':
-        masks['cap'] = df['market_cap'] < LARGE_CAP_THRESHOLD
+        # A company with no cap (or no cutoff for its region) is neither large nor mid/small.
+        known = pd.to_numeric(df['market_cap'], errors='coerce').notna() & pd.to_numeric(df['large_cap_min'], errors='coerce').notna()
+        masks['cap'] = known & ~large_cap_mask(df)
     else:
         masks['cap'] = all_true
     # country_type is a region ('US' | 'International') or 'all'. A company's region is its

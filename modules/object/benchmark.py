@@ -14,8 +14,11 @@ class Benchmark:
     region: str
     cap_type: str
     style_type: str
-    market_cap_min: int
+    market_coverage: float  # its large-cap cutoff: the float cap at which its market reaches this share (market_breakpoint)
     disabled: bool
+
+    def __post_init__(self):
+        self.market_coverage = round(float(self.market_coverage), 2)  # numeric(4,2) comes back as Decimal
 
 
 @dataclass
