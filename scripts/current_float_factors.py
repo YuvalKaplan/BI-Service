@@ -1,9 +1,10 @@
 """
 Refreshes every listing's free float and every company's float factor (the investable share of
-its market cap that benchmark weights use — modules/ticker/free_float.py), as the Wednesday cron
-does before building the universe, and reports on the latest stored universe: how many of its
-companies have a factor, the ones without, the lowest factors, and the listings found with no
-equity float (notes / preferreds the universe leaves out).
+its market cap per the Vanguard index funds — information and a market-cap check; benchmark
+weights use the whole company cap; modules/ticker/free_float.py), as the Wednesday cron does
+before building the universe, and reports: the large-cap market caps below the index funds'
+float cap (too low — worth checking), the latest universe's companies without a factor and the lowest factors,
+and the listings found with no equity float (notes / preferreds the universe leaves out).
 
 Report: .output/float_factors_report.md
 
@@ -27,6 +28,11 @@ if __name__ == '__main__':
     stats = free_float.refresh()
     lines = ["# Float Factors Report", "", f"Generated: {datetime.now():%Y-%m-%d %H:%M:%S}", "", free_float.summary(stats), ""]
     lines += [f"Index fund scale (float cap per $ held): " + ", ".join(f"{f} {k:,.1f}" for f, k in stats.scale.items()), ""]
+    lines += [f"## Market caps below the index funds' float cap: {len(stats.cap_checks)}", "",
+              f"An index fund can't hold more of a company than the whole company: a float cap {free_float.CAP_CHECK_FACTOR:g}x "
+              "the company cap or more means the company cap looks too low (largest first).", ""]
+    lines += [f"- {x}" for x in stats.cap_checks] or ["None."]
+    lines += [""]
 
     screen_date = universe_company.fetch_latest_date(up_to=date.today())
     if screen_date:
@@ -38,7 +44,7 @@ if __name__ == '__main__':
         lines += ["### Without a float factor (weighted in full)", ""]
         lines += [f"- {t.symbol}:{t.exchange} {t.name} ({region}, ${mc / 1e9:,.1f}B)" for t, region, mc in sorted(missing, key=lambda r: -r[2])] or ["None."]
         low = sorted((r for r in rows if r[0].float_factor is not None), key=lambda r: r[0].float_factor)[:40]
-        lines += ["", "### Lowest float factors", ""]
+        lines += ["", "### Lowest float factors (information — weights use the whole cap)", ""]
         lines += [f"- {t.float_factor:.2f} {t.symbol}:{t.exchange} {t.name} ({region}, ${mc / 1e9:,.1f}B -> ${mc * t.float_factor / 1e9:,.1f}B investable)"
                   for t, region, mc in low]
     lines += ["", f"## Listings with no equity float: {len(stats.zero_float)}", ""] + ([f"- {x}" for x in stats.zero_float] or ["None."])

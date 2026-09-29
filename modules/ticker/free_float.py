@@ -1,12 +1,8 @@
 """
-Free float and float factors — how much of each company's market cap is investable.
+Free float and float factors — safeguards around each company's market cap.
 
-Managers hold, and are measured against indices that hold, a company in proportion to its free
-float, not its whole market cap: an Up-C company's unlisted units (Interactive Brokers, Carvana),
-a founder's unlisted class or a fresh IPO's locked-up shares (SpaceX, ~12% floated), a family's
-stake (Walmart) aren't bought. Benchmark weights (benchmark_generator.store_holdings, best ideas'
-self mode) therefore use company cap x ticker.float_factor, while the company cap itself still
-decides size (the $10B floor, the funds' large-cap filter).
+Benchmarks weigh companies by their whole market cap (company_market_cap), the size managers
+look at. The free float and the index funds' holdings serve as safeguards around it:
 
 Weekly (refresh):
   1. ticker.free_float — FMP's freeFloat % of every listing (shares-float-all). FMP reports 0 for
@@ -19,13 +15,21 @@ Weekly (refresh):
      the factors sit on FMP's free-float scale (median over held companies of free float x cap /
      market value). A company no index fund holds — MLPs, BDCs, US-sanctioned Chinese companies,
      companies below the index's minimum float (Christian Dior), some US listings of foreign
-     companies — takes its primary listing's free float; with neither it has no factor and counts
-     in full.
+     companies — takes its primary listing's free float; with neither it has no factor.
+     Information only: weights don't use it.
+  3. Cap check — an index fund can't hold more of a company than the whole company: for one
+     worth LARGE_CAP_THRESHOLD or more, a float cap CAP_CHECK_FACTOR x its company cap or more
+     means the company cap is on too few shares (Bitmine's history ran on 230M shares against
+     570M). Flagged in FloatRunStats.cap_checks (cron email, scripts/current_float_factors.py);
+     nothing is changed automatically. (A cap on too many shares — Rocket Companies' 3.79B
+     against 2.82B — is refresh.verify_share_count's case: FMP's quote and financials against
+     its history.)
 """
 import log
 import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
+from modules.const import LARGE_CAP_THRESHOLD
 from modules.core import api_stocks
 from modules.object import ticker, ticker_value
 from modules.object.ticker import Ticker
@@ -36,6 +40,7 @@ from modules.ticker.resolver import TickerResolver
 # All Cap ex US): together nearly every listed company, each held at its float-adjusted weight.
 INDEX_FUNDS = ('VTI', 'VXUS')
 US_FUND = 'VTI'  # a company both hold is measured by the fund of its region
+CAP_CHECK_FACTOR = 1.25  # an index float cap this many times the company cap flags the cap as too low
 
 
 @dataclass
@@ -45,6 +50,7 @@ class FloatRunStats:
     index_holdings: dict[str, tuple[int, int]] = field(default_factory=dict)  # fund -> (rows, rows matched to a company)
     scale: dict[str, float] = field(default_factory=dict)            # fund -> float cap per $ held
     by_source: dict[str, int] = field(default_factory=dict)          # fund / 'free_float' / 'unknown' -> companies
+    cap_checks: list[str] = field(default_factory=list)              # large caps the index funds hold more of than the whole cap
     factors_updated: bool = False
 
 
@@ -54,7 +60,8 @@ def summary(stats: FloatRunStats) -> str:
     sources = ", ".join(f"{k} {v}" for k, v in stats.by_source.items())
     return (
         f"Free float: {stats.listings_with_float} listings, {len(stats.zero_float)} with no equity float (notes/preferreds); "
-        f"index funds: {funds or 'none'}; company float factors by source: {sources or 'not updated'}"
+        f"index funds: {funds or 'none'}; company float factors by source: {sources or 'not updated'}; "
+        f"{len(stats.cap_checks)} large-cap market cap(s) below the index funds' float cap"
     )
 
 
@@ -153,6 +160,7 @@ def refresh() -> FloatRunStats:
 
     updates: list[tuple[int, float | None]] = []
     sources: dict[str, int] = defaultdict(int)
+    checks: list[tuple[float, str]] = []
     for cid in members:
         cap = caps.get(cid)
         held_in = [f for f in INDEX_FUNDS if cid in fund_value[f] and stats.scale.get(f)]
@@ -162,8 +170,14 @@ def refresh() -> FloatRunStats:
                 fund = region_fund if region_fund in held_in else held_in[0]
             else:
                 fund = held_in[0]
-            factor = min(1.0, stats.scale[fund] * fund_value[fund][cid] / cap)
+            float_cap = stats.scale[fund] * fund_value[fund][cid]
+            factor = min(1.0, float_cap / cap)
             sources[fund] += 1
+            if cap >= LARGE_CAP_THRESHOLD and float_cap >= CAP_CHECK_FACTOR * cap:
+                t = by_id[cid]
+                checks.append((float_cap / cap,
+                               f"{t.symbol}:{t.exchange} {t.name} — company cap ${cap / 1e9:,.1f}B, {fund} float cap "
+                               f"${float_cap / 1e9:,.1f}B ({float_cap / cap:.2f}x): the company cap looks too low (too few shares?)"))
         elif (ff := primary_free_float(cid)) is not None:
             factor = min(1.0, max(0.0, ff / 100))
             sources['free_float'] += 1
@@ -174,6 +188,7 @@ def refresh() -> FloatRunStats:
     # A listing that stopped being its company's master (a realignment) drops its old factor.
     updates += [(t.id, None) for t in valid if company_of[t.id] != t.id and t.float_factor is not None]
     ticker.update_float_factor_bulk(updates)
+    stats.cap_checks = [text for _x, text in sorted(checks, reverse=True)]
     stats.by_source = dict(sources)
     stats.factors_updated = True
     log.record_status(summary(stats))

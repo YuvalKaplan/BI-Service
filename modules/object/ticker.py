@@ -52,7 +52,7 @@ class Ticker:
     average_turnover: float | None = None  # FMP profile averageVolume x price, quote currency (major unit)
     verified_shares: float | None = None   # share count (FMP units) FMP's history is repaired to — see refresh.verify_share_count
     free_float: float | None = None        # FMP freeFloat % of the listing; 0 = no equity float (a note / preferred) — see free_float.refresh
-    float_factor: float | None = None      # company's investable share of its cap, 0-1 (masters); None = 1 — see free_float.refresh
+    float_factor: float | None = None      # company's investable share of its cap per the index funds, 0-1 (masters): information and a cap check, not weights — see free_float.refresh
     region: str | None = None
 
 
@@ -655,19 +655,6 @@ def update_float_factor_bulk(pairs: list[tuple[int, float | None]]) -> None:
                 )
     except Error as e:
         raise Exception(f"Error bulk-updating float_factor: {e}")
-
-
-def fetch_float_factors(company_ids: list[int]) -> dict[int, float]:
-    """{company ticker_id: float_factor} for those with one (the rest count as fully floated)."""
-    if not company_ids:
-        return {}
-    try:
-        with db_pool_instance.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id, float_factor FROM ticker WHERE id = ANY(%s) AND float_factor IS NOT NULL;", (list(company_ids),))
-                return {tid: f for tid, f in cur.fetchall()}
-    except Error as e:
-        raise Exception(f"Error fetching float factors: {e}")
 
 
 def update_verified_shares(ticker_id: int, shares: float | None) -> None:

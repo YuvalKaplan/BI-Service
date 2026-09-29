@@ -107,7 +107,7 @@ if __name__ == '__main__':
         if weekday == 2: # Wednesday
             # The generators, after the Tue–Sat steps above (which stored and valued the screen): the
             # listings' free floats and companies' float factors (the note/preferred lines the
-            # universe leaves out, and the investable share benchmark weights use), then the
+            # universe leaves out, and a check of the market caps against the index funds), then the
             # universe is built from the stored screen and the linked companies, then benchmarks,
             # best ideas, funds — each reading what the previous step stored. A failed step stops
             # the rest: the FMP screener fails after its retries, and an empty universe or
