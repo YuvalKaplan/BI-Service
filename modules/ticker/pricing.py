@@ -88,6 +88,7 @@ REFERENCE_FACTOR = 2.5         # an implied share count this far off the profile
                                # don't move 2.5x in a year; Alphabet's all-classes/class-A ratio is ~2.1)
 SHARE_COUNT_TOLERANCE = 1.15   # an implied share count this far off a listing's verified one (ticker.verified_shares)
                                # is FMP's history on a wrong count (Rocket Companies: 3.79B against 2.82B)
+LATEST_RUN_TOLERANCE = 1.05    # implied share counts within this of the latest one are the same run of FMP's history
 
 
 def _ratio(a: float, b: float) -> float:
@@ -236,6 +237,24 @@ def reference_shares(symbol: str) -> float | None:
     return cap / price if cap and price and cap > 0 and price > 0 else None
 
 
+def _latest_run(series: dict[date, float], prices: dict[date, float]) -> list[date]:
+    """The latest stretch of the series on one share count: walking back from the newest priced
+    value, the dates whose implied share count (cap / price) stays within LATEST_RUN_TOLERANCE of
+    the newest one. A verified count (ticker.verified_shares) is today's, so it only replaces this
+    stretch: before a real change of share count — Devon Energy's merger, 621M shares in the first
+    half of 2026, 1,100M after — FMP's history keeps its own values."""
+    dates = sorted(d for d, v in series.items() if v and v > 0 and prices.get(d))
+    if not dates:
+        return []
+    latest = series[dates[-1]] / prices[dates[-1]]
+    run: list[date] = []
+    for d in reversed(dates):
+        if _ratio(series[d] / prices[d], latest) > LATEST_RUN_TOLERANCE:
+            break
+        run.append(d)
+    return run
+
+
 def clean_market_caps(
     series: dict[date, float], prices: dict[date, float] | None = None, symbol: str | None = None,
     log_outliers: bool = True, reference: float | None = None, verified_shares: float | None = None,
@@ -253,15 +272,17 @@ def clean_market_caps(
     (pence vs pounds), the value is dropped. Logged when `symbol` is given and log_outliers.
     A caller already holding the listing's profile passes its share count as `reference`.
 
-    With `verified_shares` (ticker.verified_shares: FMP's quote and financials agree on a count
-    its history doesn't — see refresh.verify_share_count), every value whose implied share count
-    is SHARE_COUNT_TOLERANCE-fold off it is first set to price x verified_shares — on every fetch,
-    so the daily validation compares like with like — and it serves as the reference.
+    With `verified_shares` (ticker.verified_shares: FMP's quote and a second source — its
+    financials or the index funds — agree on a count its history doesn't; see
+    refresh.verify_share_count), every value of the history's latest run (_latest_run) whose
+    implied share count is SHARE_COUNT_TOLERANCE-fold off it is first set to price x
+    verified_shares — on every fetch, so the daily validation compares like with like — and it
+    serves as the reference.
     """
     prices = prices or {}
     if verified_shares and prices:
-        off = sorted(d for d, v in series.items()
-                     if v and v > 0 and prices.get(d) and _ratio(v / prices[d], verified_shares) >= SHARE_COUNT_TOLERANCE)
+        off = sorted(d for d in _latest_run(series, prices)
+                     if _ratio(series[d] / prices[d], verified_shares) >= SHARE_COUNT_TOLERANCE)
         if off:
             series = {**series, **{d: prices[d] * verified_shares for d in off}}
             if symbol and log_outliers:

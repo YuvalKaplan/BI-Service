@@ -52,7 +52,7 @@ class Ticker:
     average_turnover: float | None = None  # FMP profile averageVolume x price, quote currency (major unit)
     verified_shares: float | None = None   # share count (FMP units) FMP's history is repaired to — see refresh.verify_share_count
     free_float: float | None = None        # FMP freeFloat % of the listing; 0 = no equity float (a note / preferred) — see free_float.refresh
-    float_factor: float | None = None      # company's investable share of its cap per the index funds, 0-1 (masters): information and a cap check, not weights — see free_float.refresh
+    float_factor: float | None = None      # index funds' float cap / our company cap (masters): normally 0-1, > 1 = our cap looks too low; a cap check and share-count witness, not weights — see free_float.refresh
     region: str | None = None
 
 

@@ -116,6 +116,7 @@ def refresh_ticker_profiles(include_invalid: bool = False) -> tuple[int, int, in
 
 SHARES_CHECK_POINTS = 10   # the latest stored values stored_shares_off_profile looks at
 FINANCIALS_TOLERANCE = 0.05  # FMP's quarterly weighted shares within this of the profile's count confirm it
+INDEX_TOLERANCE = 0.15  # the index funds' float cap within this of the quote's cap x free float confirms the quote
 
 
 def _latest_usd_rate(currency: str | None, today: date) -> float | None:
@@ -149,6 +150,28 @@ def stored_shares_off_profile(
             or all(pricing.SHARE_COUNT_TOLERANCE <= 1 / r < pricing.REFERENCE_FACTOR for r in ratios))
 
 
+def index_backs_quote(
+    t: Ticker, profile: dict, stored: tuple[dict[date, float], dict[date, float]] | None,
+    currency: str | None, today: date,
+) -> bool:
+    """Whether the index funds' holding backs the quote's market cap: their float cap
+    (ticker.float_factor — the index's float cap over our company cap, modules/ticker/free_float.py
+    — times our latest stored cap) within INDEX_TOLERANCE of the quote's cap x its free float. A
+    third source when FMP's financials still show an old share count (Omnicom and Devon Energy
+    after their mergers: history and financials on the old count, the quote and the index on the
+    new one). Only for a company's own row (a master or standalone ticker), the cap the factor was
+    measured against."""
+    if t.master_ticker_id is not None or not t.float_factor or not t.free_float or not stored or not stored[0]:
+        return False
+    cap, rate = profile.get('marketCap'), _latest_usd_rate(currency, today)
+    if not cap or cap <= 0 or not rate:
+        return False
+    caps = stored[0]
+    index_float_cap = t.float_factor * caps[max(caps)]
+    quote_float_cap = cap * rate * t.free_float / 100
+    return abs(index_float_cap / quote_float_cap - 1) <= INDEX_TOLERANCE
+
+
 def verify_share_count(
     t: Ticker, full_symbol: str, profile: dict, stored: tuple[dict[date, float], dict[date, float]] | None,
     currency: str | None, today: date,
@@ -156,12 +179,13 @@ def verify_share_count(
     """(the ticker's verified_shares after this check, what changed — None when nothing did).
 
     When the stored history is off the profile's share count (stored_shares_off_profile), or the
-    ticker already has a verified count, FMP's quarterly financials break the tie: their weighted
-    share count within FINANCIALS_TOLERANCE of the profile's makes the profile's count verified —
-    two FMP sources against its history, which pricing.clean_market_caps then repairs on every
-    fetch. The profile isn't trusted alone: it can be the wrong side (SABESP), and then the
-    financials agree with the history instead. A verified count follows the profile while the
-    financials agree, and is cleared when they no longer do. A line quoted in pence has a profile
+    ticker already has a verified count, a second source breaks the tie: FMP's quarterly
+    financials (their weighted share count within FINANCIALS_TOLERANCE of the profile's), else the
+    index funds (index_backs_quote). Either makes the profile's count verified — two sources
+    against FMP's history, which pricing.clean_market_caps then repairs on every fetch. The profile
+    isn't trusted alone: it can be the wrong side (SABESP), and then the financials and the index
+    agree with the history instead. A verified count follows the profile while a second source
+    agrees, and is cleared when neither does. A line quoted in pence has a profile
     count 1/100 of the real one (FMP's unit), which is allowed for. Preferred / note / unit /
     depositary lines are left out: their quote and financials are the parent company's (Duke
     Energy's units DUKU), and they never set a company's cap."""
@@ -176,12 +200,18 @@ def verify_share_count(
     financial = api_stocks.get_quarterly_weighted_shares(full_symbol)
     unit = tu.minor_unit_factor(profile.get('currency'))
     if financial and abs(financial / (shares * unit) - 1) <= FINANCIALS_TOLERANCE:
+        witness = 'financials'
+    elif index_backs_quote(t, profile, stored, currency, today):
+        witness = 'index funds'
+    else:
+        witness = None
+    if witness:
         if t.verified_shares and abs(shares / t.verified_shares - 1) < 0.005:
             return t.verified_shares, None
         verb = 'set' if t.verified_shares is None else f'updated from {t.verified_shares:,.0f}'
-        return shares, f"verified share count {verb} to {shares:,.0f} (quote and financials agree against FMP's history)"
+        return shares, f"verified share count {verb} to {shares:,.0f} (quote and {witness} agree against FMP's history)"
     if t.verified_shares is not None:
-        return None, "verified share count cleared (financials no longer agree with the quote)"
+        return None, "verified share count cleared (neither the financials nor the index funds agree with the quote)"
     return None, None
 
 
