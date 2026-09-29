@@ -1,6 +1,6 @@
 import log
 from datetime import date, timedelta
-from modules.object import batch_run, benchmark, ticker, screener_listing, universe_company
+from modules.object import batch_run, benchmark, ticker, ticker_value, screener_listing, universe_company
 from modules.object.screener_listing import ScreenerListing
 from modules.ticker import company, pricing
 from modules.ticker import util as tu
@@ -69,9 +69,10 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
     The universe is the one scripts/sim_prep_data.py stored (it screens, syncs masters and builds
     it, dated at the data cutoff — the screener has no historical mode, so today's large-cap
     universe is used); failing that, the latest stored one.
-    Each company's screened listings then get their historical market-cap series, and for each
-    Wednesday every company takes its primary listing's value; the benchmarks are formed with
-    the same selection and weighting as live (select_holdings, store_holdings).
+    Each company's screened listings then get their historical market-cap series — the stored
+    values when they cover every Wednesday, else FMP's history — and for each Wednesday every
+    company takes its primary listing's value; the benchmarks are formed with the same selection
+    and weighting as live (select_holdings, store_holdings).
 
     Returns the universe's screen date and a (benchmark_name, holding_date, num_holdings) row per
     snapshot stored, for callers that report on it (scripts/sim_benchmark.py).
@@ -99,18 +100,35 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
         tickers_by_id = {t.id: t for t in ticker.fetch_by_ids(
             list({l.ticker_id for ms in members.values() for l in ms} | set(region_lookup)))}
 
-        # Each listing's full historical market-cap series in one call — the live path's fetch
-        # (pricing.fetch_price_and_market_cap_history): market caps in USD at each date's own
-        # historical FX rate, from the listing's own currency — rates move meaningfully over a
-        # multi-month backfill range — and FMP glitches repaired from the price or dropped
+        wednesdays = _wednesdays_between(inception_date, cutoff)
+        if not wednesdays:
+            raise Exception(f"No Wednesday between {inception_date} and the data cutoff {cutoff}.")
+
+        # Each listing's market-cap series. The stored values come first: they're the ones live
+        # validated (USD at each date's FX rate, from the listing's own currency; FMP glitches
+        # repaired — scripts/data_fill_ticker_value_refresh.py --outliers / --profile-check for
+        # older history), and most listings — ETF holdings valued daily, weekly-screened lines —
+        # have one near every Wednesday. Only a listing whose stored values miss a Wednesday
+        # (registered recently, or not in use then) gets its full history from FMP, in one call —
+        # the live path's fetch (pricing.fetch_price_and_market_cap_history): USD at each date's
+        # own historical FX rate, and FMP glitches repaired from the price or dropped
         # (pricing.clean_market_caps: Compass at 1/100 for two weeks would otherwise fall out of
         # the $10B benchmark on those dates), with history from before inception as context and
         # the screener quote's share count as the reference.
+        listing_ids = [l.ticker_id for ms in members.values() for l in ms if l.ticker_id in tickers_by_id]
+        stored = ticker_value.fetch_market_caps_between(
+            listing_ids, wednesdays[0] - timedelta(days=WINDOW_DAYS), wednesdays[-1] + timedelta(days=WINDOW_DAYS))
         history: dict[int, dict[date, float]] = {}
+        from_store = fetched_count = 0
         for ms in members.values():
             for l in ms:
                 t = tickers_by_id.get(l.ticker_id)
                 if t is None:
+                    continue
+                series = stored.get(l.ticker_id)
+                if series and all(pricing.closest_value_for_date(series, w, window_days=WINDOW_DAYS) for w in wednesdays):
+                    history[l.ticker_id] = series
+                    from_store += 1
                     continue
                 fetched = pricing.fetch_price_and_market_cap_history(
                     l.symbol,
@@ -125,7 +143,10 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
                 series = {d: market_cap for d, (_price, market_cap) in fetched.items()}
                 if series:
                     history[l.ticker_id] = series
-        log.record_status(f"Fetched historical market cap series for {len(history)} listings of {len(members)} companies.")
+                    fetched_count += 1
+        log.record_status(
+            f"Market cap series for {len(history)} listings of {len(members)} companies: "
+            f"{from_store} from stored values, {fetched_count} fetched from FMP.")
 
         # Each company's listings with history, primary first, for per-date cap lookup.
         listing_order: dict[int, list[int]] = {}
@@ -139,7 +160,6 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
 
         benchmarks = benchmark.fetch_all()
         styles = company_styles(list(listing_order), benchmarks)
-        wednesdays = _wednesdays_between(inception_date, cutoff)
         log.record_status(f"Backfilling {len(wednesdays)} historical Wednesdays from {inception_date} to {cutoff}.")
 
         benchmarks_created: list[tuple[str, date, int]] = []
