@@ -103,8 +103,9 @@ class BestIdeaRanked:
 
 def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
     """
-    Load all best ideas within the lookback window for all benchmark modes,
-    including ticker attributes needed for per-fund filtering.
+    Load all best ideas within the lookback window for all benchmark modes, of the ETFs that are
+    active now (an ETF that turned inactive stops feeding the funds at once), including ticker
+    attributes needed for per-fund filtering.
     Returned DataFrame columns: provider_etf_id, ticker_id, value_date, ranking,
     delta, benchmark_mode, style_type, exchange, country, region, esg_qualified, name,
     master_ticker_id, market_cap, etf_region.
@@ -150,7 +151,7 @@ def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
             pe.region AS etf_region
         FROM latest_ideas li
         JOIN ticker t ON t.id = li.ticker_id
-        JOIN provider_etf pe ON pe.id = li.provider_etf_id
+        JOIN provider_etf pe ON pe.id = li.provider_etf_id AND pe.status = 'active'
         LEFT JOIN LATERAL (
             SELECT market_cap
             FROM ticker_value

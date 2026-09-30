@@ -7,26 +7,15 @@ from modules.core.db import db_pool_instance_bt
 
 @dataclass
 class CategorizeEtf:
+    """A style reference ETF: its FMP holdings (by ticker) are the stocks of its style and cap."""
     id: int | None
     created_at: datetime | None
     name: str | None
     usage: str | None
     cap_type: str | None
     style_type: str | None
-    url: str | None
-    wait_pre_events: str | None
-    wait_post_events: str | None
-    events: dict | None
-    trigger_download: dict | None
-    mapping: dict | None
-    file_format: str | None
+    ticker: str | None
     last_downloaded: datetime | None
-
-@dataclass
-class CategorizeEtfDownload:
-    etf: CategorizeEtf
-    file_name: str | None = None
-    data: bytes | None = None
 
 
 def fetch_all(usage: str) -> list[CategorizeEtf]:

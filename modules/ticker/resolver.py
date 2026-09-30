@@ -21,6 +21,8 @@ class TickerResolver:
         self._symbol_cache: dict[str, Any] = {}
         self._isin_cache:   dict[str, Any] = {}
         self._full_symbol_cache: dict[str, Any] = {}
+        self._profile_cache: dict[str, dict | None] = {}
+        self._name_cache: dict[str, Any] = {}
         self._exchange_suffix_map: dict[str, str] = {}
 
     def set_classification(self, style_type: str, cap_type: str) -> None:
@@ -37,6 +39,59 @@ class TickerResolver:
         if region == 'US':
             return self._resolve_by_symbol(symbol)
         return self._resolve_non_us(symbol, isin, name)
+
+    def resolve_fmp_line(
+        self,
+        symbol: str | None,
+        isin: str | None = None,
+        cusip: str | None = None,
+        name: str | None = None,
+    ) -> Any:
+        """
+        A line of an FMP fund holdings answer (etf/holdings: asset, isin, securityCusip, name).
+        Its symbol is already FMP's, so its profile is used when it is the line's security - the
+        ISIN (else the CUSIP) agrees, or with neither on both sides the names match (a fund's
+        symbol can be another company's: FAB, First Abu Dhabi Bank, is a First Trust fund on
+        FMP). Else the ISIN is searched, else the name (a verified name search - FMP lists some
+        stocks by name only, e.g. "SAMSUNG ELECTRONICS CO").
+        """
+        if symbol:
+            profile = self._fmp_profile(symbol)
+            if profile is not None and self._same_security(profile, isin, cusip, name):
+                if symbol not in self._full_symbol_cache:
+                    self._full_symbol_cache[symbol] = self._populate(profile)
+                return self._full_symbol_cache[symbol]
+        if isin:
+            return self._resolve_by_isin(isin)
+        if name:
+            return self._resolve_by_name(name)
+        return None
+
+    def _fmp_profile(self, symbol: str) -> dict | None:
+        if symbol not in self._profile_cache:
+            profile = api_stocks.get_stock_profile(symbol)
+            self._profile_cache[symbol] = profile if isinstance(profile, dict) else None
+        return self._profile_cache[symbol]
+
+    @staticmethod
+    def _same_security(profile: dict, isin: str | None, cusip: str | None, name: str | None) -> bool:
+        if isin and profile.get('isin'):
+            return profile['isin'] == isin
+        if cusip and profile.get('cusip'):
+            return profile['cusip'] == cusip
+        return not name or not profile.get('companyName') or tu.names_match(name, profile['companyName'])
+
+    def _resolve_by_name(self, name: str) -> Any:
+        if name in self._name_cache:
+            return self._name_cache[name]
+        result = None
+        fmp_symbol_full = tu.resolve_ticker_from_alt_data(isin=None, name=name)
+        if fmp_symbol_full:
+            profile = self._fmp_profile(fmp_symbol_full)
+            if profile is not None:
+                result = self._populate(profile)
+        self._name_cache[name] = result
+        return result
 
     def get_full_symbol(self, ticker: Ticker) -> str:
         if ticker.exchange and not self._exchange_suffix_map:

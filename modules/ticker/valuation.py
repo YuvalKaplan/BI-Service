@@ -5,11 +5,12 @@ from datetime import date
 from modules.object import batch_run, ticker, ticker_value, screener_listing, provider_etf_holding
 from modules.object.screener_listing import ScreenerListing
 from modules.object.ticker import Ticker
+from modules.sec import etf_selection
 from modules.ticker import pricing
 from modules.ticker.resolver import TickerResolver
 
 WORKERS = 5                  # tickers valued in parallel — FMP's rate limit (200/min) is the bound
-HOLDINGS_LOOK_BACK_DAYS = 7  # holdings best ideas can still use (best_ideas_generator.LOOK_BACK_WINDOW)
+HOLDINGS_LOOK_BACK_DAYS = etf_selection.MAX_HOLDINGS_AGE_DAYS  # holdings best ideas can still use (best_ideas_generator.LOOK_BACK_WINDOW)
 
 
 @dataclass

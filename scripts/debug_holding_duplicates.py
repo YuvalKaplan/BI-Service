@@ -6,7 +6,7 @@ provider_etf_holding.aggregate_holdings):
   - inconsistent: implied prices disagree           -> likely mis-resolved tickers, quarantined
 
 Use it to confirm ticker-resolution fixes (new holding dates should show few or no
-inconsistent groups) and to spot providers whose mapping needs an ISIN/CUSIP column.
+inconsistent groups) - each line keeps FMP's symbol / name / ISIN / CUSIP to trace it back.
 
 Writes the report to .output/holding_duplicates_report.md.
 

@@ -4,18 +4,24 @@ from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
 from modules.core.db import db_pool_instance
-import pandas as pd
 
 @dataclass
 class ProviderEtfHolding:
-    id: int
-    created_at: datetime
+    """One holding line of a provider ETF as FMP lists it (modules/cron/etf_downloader.py).
+    ticker_id is the ticker the line resolved to; FMP's symbol / name / ISIN / CUSIP identify the
+    line (and the unresolved ones). weight is a fraction."""
+    id: int | None
+    created_at: datetime | None
     provider_etf_id: int
     holding_date: date
     ticker_id: int | None
-    shares: float
-    market_value: float
-    weight: float
+    shares: float | None
+    market_value: float | None
+    weight: float | None
+    symbol: str | None = None
+    name: str | None = None
+    isin: str | None = None
+    cusip: str | None = None
 
 def fetch_valid_ticker_ids_in_holdings() -> List[int]:
     try:
@@ -42,8 +48,7 @@ def fetch_valid_ticker_ids_in_recent_holdings(look_back_days: int) -> List[int]:
                     WITH latest AS (
                         SELECT peh.provider_etf_id, MAX(peh.holding_date) AS holding_date
                         FROM provider_etf_holding AS peh
-                        JOIN provider_etf AS pe ON pe.id = peh.provider_etf_id AND NOT pe.disabled
-                        JOIN provider AS p ON p.id = pe.provider_id AND NOT p.disabled
+                        JOIN provider_etf AS pe ON pe.id = peh.provider_etf_id AND pe.status = 'active'
                         WHERE peh.holding_date > NOW() - (%s * INTERVAL '1 day')
                         GROUP BY peh.provider_etf_id
                     )
@@ -199,6 +204,10 @@ def aggregate_holdings(raw: List[ProviderEtfHolding]) -> tuple[List[ProviderEtfH
             shares=sum(h.shares or 0 for h in lines),
             market_value=sum(h.market_value or 0 for h in lines),
             weight=sum(h.weight or 0 for h in lines),
+            symbol=first.symbol,
+            name=first.name,
+            isin=first.isin,
+            cusip=first.cusip,
         ))
 
     return holdings + passthrough, quarantined
@@ -221,34 +230,49 @@ def fetch_max_holding_date() -> date | None:
         raise Exception(f"Error fetching max holding date: {e}")
 
 
-def insert_all_holdings(etf_id: int, df: pd.DataFrame) -> None:
+def fetch_latest_dates() -> dict[int, date]:
+    """Each ETF's latest holdings date - the selection's freshness rule."""
     try:
-        df = df.drop(columns=["id"], errors="ignore")
-        df["provider_etf_id"] = etf_id
-        df = df[[
-            "provider_etf_id",
-            "holding_date",
-            "ticker_id",
-            "shares",
-            "market_value",
-            "weight"
-        ]]
-        rows = list(df.itertuples(index=False, name=None)).copy()
-
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
-                delete_query = """
-                    DELETE FROM provider_etf_holding peh
-                    WHERE peh.provider_etf_id = %s
-                    AND peh.holding_date = %s;
-                """
-                cur.execute(delete_query, (etf_id, df["holding_date"].iat[0]))
-                insert_query = """
-                    INSERT INTO provider_etf_holding
-                        (provider_etf_id, holding_date, ticker_id, shares, market_value, weight)
-                    VALUES (%s, %s, %s, %s, %s, %s);
-                """
-                cur.executemany(insert_query, rows)
-
+                cur.execute("SELECT provider_etf_id, MAX(holding_date) FROM provider_etf_holding GROUP BY provider_etf_id;")
+                return {row[0]: (row[1].date() if isinstance(row[1], datetime) else row[1]) for row in cur.fetchall()}
     except Error as e:
-        raise Exception(f"Error inserting the Provider ETF Holdings into the DB: {e}")
+        raise Exception(f"Error fetching the provider ETFs' latest holdings dates: {e}")
+
+
+def fetch_latest_lines(provider_etf_id: int) -> List[ProviderEtfHolding]:
+    """Every line (resolved or not) of the ETF's latest stored holdings."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(ProviderEtfHolding)) as cur:
+                cur.execute("""
+                    SELECT * FROM provider_etf_holding
+                    WHERE provider_etf_id = %s
+                      AND holding_date = (SELECT MAX(holding_date) FROM provider_etf_holding WHERE provider_etf_id = %s)
+                    ORDER BY id;
+                """, (provider_etf_id, provider_etf_id))
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching the latest holdings of provider ETF {provider_etf_id}: {e}")
+
+
+_INSERT_COLUMNS = ('provider_etf_id', 'holding_date', 'ticker_id', 'shares', 'market_value', 'weight',
+                   'symbol', 'name', 'isin', 'cusip')
+
+
+def replace_holdings(provider_etf_id: int, holding_date: date, lines: List[ProviderEtfHolding]) -> None:
+    """Stores the ETF's lines for holding_date, replacing any stored for that date."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM provider_etf_holding WHERE provider_etf_id = %s AND holding_date = %s;",
+                            (provider_etf_id, holding_date))
+                cur.executemany(
+                    f"INSERT INTO provider_etf_holding ({', '.join(_INSERT_COLUMNS)}) "
+                    f"VALUES ({', '.join(['%s'] * len(_INSERT_COLUMNS))});",
+                    [tuple(getattr(h, c) for c in _INSERT_COLUMNS) for h in lines],
+                )
+            conn.commit()
+    except Error as e:
+        raise Exception(f"Error saving the holdings of provider ETF {provider_etf_id}: {e}")

@@ -115,13 +115,13 @@ def fetch_current(filed_since: date) -> List[SecActiveEtf]:
 
 
 def count_current(filed_since: date) -> tuple[int, int]:
-    """(current active ETFs, how many of them are tracked in provider_etf by ticker)."""
+    """(current active ETFs, how many of them are in provider_etf - profiled as equity funds)."""
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """SELECT count(*), count(*) FILTER (WHERE EXISTS (
-                           SELECT 1 FROM provider_etf p WHERE upper(p.ticker) = upper(a.ticker)))
+                           SELECT 1 FROM provider_etf p WHERE p.sec_series_id = a.series_id))
                        FROM sec_active_etf a
                        WHERE a.terminated_at IS NULL AND a.filing_date >= %s;""",
                     (filed_since,),
@@ -132,13 +132,17 @@ def count_current(filed_since: date) -> tuple[int, int]:
         raise Exception(f"Error counting the current active ETFs: {e}")
 
 
-def fetch_tracked_tickers() -> dict[str, tuple[int, str | None, str | None, str | None]]:
-    """provider_etf ticker (upper case) -> (provider_etf id, cap_type, style_type, region), to
-    cross-reference the list with the funds we already track."""
+def fetch_old_tracked_tickers() -> dict[str, tuple[int, bool, str | None, str | None, str | None]]:
+    """old_provider_etf ticker (upper case) -> (old id, enabled, cap_type, style_type, region): the
+    ETFs chosen by hand before the selection rules, to compare the two."""
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute('SELECT upper(ticker), id, cap_type, style_type, region FROM provider_etf WHERE ticker IS NOT NULL;')
-                return {row[0]: (row[1], row[2], row[3], row[4]) for row in cur.fetchall()}
+                cur.execute(
+                    """SELECT upper(e.ticker), e.id, NOT e.disabled AND NOT p.disabled, e.cap_type, e.style_type, e.region
+                       FROM old_provider_etf e JOIN old_provider p ON p.id = e.provider_id
+                       WHERE e.ticker IS NOT NULL;"""
+                )
+                return {row[0]: (row[1], row[2], row[3], row[4], row[5]) for row in cur.fetchall()}
     except Error as e:
-        raise Exception(f"Error fetching the provider ETF tickers: {e}")
+        raise Exception(f"Error fetching the old provider ETF tickers: {e}")

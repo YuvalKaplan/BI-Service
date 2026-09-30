@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. `README.md` has the human-readable, step-by-step description of every pipeline stage, all scripts, environment variables, Docker and MCP setup — keep it in sync when behaviour described there changes.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. `README.md` has the human-readable, step-by-step description of every pipeline stage, all scripts, environment variables, hosting and MCP setup — keep it in sync when behaviour described there changes.
 
 ## Commands
 
@@ -16,7 +16,7 @@ python modules/bt/run.py
 
 # Run individual scripts (ad-hoc / debugging)
 python scripts/current_categorize_tickers.py
-python scripts/single_provider.py
+python scripts/current_etf_holdings.py
 
 # Fund methodology export (ETFs -> benchmark -> best ideas -> fund) for one fund/date
 python scripts/report_fund_methodology.py
@@ -27,7 +27,9 @@ pip freeze > requirements.txt
 
 No automated test suite exists. Validation is done by running the cron or BT pipelines directly.
 
-All script/pipeline output (reports, sim results, methodology exports, BT CSVs) goes under `.output/` (git-ignored); downloaded provider holdings files go under `.output/downloads/` (`scripts/download_and_save_all_providers.py`, `scripts/single_provider_etf.py`, `modules/parse/convert.py::FILE_FOLDER`). New scripts should follow the same convention.
+All script/pipeline output (reports, sim results, methodology exports, BT CSVs) goes under `.output/` (git-ignored); downloaded files kept for debugging go under `.output/downloads/` (today only the N-CEN filings that failed to parse, `.output/downloads/ncen/`). New scripts should follow the same convention.
+
+All external data comes from APIs (FMP, EDGAR) — nothing is scraped any more, and nothing needs a browser.
 
 ### Dev/Prod DB switching
 
@@ -35,16 +37,10 @@ All script/pipeline output (reports, sim results, methodology exports, BT CSVs) 
 
 ```bash
 python service_cron.py --prod
-python scripts/single_provider.py --prod
+python scripts/current_etf_holdings.py --prod
 ```
 
 The resolved environment is printed at startup (`[db] Resolved database environment: ...`) and logged via `log.record_status`. This flag only affects the live pool — `db_pool_instance_bt` (backtesting) always uses the development database regardless.
-
-Pass `--headed` to run Playwright with a visible browser window instead of headless (useful together with `--prod` for debugging scraping issues against production data):
-
-```bash
-python scripts/single_provider.py --prod --headed
-```
 
 ## Architecture
 
@@ -60,8 +56,8 @@ A third mode, the **simulation** (`scripts/sim_prep_data.py` → `scripts/sim_be
 ### Live Pipeline Flow
 
 ```
-etf_downloader        → scrapes provider websites (Playwright), resolves lines  → provider_etf_holding, ticker
-                        (TickerResolver + FMP)
+etf_downloader        → FMP etf/holdings of the selected ETFs, resolves lines     → provider_etf_holding, ticker,
+                        (TickerResolver + FMP), then the selection rules           provider_etf.status
 screener              → FMP screener API; registers home-market lines daily;    → ticker (+ screener_listing on Wed)
                         Wednesday: stores the screen
 ticker maintenance    → modules/ticker utilities over every ticker:              → ticker, ticker_value
@@ -73,11 +69,11 @@ best_ideas_generator  → active weight algorithm                               
 funds_update          → fund strategy composition                                → fund_holding, fund_holding_change, fund_analysis
 ```
 
-`ticker_value` (price + USD market cap) is written by the valuation pass (`modules/ticker/valuation.py::run()`: every valid ticker in each active ETF's latest holdings from the last 7 days, plus the registered lines of a screen stored for the date — once per ticker, 5 in parallel, skipping tickers already valued for the date), via `modules/ticker/pricing.py::store_validated_ticker_value`, which validates against FMP historical endpoints and converts to USD with per-date FX rates. Resolution no longer stores values (a ticker held by several providers was valued once per provider). Values are stored under `pricing.latest_value_date()` — the latest completed trading day (before 17:00 ET the previous day, weekends stepped back to Friday) — so the Wednesday cron (~01:00–04:00 UTC) values Tuesday's close. Never `date.today()`: at that hour FMP has no data for it yet, and every US value would be withheld.
+`ticker_value` (price + USD market cap) is written by the valuation pass (`modules/ticker/valuation.py::run()`: every valid ticker in each active ETF's latest holdings from the last 10 days (`etf_selection.MAX_HOLDINGS_AGE_DAYS`, as best ideas' `LOOK_BACK_WINDOW`), plus the registered lines of a screen stored for the date — once per ticker, 5 in parallel, skipping tickers already valued for the date), via `modules/ticker/pricing.py::store_validated_ticker_value`, which validates against FMP historical endpoints and converts to USD with per-date FX rates. Resolution no longer stores values (a ticker held by several providers was valued once per provider). Values are stored under `pricing.latest_value_date()` — the latest completed trading day (before 17:00 ET the previous day, weekends stepped back to Friday) — so the Wednesday cron (~01:00–04:00 UTC) values Tuesday's close. Never `date.today()`: at that hour FMP has no data for it yet, and every US value would be withheld.
 
 **Cron schedule** (weekday 0=Monday, UTC):
-- Tue–Sat, listings in first, then ticker maintenance over every ticker: `etf_downloader.run()` (holdings, resolution) → `screener.run(store=(weekday == 2))` (registers the ~2,500 home-market listings, ~1 min; on Wednesday also stores the screen) → `refresh.refresh_ticker_profiles()` (first, so values use current currencies and skip newly invalid tickers) → `valuation.run()` (~3,600 tickers, ~4,500 on Wednesday with the screen) → `master.sync_masters_and_company_data()` (master ticker sync + company market cap/region from the day's values, DB-only) → `style.assign_styles()` (after the sync, so siblings aren't classified on their own).
-- Sun (ticker maintenance, weekly part): `categorize_downloader.run()` → `esg.refresh_all()`; then `ncen.run()` → `etf_profile.run()` (the SEC active ETF list and its FMP profiles, below — last, nothing in the pipeline reads them)
+- Tue–Sat, listings in first, then ticker maintenance over every ticker: `etf_downloader.run()` (FMP holdings of the selection's download targets, line resolution, then `etf_selection.run()`; unresolved lines retried on Wednesdays) → `screener.run(store=(weekday == 2))` (registers the ~2,500 home-market listings, ~1 min; on Wednesday also stores the screen) → `refresh.refresh_ticker_profiles()` (first, so values use current currencies and skip newly invalid tickers) → `valuation.run()` (~3,600 tickers, ~4,500 on Wednesday with the screen) → `master.sync_masters_and_company_data()` (master ticker sync + company market cap/region from the day's values, DB-only) → `style.assign_styles()` (after the sync, so siblings aren't classified on their own).
+- Sun (ticker maintenance, weekly part): `categorize_downloader.run()` (style reference ETFs' FMP holdings) → `esg.refresh_all()`; then `ncen.run()` → `etf_profile.run()` (the SEC active ETF list, its FMP profiles and the selection rules, below — new ETFs start downloading on Tuesday)
 - Wed (after the Tue–Sat steps), the generators: `index_funds.refresh()` (VTI/VEA/VWO snapshot + size breakpoints, below) → `free_float.refresh()` → `company_builder.run()` → `benchmark_generator.run()` → best ideas generation → fund updates. A failed step stops the rest: the FMP screener raises once its 3 attempts fail, and no companies or an empty benchmark raises too. Each step reads its input from the database (the latest screen / screened companies on or before today), so any one can be re-run alone (`scripts/current_screener.py` [`--register-only`], `data_fill_ticker_profile.py`, `current_ticker_values.py`, `data_fill_master_tickers.py`, `current_index_funds.py`, `current_float_factors.py`, `current_company_builder.py`, `current_benchmark_generator.py`).
 
 **Ticker utilities** (`modules/ticker/`, README "Ticker utilities"): registration (`resolver.py`; screener lines via `screener.register_listings`) → profile refresh (`refresh.py`) → prices and market caps (`valuation.py` + `pricing.py`) → share-class consolidation (`master.py`, `company.py`, `identity.py`) → style (`style.py`) → ESG (`esg.py`, weekly) → index funds and size breakpoints (`index_funds.py`, weekly, Wednesday first) → free float / float factors (`free_float.py`, weekly, Wednesday before the company builder). Stages call them; they don't live inside a stage. `resolver.py` and `esg.py` import each other as modules (new tickers get ESG at registration) — keep those imports module-level (`from modules.ticker import esg`), not name-level.
@@ -105,7 +101,7 @@ They're built in three steps, each reading the previous one's output from the da
 
 **`modules/cron/benchmark_generator.py::run(screen_date)`** only forms benchmarks: for every enabled `benchmark` row, the latest screened companies (read through their current master, `current_companies`) of its `region`, passing `index_funds.passes_large` against its cutoff (`benchmark_cutoffs`: its region's breakpoint at its `market_coverage` on the screen date) with the company's `float_factor` (`company_float_factors`), of its `style_type` (`blend`/`core`: any; `value`/`growth`: the company's `ticker.style_type`) — `select_holdings(companies, benchmarks, cutoffs, float_factors, styles)` — market-cap weighted on the whole company cap (by decision: the size managers look at) and stored at their screen date — Tuesday for the Wednesday run (`store_holdings`, replacing that date); the summary shows each cutoff. Any empty benchmark raises before anything is stored. The sim backfill uses the same `select_holdings`/`store_holdings` per Wednesday with that Wednesday's cutoffs (the earliest stored breakpoints before snapshots were kept) and today's float factors. The funds' large / mid_small filter uses the same rule: `funds_update.build_shared_context` adds `large_cap_min` (by region, `large_cutoffs(as_of_date)`) and `float_factor` columns, and `model_fund.large_cap_mask` applies them (a held stock below it stays eligible for a `large` fund).
 
-Each `provider_etf` row has an optional `benchmark_id` FK pointing to the appropriate benchmark. When set, `best_ideas_generator` computes best ideas twice per ETF — once using the ETF's own holdings as the benchmark (`benchmark_mode = 'self'`) and once using the external benchmark (`benchmark_mode = 'full_universe'`). Both sets are stored in `best_idea`.
+Each `provider_etf` row has a `benchmark_id` FK set by the selection (`etf_selection._benchmark_ids`): its region's enabled large blend/core benchmark (none for Global). When set, `best_ideas_generator` computes best ideas twice per ETF — once using the ETF's own holdings as the benchmark (`benchmark_mode = 'self'`) and once using the external benchmark (`benchmark_mode = 'full_universe'`). Both sets are stored in `best_idea`.
 
 `fund.strategy.benchmark` (`'full_universe'` | `'self'`, default `'full_universe'`) controls which mode `funds_update` selects when building each fund's model portfolio.
 
@@ -129,7 +125,13 @@ Both the company builder (feeding `benchmark_holding`) and `best_ideas_generator
 
 `modules/sec/ncen.py::run()` (Sunday; `scripts/current_sec_active_etfs.py` by hand, which also runs the profiles below, CSV to `.output/sec_active_etfs.csv`) keeps `sec_active_etf`: one row per SEC series whose latest **Form N-CEN** marks it an exchange-traded fund and not an index fund (Item C.3 — the fund's own statement; GSLC, JQUA, BetaBuilders, BOUT/FFTY, NIXT are index funds by it). Read **from EDGAR directly** (`modules/sec/edgar.py`: quarterly `full-index/.../form.idx` — rows read from the right, the columns are wider than the header — then each filing's `primary_doc.xml`; `SECRET_SEC_USER_AGENT` required, 5 requests/s, gzip), not the SEC's quarterly N-CEN data sets (weeks late; 2025 Q4 lacks 97 of 598 filings). Each run reads the last `WINDOW_QUARTERS` (5) indexes and the filings not yet in `sec_ncen_filing` (first run ~3,900, ~20 min); a failed filing is stored with its error (XML to `.output/downloads/ncen/`) and retried; >10% failing raises. Per filing (`sec_active_etf.apply_filing`, one transaction): upsert its active ETFs, delete its series now index / not ETF, mark its `terminatedSeriesInfo` series (all its series on `isRegistrantLastFiling`) — every write guarded by (report_period, filing_date), so order and re-reads (`--reload`) don't matter. XML: fund types are `fundTypes/fundType` text plus `@fundType` attributes (`indexFundInfo fundType="Index Fund"`; leveraged funds are "Inverse of a benchmark"); the listed ticker comes from Part E (`exchangeSeriesInfo/exchangeTradedFund/etfSeriesId` + `securityExchange/@fundsTickerSymbol`), else the share class; a filing may cover only some of a trust's series. ElementTree's `iter()` ignores `{*}` — use `iterfind('.//{*}…')`. Current list: not terminated, filed within `CURRENT_WINDOW_DAYS` (455). No asset class/region (N-CEN has none).
 
-**Profiles** — `modules/sec/etf_profile.py::run(refresh_all)` (Sunday after `ncen.run()`): current funds never checked, with a newer filing, or 28 days since (`sec_etf_classification.updated_at`), 2 FMP calls each (`api_stocks.get_etf_info` — `sectorsList` equals `etf/sector-weightings` — and `get_etf_holdings`), 4 threads under the shared throttle. `classify`: `leveraged_inverse` (SEC flag / asset class / name) → `fund_of_funds` (SEC flag, left out by decision) → `buffer`, `option_income` (name rules — FMP files PJAN, JEPI, QQQI under equity) → FMP asset class → `equity` (equity or no asset class and `equity_weight` ≥ 0.8: lines matched to an index-fund stock, or any line whose name isn't cash/currency/MMF/derivative/bond — `_NON_STOCK_NAME`; FMP lists JADE's Samsung etc. by name only). Only `equity` goes to **`test_provider` / `test_provider_etf` / `test_provider_etf_holding`** (migration 16; parallel to `provider*` without scraping columns; disabled, 'Awaiting approval by admin'; nothing in the live pipeline reads them — the future Tue–Sat FMP download for enabled ones is not built). Profile against `build_reference` (the index funds' stored snapshot): region by the US fund's share (≥80% US, ≤20% International, else Global), cap size by the 0.70 / 0.90 breakpoints of each stock's market (Morningstar-style; fund large ≥70% large, small ≥50%, mid ≥50%, smid ≥70% mid+small, else all), value/growth only for large (our `style_type`), both needing `stock_weight` ≥ 0.5. Holdings stored **once** (symbol/name/ISIN/CUSIP kept, `ticker_id` where matched — none registered); a fund that stops passing or leaves the SEC list is disabled with the reason (and back to awaiting approval if it passes again).
+**Profiles** — `modules/sec/etf_profile.py::run(refresh_all)` (Sunday after `ncen.run()`): current funds never checked, with a newer filing, or 28 days since (`sec_etf_classification.updated_at`; an active ETF 6 days — every Sunday — so the rules read a profile at most a week old), 2 FMP calls each (`api_stocks.get_etf_info` — `sectorsList` equals `etf/sector-weightings` — and `get_etf_holdings`), 4 threads under the shared throttle. `classify`: `leveraged_inverse` (SEC flag / asset class / name) → `fund_of_funds` (SEC flag, left out by decision) → `buffer`, `option_income` (name rules — FMP files PJAN, JEPI, QQQI under equity) → FMP asset class → `equity` (equity or no asset class and `equity_weight` ≥ 0.8: lines matched to an index-fund stock, or any line whose name isn't cash/currency/MMF/derivative/bond — `_NON_STOCK_NAME`; FMP lists JADE's Samsung etc. by name only). Only `equity` goes to **`provider` / `provider_etf`** (one `provider` per FMP `etfCompany`; `provider_etf` keyed by `sec_series_id`, new rows `status = 'pending'`); a provider ETF whose profile stops being equity gets its new `strategy` (`set_strategy_by_series`) and the selection makes it inactive. Profile against `build_reference` (the index funds' stored snapshot): region by the US fund's share (≥80% US, ≤20% International, else Global), cap size by the 0.70 / 0.90 breakpoints of each stock's market (Morningstar-style; fund large ≥70% large, small ≥50%, mid ≥50%, smid ≥70% mid+small, else all), value/growth only for large (our `style_type`), both needing `stock_weight` ≥ 0.5; `stock_holdings` = lines matched to an index-fund stock; sector weights from FMP's `sectorsList`, else (`holding_sectors`) our `ticker.sector` over the lines resolving to one company, when they cover ≥ 50% of `equity_weight`. The profile run stores no holdings. It ends with the selection.
+
+Migration 17 made these the provider tables: the hand-configured, Playwright-scraped ones are kept as **`old_provider` / `old_provider_etf` / `old_provider_etf_holding`** (read only by the old-vs-new comparison in `scripts/current_sec_active_etfs.py`); `best_idea` / `fund_analysis` / `fund_holding` / `fund_holding_change` were emptied and the funds' `strategy.provider_etfs` lists removed (every fund draws on all active ETFs). The sim's holdings history starts at the switch.
+
+**Selection** — `modules/sec/etf_selection.py::run(as_of)` (after every profile run and every holdings download): `provider_etf.status` replaces manual approval. Active = on the current SEC list, `strategy = 'equity'`, and region US / International (Global has no benchmark or fund region), `cap_type` large / all, 20–200 `stock_holdings`, `top_sector_weight` ≤ 40%, latest `provider_etf_holding.holding_date` ≤ `MAX_HOLDINGS_AGE_DAYS` (10 — FMP refreshes most funds weekly, dated Sunday; some on Thursdays) old; unknown fails. A fund moved to another trust is on the SEC list twice under one ticker until its old series drops off (BRIF, TGLR): only the row with the latest filing can be active, the other fails `duplicate` (same FMP holdings, counted twice in the funds). Otherwise inactive — except passing everything but with no holdings stored yet: `pending` until its first download. No reason column: `failed_rules` recomputes it (email summary, CSV). Also sets `benchmark_id` (its region's large blend/core benchmark). `best_ideas_generator.LOOK_BACK_WINDOW` and `valuation.HOLDINGS_LOOK_BACK_DAYS` are `MAX_HOLDINGS_AGE_DAYS`; `best_idea.fetch_all_as_df` reads active ETFs only.
+
+**Holdings download** — `modules/cron/etf_downloader.py::run(as_of, retry_unresolved)` (Tue–Sat, first; `scripts/current_etf_holdings.py`): `etf_selection.download_targets` (active, pending, and those failing only freshness, so they come back when FMP refreshes), `get_etf_holdings` 4 threads, lines stored under FMP's date (`index_funds.holdings_date`: max `updatedAt`; none → skipped) replacing that date (`replace_holdings`, every line with FMP's symbol/name/ISIN/CUSIP, weight as a fraction). Line → ticker, first match: our tickers by symbol/ISIN/CUSIP (`index_funds.matched_ticker_id`, no API call); none for non-stock names (`etf_profile.is_stock_line`) or weight ≤ 0; the ETF's previous line with the same (symbol, ISIN, CUSIP, name) (name-only lines; a previously unresolved one retried only with `retry_unresolved` — Wednesdays); `TickerResolver.resolve_fmp_line` (registers, ESG at registration). >10% of targets failing raises. Then the selection.
 
 ### Key Modules
 
@@ -139,20 +141,19 @@ Both the company builder (feeding `benchmark_holding`) and `best_ideas_generator
 | `modules/core/api_stocks.py` | FinancialModelingPrep API client with token-bucket rate limiting (200 req/min). Query values go through `_q` (URL-encoded): an unencoded `&` (NSE's `M&M.NS`) made FMP answer for `M` (Macy's) — `scripts/data_fix_symbol_encoding.py` repaired the tickers that got another company's data |
 | `modules/core/sender.py` | Admin email notifications via Mailgun |
 | `modules/cron/best_ideas_generator.py` | Core algorithm: active weight = ETF% − benchmark weight (`prepare_etf_inputs` → `compute_active_weights` → `select_best_ideas`) |
-| `modules/calc/classification.py` | Scikit-learn GradientBoosting value/growth classifier — used by live (`etf_downloader`) and BT |
+| `modules/calc/classification.py` | Scikit-learn GradientBoosting value/growth classifier — used by live (`style.assign_styles`) and BT |
 | `modules/calc/esg.py` | ESG qualification rules (risk rating / ESG score / governance score thresholds) |
 | `modules/calc/model_fund.py` | Fund strategy parsing and composition logic; `Strategy.benchmark` selects best-idea mode |
-| `modules/parse/download.py` | Per-provider collection: scrape → parse → resolve → store holdings |
-| `modules/parse/url.py` | Playwright scraper with anti-detection; replays recorded event sequences |
-| `modules/parse/convert.py` | Excel/CSV parsing using provider `Mapping` config from DB |
+| `modules/cron/etf_downloader.py` | Tue–Sat FMP holdings of the selection's download targets, line → ticker resolution → `provider_etf_holding`, then the selection |
+| `modules/sec/etf_selection.py` | The selection rules: `provider_etf.status` (pending / active / inactive) and `benchmark_id`; `download_targets` |
 | `modules/object/benchmark.py` | Dataclasses and CRUD for `benchmark` and `benchmark_holding` tables |
 | `modules/object/screener_listing.py`, `modules/object/screener_company.py` | The stored weekly screen (one row per screener line) and the same screen by company (one row per company, from the company builder) |
 | `modules/cron/screener.py` | FMP screener fetch per exchange, line classification, home-market line registration (`register_listings`, daily); Wednesday: `screener_listing` storage and value validation |
 | `modules/cron/company_builder.py` | Screened companies from the stored screen: foreign-line admission, one row per company, duplicate guard → `screener_company` |
 | `modules/cron/benchmark_generator.py` | Forms every enabled `benchmark` row (region / `market_coverage` cutoff + minimum float / style) from the stored screened companies → `benchmark_holding` |
 | `modules/ticker/index_funds.py` | Weekly `refresh()`: the index funds' (`universe_etf` VTI/VEA/VWO) holdings snapshot with company float caps (`universe_etf_holding`) and the market's size breakpoints (`market_breakpoint`); `cutoff` / `large_cutoffs` / `passes_large` for the benchmarks, screener, funds' cap filter, cap check and SEC profiles |
-| `modules/sec/etf_profile.py` | SEC active ETFs' FMP profiles: strategy per fund (`sec_etf_classification`), actively managed equity funds → `test_provider*` (disabled), holdings once |
-| `modules/cron/categorize_downloader.py` | Scrapes style reference ETFs into `categorize_ticker` (with FMP factors) |
+| `modules/sec/etf_profile.py` | SEC active ETFs' FMP profiles: strategy per fund (`sec_etf_classification`), actively managed equity funds → `provider` / `provider_etf` (pending until the selection) |
+| `modules/cron/categorize_downloader.py` | The style reference ETFs' FMP holdings (`categorize_etf.ticker`: VUG, VTV, VBK, VBR, ISCV, ISCG, IMCG, IMCV, ILCV, ILCG) into `categorize_ticker` (with FMP factors) |
 | `modules/ticker/style.py` | `assign_styles()`: the style chain (CAT_ETF → PROVIDER_ETF → MODEL) for unclassified companies, run after the daily master sync |
 | `modules/ticker/free_float.py` | Weekly `refresh()`: FMP free float per listing (`ticker.free_float`; 0 = note/preferred) and the float factor per company (`ticker.float_factor`; the 10% minimum for benchmarks / the funds' large filter) from the stored VTI/VEA/VWO snapshot, else free float, plus the large-cap market-cap check against the index funds (`cap_checks`) |
 | `modules/ticker/esg.py` | `populate_esg` (one ticker; new tickers at registration) and `refresh_all()` (weekly, every valid company — masters/standalone only) |
@@ -161,7 +162,7 @@ Both the company builder (feeding `benchmark_holding`) and `best_ideas_generator
 | `modules/ticker/refresh.py` | Ticker profile refresh (cik/isin/name/currency/validity), value-history resync on a currency change or a history off the profile's share count (`stored_cap_off_profile`) |
 | `modules/ticker/company.py` | Primary-listing rule behind the master, `company_market_cap` and `region`; non-equity / depositary line detection |
 | `modules/ticker/identity.py` | Evidence that two listing groups are one company (shared ISIN, name + cap, depositary receipt, dual listing) — master linking and the benchmark duplicate guard |
-| `modules/ticker/resolver.py` | Resolves provider holding lines to `ticker` rows (US: symbol; non-US: ISIN, else symbol search, else verified name search) |
+| `modules/ticker/resolver.py` | Resolves holding lines to `ticker` (or `categorize_ticker`) rows: FMP lines (`resolve_fmp_line`: FMP's symbol when its profile's ISIN/CUSIP/name agree, else ISIN, else verified name search); `resolve(region, …)` for others |
 | `modules/ticker/valuation.py` | The valuation pass: which tickers are in use (recent ETF holdings + a stored screen), each valued once for `pricing.latest_value_date()`, in parallel |
 | `modules/ticker/pricing.py` | Validated `ticker_value` storage (FMP history cross-check, grace period, invalid flagging), FMP market-cap glitch repair, historical FX → USD, and `latest_value_date()` |
 | `modules/object/fund_analysis.py` | Per-fund snapshot of every constituent ETF company's active-weight calculation |
@@ -172,7 +173,7 @@ Both the company builder (feeding `benchmark_holding`) and `best_ideas_generator
 
 ### Holding lines, duplicates and ticker resolution
 
-Provider files are resolved line by line to `ticker_id` (`TickerResolver`). Non-US lines without an ISIN fall back to FMP symbol search and then name search; a name candidate is only accepted when `ticker.util.names_match` holds (every token of the shorter name matches, covering more than half of the longer one), never on a single shared word — loose matching used to map unrelated holdings onto one ticker.
+FMP holding lines are resolved line by line to `ticker_id` (`etf_downloader`, above). FMP's symbol is trusted only when its profile is the line's security (ISIN, else CUSIP, else `names_match`) — a fund's symbol can be another company's (FAB: First Abu Dhabi Bank vs a First Trust fund); lines without one fall back to the ISIN and then name search; a name candidate is only accepted when `ticker.util.names_match` holds (every token of the shorter name matches, covering more than half of the longer one), never on a single shared word — loose matching used to map unrelated holdings onto one ticker.
 
 A ticker can still appear on several lines of one ETF/date. `provider_etf_holding.aggregate_holdings()` (used by `best_ideas_generator.prepare_etf_inputs`) sums the lines when they all imply the same price (`DUP_PRICE_TOLERANCE`), and **quarantines** all of that ticker's lines when they don't (they're most likely different securities mis-resolved to one ticker) — reported as `QUARANTINED DUPLICATES` per ETF. `scripts/debug_holding_duplicates.py` reports current duplicate groups.
 
@@ -201,17 +202,11 @@ BT has its own parallel set of dataclasses under `modules/bt/object/` that mirro
 
 - **Live** (`modules/ticker/style.py::assign_styles()`, Tue–Sat right after the master sync so a new listing is grouped before it could be classified on its own; also `scripts/current_categorize_tickers.py`), only for tickers with `style_type IS NULL`, skipping share-class siblings (`master_ticker_id` set); `ticker.type_from` records the source:
   1. `CAT_ETF` — `ticker.update_style_for_unclassified()`: match on `categorize_ticker` (symbol + exchange), sets style and cap
-  2. `PROVIDER_ETF` — `ticker.update_style_from_provider_etfs()`: held by a provider ETF whose `style_type` is value/growth
+  2. `PROVIDER_ETF` — `ticker.update_style_from_provider_etfs()`: held by a provider ETF whose `style_type` is value/growth (the profile's: ≥60% of its style-classified weight)
   3. `MODEL` — `classification.mark_style(classifier, ticker)`: GradientBoosting trained on `categorize_ticker` factors; tickers with no FMP factor data get `style_factors_failed_at` and are retried after 30 days
   
   `ticker.update_style_from_categorization_etfs()` exists but is not called anywhere.
 - **BT**: same classifier approach via its own modules; `ticker.mark_style(classifier)` handles residual tickers.
-
-### Web Scraping
-
-Playwright with `playwright-stealth`. Provider/ETF scraping config (URL, CSS selectors, event sequences) is stored in the database `provider` and `provider_etf` tables. Events are recorded with the [Playwright CRX Chrome plugin](https://chromewebstore.google.com/detail/jambeljnbnfbkcpnoiaedcabbgmnnlcd) and stored as JSON arrays.
-
-Pass `--headed` on the command line to run with a visible browser window when debugging scraping issues (see Dev/Prod DB switching above).
 
 ### DB Schema Migrations
 
@@ -220,7 +215,7 @@ Column additions follow the `x_d_shift_columns_template` pattern (5-step shift; 
 ## Environment Variables
 
 ```
-ENV_TYPE=development|production   # fallback when no --prod/--dev flag is passed (Docker image sets production)
+ENV_TYPE=development|production   # fallback when no --prod/--dev flag is passed (the hosting cron job passes --prod)
 PYTHONPATH=<project root>         # so `modules.*` imports resolve when running scripts
 SECRET_DATABASE_USER=             # development (default)
 SECRET_DATABASE_PASSWORD=

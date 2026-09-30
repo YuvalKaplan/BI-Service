@@ -100,7 +100,7 @@ class NcenRunStats:
     removed: int = 0                                    # a newer filing says index fund / not an ETF
     terminated: int = 0
     current: int = 0                                    # the current list after the run
-    tracked: int = 0                                    # ... of which tracked in provider_etf
+    tracked: int = 0                                    # ... of which in provider_etf (equity funds)
 
 
 def _local(tag: str) -> str:
@@ -285,7 +285,7 @@ def summary(stats: NcenRunStats) -> str:
         f"SEC active ETFs (N-CEN, {stats.window}): {stats.read} new filing(s) read of {stats.indexed} indexed"
         f"{f', {len(stats.failed)} failed' if stats.failed else ''} - {stats.added} ETF(s) added, {stats.updated} updated, "
         f"{stats.removed} removed (index fund / not an ETF by a newer filing), {stats.terminated} terminated",
-        f"Current list: {stats.current} active ETFs, {stats.tracked} of them tracked in provider_etf",
+        f"Current list: {stats.current} active ETFs, {stats.tracked} of them equity funds in provider_etf",
     ]
     lines += [f"  failed: {f}" for f in stats.failed[:10]]
     if len(stats.failed) > 10:

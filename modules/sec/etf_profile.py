@@ -1,8 +1,8 @@
 """
 Finds the actively managed equity funds among the SEC active ETFs (sec_active_etf) from their FMP
-data, and places them - with a profile of what they hold - in the test provider tables
-(test_provider, test_provider_etf, test_provider_etf_holding), parallel to the scraped provider
-tables and disabled until an admin approves them.
+data, and places them - with a profile of what they hold - in the provider tables (provider,
+provider_etf). The selection rules (modules/sec/etf_selection.py) then decide which of them feed
+best ideas; their holdings are downloaded by modules/cron/etf_downloader.py.
 
 Per fund, two FMP calls: etf/info (asset class, provider, description, website, AUM, NAV,
 inception, sector weights) and etf/holdings. The reference for a fund's stocks is the index funds'
@@ -16,10 +16,12 @@ A fund's strategy (classify): leveraged_inverse (its N-CEN says it seeks a multi
 an index, FMP's asset class, or its name), fund_of_funds (its N-CEN - left out), buffer and
 option_income (its name - FMP files many under equity), then FMP's asset class; equity needs an
 equity (or no) asset class and at least EQUITY_MIN_WEIGHT of the fund in stock lines. Only equity
-funds go in the test tables, profiled by region (US / International / Global), cap size (large /
-mid / small / smid / all), value / growth (large-cap funds, from our tickers' style_type) and FMP's
-sector weights. Their holdings are stored once. Every checked fund's strategy is kept in
-sec_etf_classification, so it's checked again only after PROFILE_REFRESH_DAYS or a newer filing.
+funds go in provider_etf, profiled by region (US / International / Global), cap size (large / mid /
+small / smid / all), value / growth (large-cap funds, from our tickers' style_type) and sector
+weights (FMP's, else our tickers' sectors). A provider ETF no longer equity keeps its row with its
+new strategy, and the selection makes it inactive. Every checked fund's strategy is kept in
+sec_etf_classification, so it's checked again only after PROFILE_REFRESH_DAYS (an active fund:
+PROFILE_REFRESH_DAYS_ACTIVE, so the rules read a profile at most a week old) or a newer filing.
 """
 import log
 import re
@@ -28,16 +30,17 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from collections import Counter, defaultdict
 from modules.core import api_stocks
-from modules.object import batch_run, sec_active_etf, sec_etf_classification, test_provider, test_provider_etf, test_provider_etf_holding
+from modules.object import batch_run, provider, provider_etf, sec_active_etf, sec_etf_classification
 from modules.object.batch_run import BatchRun
+from modules.object.provider_etf import ProviderEtf, ACTIVE
 from modules.object.sec_active_etf import SecActiveEtf
 from modules.object.sec_etf_classification import SecEtfClassification
-from modules.object.test_provider_etf import TestProviderEtf, NOT_EQUITY_REASON, SEC_GONE_REASON
-from modules.object.test_provider_etf_holding import TestProviderEtfHolding
-from modules.sec import ncen
+from modules.sec import etf_selection, ncen
+from modules.sec.etf_selection import SelectionStats
 from modules.ticker import index_funds
 
 PROFILE_REFRESH_DAYS = 28   # a fund's profile is checked again after this long (or after a newer filing)
+PROFILE_REFRESH_DAYS_ACTIVE = 6  # ... an active fund's: every Sunday run
 FETCH_WORKERS = 4           # funds fetched in parallel, all under api_stocks' 200-calls-a-minute throttle
 EQUITY_MIN_WEIGHT = 0.8     # share of the fund in stock lines an equity fund needs
 MIN_COVERAGE = 0.5          # share of the fund matched to the index funds' stocks needed for region and size
@@ -50,10 +53,11 @@ MID_MIN = 0.5               # ... mid share for 'mid'
 SMID_MIN = 0.7              # ... mid + small share for 'smid'; otherwise 'all'
 STYLE_MIN = 0.6             # value (growth) share of the style-classified weight for 'value' ('growth')
 STYLE_MIN_COVERAGE = 0.5    # style-classified share of the stock weight needed for value / growth
+SECTOR_MIN_COVERAGE = 0.5   # sector-classified share of the stock weight needed for our own sector weights
 MAX_FAILED_SHARE = 0.1
 MIN_FAILED_TO_RAISE = 5
 
-EQUITY = 'equity'
+EQUITY = etf_selection.EQUITY
 REGION_US, REGION_INTERNATIONAL, REGION_GLOBAL = 'US', 'International', 'Global'
 
 # Leveraged / inverse by name (the N-CEN flag and FMP's asset class catch most): 2x, 1.5x, Bull /
@@ -131,8 +135,9 @@ class ProfileRunStats:
     equity_by_cap: Counter = field(default_factory=Counter)
     etfs_added: int = 0
     etfs_updated: int = 0
-    etfs_disabled: int = 0
-    holdings_stored: int = 0                                  # funds whose holdings were stored (once)
+    no_longer_equity: int = 0                                 # provider ETFs whose profile isn't equity any more
+    sectors_from_holdings: int = 0                            # equity funds FMP has no sector weights for
+    selection: SelectionStats | None = None
 
 
 def _keys(line: dict) -> list[str]:
@@ -184,7 +189,7 @@ def classify(etf: SecActiveEtf, asset_class: str | None, equity_weight: float | 
     return 'other'
 
 
-def _is_stock_line(line: dict, stock: IndexStock | None) -> bool:
+def is_stock_line(line: dict, stock: IndexStock | None) -> bool:
     if stock is not None:
         return True
     name = (line.get('name') or '').strip()
@@ -204,7 +209,7 @@ def profile_fund(etf: SecActiveEtf, info: dict | None, holdings: list[dict], ref
     if total > 0:
         matched = [(r['weightPercentage'] / total, ref.index.get(next((k for k in _keys(r) if k in ref.index), ''))) for r in lines]
         stock = [(w, s) for w, s in matched if s is not None]
-        p.equity_weight = sum(w for (w, s), r in zip(matched, lines) if _is_stock_line(r, s))
+        p.equity_weight = sum(w for (w, s), r in zip(matched, lines) if is_stock_line(r, s))
         p.stock_weight = sum(w for w, _ in stock)
         p.stock_holdings = len(stock)
         p.top10_weight = sum(sorted((r['weightPercentage'] / total for r in lines), reverse=True)[:10])
@@ -240,6 +245,8 @@ def profile_fund(etf: SecActiveEtf, info: dict | None, holdings: list[dict], ref
 
     sectors = {s.get('industry'): (s.get('exposure') or 0) / 100 for s in (info or {}).get('sectorsList') or []
                if s.get('industry') and (s.get('exposure') or 0) > 0}
+    if not sectors:
+        sectors = holding_sectors(lines, total, ref, p.equity_weight)
     if sectors:
         p.sector_weights = dict(sorted(sectors.items(), key=lambda kv: -kv[1]))
         top = next(((k, v) for k, v in p.sector_weights.items() if not k.lower().startswith('cash')), None)
@@ -248,15 +255,35 @@ def profile_fund(etf: SecActiveEtf, info: dict | None, holdings: list[dict], ref
     return p
 
 
+def holding_sectors(lines: list[dict], total: float, ref: Reference, equity_weight: float | None) -> dict[str, float]:
+    """Sector weights from our tickers when FMP has none: each line resolving to one of our
+    companies weighs in its sector (ticker.sector), as shares of the sector-classified weight -
+    {} unless that covers SECTOR_MIN_COVERAGE of the fund's stock lines."""
+    if total <= 0 or not equity_weight:
+        return {}
+    by_sector: dict[str, float] = defaultdict(float)
+    for r in lines:
+        companies = {ref.listings.company_of[tid] for tid in index_funds.matched_listings(r, ref.listings)}
+        company = ref.listings.by_id.get(next(iter(companies))) if len(companies) == 1 else None
+        if company is not None and company.sector:
+            by_sector[company.sector] += r['weightPercentage'] / total
+    classified = sum(by_sector.values())
+    if classified < SECTOR_MIN_COVERAGE * equity_weight:
+        return {}
+    return {sector: w / classified for sector, w in by_sector.items()}
+
+
 def _targets(refresh_all: bool, as_of: date) -> list[SecActiveEtf]:
     current = [e for e in sec_active_etf.fetch_current(ncen.filed_since(as_of)) if e.ticker]
     if refresh_all:
         return current
     checked = sec_etf_classification.fetch_all()
-    stale = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=PROFILE_REFRESH_DAYS)
+    active = {e.sec_series_id for e in provider_etf.fetch_all() if e.status == ACTIVE and e.sec_series_id}
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     out = []
     for e in current:
         c = checked.get(e.series_id)
+        stale = now - timedelta(days=PROFILE_REFRESH_DAYS_ACTIVE if e.series_id in active else PROFILE_REFRESH_DAYS)
         if c is None or c.fmp_error or c.updated_at is None or c.updated_at < stale or (e.updated_at and c.updated_at < e.updated_at):
             out.append(e)
     return out
@@ -271,21 +298,11 @@ def _fetch(etf: SecActiveEtf) -> tuple[SecActiveEtf, dict | None, list[dict], Ex
         return etf, None, [], e
 
 
-def _holding_date(holdings: list[dict]) -> datetime:
-    stamps = [h.get('updatedAt') for h in holdings if h.get('updatedAt')]
-    try:
-        return datetime.combine(datetime.fromisoformat(max(stamps)).date(), datetime.min.time()) if stamps else \
-            datetime.combine(date.today(), datetime.min.time())
-    except ValueError:
-        return datetime.combine(date.today(), datetime.min.time())
-
-
-def _save_equity(etf: SecActiveEtf, info: dict, holdings: list[dict], p: Profile, ref: Reference,
-                 with_holdings: set[int], stats: ProfileRunStats) -> None:
-    provider_id = test_provider.ensure_by_name(info.get('etfCompany') or etf.adviser_name or etf.registrant_name or 'Unknown')
+def _save_equity(etf: SecActiveEtf, info: dict, p: Profile, stats: ProfileRunStats) -> None:
+    provider_id = provider.ensure_by_name(info.get('etfCompany') or etf.adviser_name or etf.registrant_name or 'Unknown')
     inception = info.get('inceptionDate')
-    etf_id, inserted = test_provider_etf.upsert_profile(TestProviderEtf(
-        test_provider_id=provider_id, sec_series_id=etf.series_id,
+    _etf_id, inserted = provider_etf.upsert_profile(ProviderEtf(
+        provider_id=provider_id, sec_series_id=etf.series_id,
         region=p.region, name=info.get('name') or etf.fund_name, description=info.get('description'),
         isin=info.get('isin') or None, ticker=etf.ticker, cap_type=p.cap_size, style_type=p.value_growth,
         trading_since=datetime.fromisoformat(inception) if inception else None, website=info.get('website') or None,
@@ -299,22 +316,10 @@ def _save_equity(etf: SecActiveEtf, info: dict, holdings: list[dict], p: Profile
     ))
     stats.etfs_added += inserted
     stats.etfs_updated += not inserted
-    if etf_id not in with_holdings and holdings:  # the holdings are stored once
-        when = _holding_date(holdings)
-        test_provider_etf_holding.insert_all([TestProviderEtfHolding(
-            test_provider_etf_id=etf_id, holding_date=when, ticker_id=index_funds.matched_ticker_id(h, ref.listings),
-            shares=h.get('sharesNumber'), market_value=h.get('marketValue'),
-            weight=(h['weightPercentage'] / 100) if h.get('weightPercentage') is not None else None,
-            symbol=h.get('asset') or None, name=h.get('name') or None, isin=h.get('isin') or None,
-            cusip=h.get('securityCusip') or None,
-        ) for h in holdings])
-        test_provider_etf.set_last_downloaded(etf_id, datetime.now(timezone.utc).replace(tzinfo=None))
-        with_holdings.add(etf_id)
-        stats.holdings_stored += 1
 
 
 def _apply(etf: SecActiveEtf, info: dict | None, holdings: list[dict], error: Exception | None,
-           ref: Reference, with_holdings: set[int], stats: ProfileRunStats) -> None:
+           ref: Reference, provider_series: set[str], stats: ProfileRunStats) -> None:
     stats.checked += 1
     if error is not None:
         stats.failed.append(f"{etf.ticker}: {str(error)[:200]}")
@@ -334,9 +339,11 @@ def _apply(etf: SecActiveEtf, info: dict | None, holdings: list[dict], error: Ex
     if p.strategy == EQUITY:
         stats.equity_by_region[p.region or 'unknown'] += 1
         stats.equity_by_cap[p.cap_size or 'unknown'] += 1
-        _save_equity(etf, info or {}, holdings, p, ref, with_holdings, stats)
-    else:
-        stats.etfs_disabled += test_provider_etf.disable_by_series([etf.series_id], NOT_EQUITY_REASON)
+        stats.sectors_from_holdings += bool(not (info or {}).get('sectorsList') and p.sector_weights)
+        _save_equity(etf, info or {}, p, stats)
+    elif etf.series_id in provider_series:
+        provider_etf.set_strategy_by_series(etf.series_id, p.strategy)
+        stats.no_longer_equity += 1
 
 
 def summary(stats: ProfileRunStats) -> str:
@@ -345,19 +352,22 @@ def summary(stats: ProfileRunStats) -> str:
     lines = [
         f"SEC ETF profiles (FMP): {stats.checked} fund(s) checked, {len(stats.failed)} failed, {stats.not_on_fmp} not on FMP - {strategies or 'none'}",
         f"Equity funds: by region {dict(stats.equity_by_region)}, by cap size {dict(stats.equity_by_cap)}; "
-        f"test provider ETFs {stats.etfs_added} added, {stats.etfs_updated} updated, {stats.etfs_disabled} disabled; "
-        f"holdings stored for {stats.holdings_stored}",
+        f"provider ETFs {stats.etfs_added} added, {stats.etfs_updated} updated, {stats.no_longer_equity} no longer equity; "
+        f"sector weights from our tickers for {stats.sectors_from_holdings}",
     ]
     lines += [f"  failed: {f}" for f in stats.failed[:10]]
+    if stats.selection is not None:
+        lines.append(etf_selection.summary(stats.selection))
     return "\n".join(lines)
 
 
 def run(refresh_all: bool = False, as_of: date | None = None) -> ProfileRunStats:
     """
     Checks the current SEC active ETFs due for a profile (never checked, a newer filing, or
-    PROFILE_REFRESH_DAYS since the last check; every one with refresh_all), saves each one's
-    strategy, and places the equity funds, profiled, in the test provider tables - their holdings
-    stored the first time. Funds that stopped passing, or left the SEC list, are disabled there.
+    PROFILE_REFRESH_DAYS - an active fund: PROFILE_REFRESH_DAYS_ACTIVE - since the last check;
+    every one with refresh_all), saves each one's strategy, and places the equity funds, profiled,
+    in provider_etf (new ones pending). Then the selection rules set every provider ETF's status -
+    funds no longer equity, or no longer on the SEC list, become inactive there.
 
     Raises - so the cron emails the failure - when the index funds' snapshot can't be read or
     more than MAX_FAILED_SHARE of the funds fail.
@@ -367,27 +377,25 @@ def run(refresh_all: bool = False, as_of: date | None = None) -> ProfileRunStats
     log.record_status(f"Starting SEC ETF profiles batch job ID {batch_run_id}{' (all funds)' if refresh_all else ''}")
     stats = ProfileRunStats()
     try:
-        current = {e.series_id for e in sec_active_etf.fetch_current(ncen.filed_since(today))}
-        gone = [e.sec_series_id for e in test_provider_etf.fetch_all() if e.sec_series_id and e.sec_series_id not in current]
-        stats.etfs_disabled += test_provider_etf.disable_by_series(gone, SEC_GONE_REASON)
-
         targets = _targets(refresh_all, today)
         log.record_status(f"{len(targets)} SEC active ETF(s) due for a profile.")
         if targets:
             ref = build_reference(today)
-            with_holdings = test_provider_etf_holding.fetch_etf_ids_with_holdings()
+            provider_series = {e.sec_series_id for e in provider_etf.fetch_all() if e.sec_series_id}
             pool = ThreadPoolExecutor(max_workers=FETCH_WORKERS)
             try:
                 for n, (etf, info, holdings, error) in enumerate(pool.map(_fetch, targets), 1):
-                    _apply(etf, info, holdings, error, ref, with_holdings, stats)
+                    _apply(etf, info, holdings, error, ref, provider_series, stats)
                     if n % 250 == 0:
                         print(f"[etf_profile] {n}/{len(targets)} funds checked")
             finally:
                 pool.shutdown(wait=True, cancel_futures=True)
 
-        log.record_status(summary(stats))
         if len(stats.failed) > max(MIN_FAILED_TO_RAISE, MAX_FAILED_SHARE * len(targets)):
+            log.record_status(summary(stats))
             raise Exception(f"{len(stats.failed)} of {len(targets)} fund profiles failed - first: {stats.failed[0]}")
+        stats.selection = etf_selection.run(today)
+        log.record_status(summary(stats))
         batch_run.update_completed_at(batch_run_id)
         log.record_status("SEC ETF profiles completed.\n")
         return stats

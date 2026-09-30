@@ -3,7 +3,6 @@ from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
 from modules.core.db import db_pool_instance_bt
-from modules.object.provider import Provider 
 
 
 @dataclass

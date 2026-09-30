@@ -578,13 +578,7 @@ CREATE TABLE public.categorize_etf (
     usage character varying(10),
     cap_type text,
     style_type text,
-    url text NOT NULL,
-    wait_pre_events text,
-    wait_post_events text,
-    events jsonb,
-    trigger_download jsonb,
-    mapping jsonb,
-    file_format character varying(10),
+    ticker text NOT NULL,
     last_downloaded timestamp without time zone
 );
 

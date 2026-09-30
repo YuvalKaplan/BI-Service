@@ -1,5 +1,6 @@
 import log
 import pandas as pd
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from functools import partial
@@ -9,11 +10,12 @@ from modules.object.provider_etf_holding import ProviderEtfHolding, QuarantinedH
 from modules.object.ticker_value import fetch_latest_market_caps_within_window
 from modules.object import best_idea, benchmark
 from modules.object.fund_analysis import FundAnalysis
+from modules.sec import etf_selection
 from modules.ticker import company
 
 DAYS_NO_MARKET_CAP = 5
 MIN_HOLDINGS_WITH_PRICES_PCT = 0.95
-LOOK_BACK_WINDOW = 7
+LOOK_BACK_WINDOW = etf_selection.MAX_HOLDINGS_AGE_DAYS  # an active ETF's holdings are never older
 MAX_BEST_IDEAS_PER_FUND = 10
 HOLDING_DELTA_LIMIT_DROP_OFF = 0.20
 
@@ -279,7 +281,8 @@ def record_problem(batch_run_id: int, provider: provider.Provider, etf: provider
 
 def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
     """
-    Generates best ideas for every active provider ETF. When as_of_date is None (live),
+    Generates best ideas for every active provider ETF (status 'active' - the selection rules,
+    modules/sec/etf_selection.py). When as_of_date is None (live),
     holdings and the full_universe benchmark are resolved as of "now". When given (sim),
     they're resolved as of that historical date instead — both fetches already support
     this natively via their up_to_date param.
@@ -289,7 +292,10 @@ def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
     try:
         batch_run_id = batch_run.insert(batch_run.BatchRun(process=process_name, activation='auto'))
 
-        providers = provider.fetch_active_providers()
+        etfs_by_provider: dict[int, list[provider_etf.ProviderEtf]] = defaultdict(list)
+        for pe in provider_etf.fetch_active():
+            etfs_by_provider[pe.provider_id].append(pe)
+        providers = sorted(provider.fetch_by_ids(list(etfs_by_provider)), key=lambda p: p.name)
         log.record_status(f"{log_prefix}Running Best Ideas Generator batch job ID {batch_run_id} - will proccess {len(providers)} providers.")
 
         total_etfs = 0
@@ -300,7 +306,7 @@ def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
         _bm_cache: dict[int, tuple[dict[int, float], date | None]] = {}
 
         for p in providers:
-            pe_list = provider_etf.fetch_by_provider_id(p.id)
+            pe_list = etfs_by_provider[p.id]
             total_etfs += len(pe_list)
             log.record_status(f"Starting processing provider {p.name} with {len(pe_list)} ETFs")
 

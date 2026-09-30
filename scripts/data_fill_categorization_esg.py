@@ -3,7 +3,7 @@ Fills missing style (value/growth) classification and ESG data for valid compani
 standalone tickers; share-class siblings are skipped, as in the live pipeline).
 
 Steps:
-  1. (optional) Re-scrape the categorization style ETFs into categorize_ticker (Playwright, slow).
+  1. (optional) Re-read the style reference ETFs' FMP holdings into categorize_ticker (slow).
   2. Style chain for tickers with style_type IS NULL: CAT_ETF match -> PROVIDER_ETF -> MODEL
      (GradientBoosting). Optionally clears the 30-day back-off on tickers whose factor fetch
      failed before, so the model retries them now.
@@ -15,7 +15,7 @@ only masters get classified. Writes a before/after coverage report to
 
 Usage:
     python scripts/data_fill_categorization_esg.py --dev
-    python scripts/data_fill_categorization_esg.py --prod [--headed]
+    python scripts/data_fill_categorization_esg.py --prod
 """
 import atexit
 import os
@@ -98,18 +98,18 @@ def build_report(before: dict, after: dict, esg_count: int, options: list[str]) 
 
 if __name__ == '__main__':
     try:
-        rescrape = ask("Re-scrape the categorization style ETFs first (Playwright, slow)?")
+        reload_style_etfs = ask("Re-read the style reference ETFs' holdings from FMP first (slow)?")
         retry_failed = ask("Retry tickers whose style factor fetch failed before (ignore the 30-day back-off)?")
         refresh_esg = ask("Refresh ESG for ALL companies (not only those never fetched)?")
         options = [name for name, on in [
-            ('re-scrape categorization ETFs', rescrape),
+            ('re-read style reference ETFs', reload_style_etfs),
             ('retry failed style factors', retry_failed),
             ('refresh all ESG', refresh_esg),
         ] if on]
 
         before = ticker.fetch_style_esg_stats()
 
-        if rescrape:
+        if reload_style_etfs:
             categorize_downloader.run()
         fill_style(retry_failed)
         esg_count = fill_esg(refresh_esg)

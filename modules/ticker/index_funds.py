@@ -146,13 +146,14 @@ def breakpoints(float_caps: list[float], coverages: list[float]) -> dict[float, 
     return out
 
 
-def _holding_date(rows: list[dict]) -> datetime:
+def holdings_date(rows: list[dict]) -> date | None:
+    """The date of a fund's FMP holdings (etf/holdings): its lines' latest updatedAt - None when
+    they have none."""
     stamps = [r.get('updatedAt') for r in rows if r.get('updatedAt')]
     try:
-        day = datetime.fromisoformat(max(stamps)).date() if stamps else date.today()
+        return datetime.fromisoformat(max(stamps)).date() if stamps else None
     except ValueError:
-        day = date.today()
-    return datetime.combine(day, datetime.min.time())
+        return None
 
 
 def summary(stats: RefreshStats) -> str:
@@ -190,7 +191,7 @@ def refresh(as_of: date | None = None) -> RefreshStats:
             if key[0] == 'c' and any(key in caps_of for caps_of in market_caps.values()):
                 continue
             market_caps[f.market].setdefault(key, cap)
-        when = _holding_date(rows[f.symbol])
+        when = datetime.combine(holdings_date(rows[f.symbol]) or date.today(), datetime.min.time())
         snapshots.append((f, when, [UniverseEtfHolding(
             universe_etf_id=f.id, holding_date=when, ticker_id=matched_ticker_id(r, ls),
             shares=r.get('sharesNumber'), market_value=r.get('marketValue'),

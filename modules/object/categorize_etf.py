@@ -1,13 +1,13 @@
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
 from modules.core.db import db_pool_instance
-from modules.core.protocols import CategorizeEtfProtocol
 
 
 @dataclass
 class CategorizeEtf:
+    """A style reference ETF: its FMP holdings (by ticker) are the stocks of its style and cap."""
     id: int | None
     created_at: datetime | None
     name: str | None
@@ -15,21 +15,8 @@ class CategorizeEtf:
     usage: str | None
     cap_type: str | None
     style_type: str | None
-    url: str | None
-    wait_pre_events: str | None
-    wait_post_events: str | None
-    events: dict | None
-    trigger_download: dict | None
-    mapping: dict | None
-    file_format: str | None
+    ticker: str | None
     last_downloaded: datetime | None
-
-@dataclass
-class CategorizeEtfDownload:
-    etf: CategorizeEtfProtocol
-    file_name: str | None = None
-    data: bytes | None = None
-    date_from_page: date | None = None
 
 
 def fetch_all(usage: str) -> list[CategorizeEtf]:

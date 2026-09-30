@@ -2,10 +2,7 @@ from datetime import datetime
 from psycopg.errors import Error
 from psycopg.rows import class_row, dict_row
 from dataclasses import dataclass
-from pydantic import BaseModel
-from typing import Dict, Optional
 from modules.core.db import db_pool_instance_bt
-from modules.object.provider import Mapping
 
 @dataclass
 class Provider:
@@ -16,9 +13,6 @@ class Provider:
     name: str | None
     domain: str | None
     file_format: str | None
-
-def getMappingFromJson(data: dict) -> Mapping:
-    return Mapping.model_validate(data)
 
 def fetch_by_id(id: int) -> Provider | None:
     try:

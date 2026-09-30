@@ -7,7 +7,6 @@ import random
 import string
 import bcrypt
 import re
-from tld import get_fld
 
 def get_consistent_hash(input: str | tuple | list, algorithm='sha256') -> str:
     if algorithm not in hashlib.algorithms_available:
@@ -82,38 +81,3 @@ def clean_dict(obj: Any) -> Any:
         return clean_text(obj)
     else:
         return obj
-    
-
-def get_domain_from_email(email: str) -> str:
-    domain = email.split('@')[1]
-    top_level_domain = get_fld(domain, fix_protocol=True, fail_silently=True)
-    if top_level_domain is None:
-        raise Exception(f"Could not detect First Level Domain in {email}")
-    else:
-        return top_level_domain
-    
-def get_domain_from_url(url: str) -> str:
-    top_level_domain = get_fld(url, fix_protocol=True, fail_silently=True)
-    if top_level_domain is None:
-        raise Exception(f"Could not detect First Level Domain in {url}")
-    else:
-        return top_level_domain
-
-def clean_date(dirty: str, format: str) -> datetime:
-    format_to_regex = {
-        "%Y": r"\d{4}",
-        "%y": r"\d{2}",
-        "%m": r"\d{1,2}",
-        "%d": r"\d{1,2}",
-        "%b": r"\w{3}",
-        "%B": r"\w+"
-    }
-    pattern = format
-    for k, v in format_to_regex.items():
-        pattern = pattern.replace(k, v)
-
-    match = re.search(pattern, dirty)
-    if match:
-        return datetime.strptime(match.group(), format)
-    
-    raise Exception("Date could not be parsed")

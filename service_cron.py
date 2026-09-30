@@ -26,22 +26,22 @@ if __name__ == '__main__':
         message_actions = ""
 
         if 1 <= weekday <= 5: # Tuesday through Saturday
-            # Listings in first — the holdings (stage 2) and the large-cap screener (stage 3), which
-            # register their tickers as they read them — then ticker maintenance (stage 4) runs the
+            # Listings in first — the provider ETFs' FMP holdings (stage 2, then the selection rules on
+            # their new dates) and the large-cap screener (stage 3), which register their tickers as
+            # they read them — then ticker maintenance (stage 4) runs the
             # ticker utilities over every ticker, in order: profiles (so values use current
             # currencies and skip tickers no longer valid) -> values (once per ticker in use; on
             # Wednesday also the stored screen's lines) -> share-class consolidation (company caps
             # come from the values) -> style (after grouping, so a new listing isn't classified on
             # its own). The Wednesday generators only ever use maintained tickers.
             try:
-                stats_downloader, total_downloaded, provider_ids, = etf_downloader.run(start_time)
+                downloads = etf_downloader.run()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
                 raise e
 
             message_actions += f"Holdings Download\n" + SEPERATOR_LINE
-            message_actions += f"{stats_downloader}\n" + SEPERATOR_LINE
-            message_actions += f"Total ETFs downloaded: {total_downloaded}\n"
+            message_actions += etf_downloader.summary(downloads) + "\n"
             message_actions += BREAKER_LINE
 
             try:
@@ -115,8 +115,9 @@ if __name__ == '__main__':
 
             message_actions += ncen.summary(ncen_stats) + "\n"
 
-            # Then the listed funds' FMP profiles: the actively managed equity ones go to the test
-            # provider tables (disabled until approved), sized against the index funds' snapshot.
+            # Then the listed funds' FMP profiles: the actively managed equity ones go to the provider
+            # tables, sized against the index funds' snapshot, and the selection rules set which of
+            # them are active (their holdings are downloaded from Tuesday).
             try:
                 profile_stats = etf_profile.run()
             except Exception as e:
