@@ -1,4 +1,5 @@
 import log
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from modules.core import api_stocks
 from modules.object import ticker, ticker_value
@@ -6,6 +7,9 @@ from modules.object.ticker import Ticker
 from modules.ticker import company, pricing
 from modules.ticker import util as tu
 from modules.ticker.resolver import TickerResolver
+
+WORKERS = 5   # tickers refreshed in parallel — FMP's rate limit (200/min, api_stocks' shared throttle) is the bound
+UPDATED, INVALID = 'updated', 'invalid'
 
 
 def refresh_ticker_profiles(include_invalid: bool = False) -> tuple[int, int, int]:
@@ -24,94 +28,104 @@ def refresh_ticker_profiles(include_invalid: bool = False) -> tuple[int, int, in
     already excludes already-invalid tickers by default — pass include_invalid=True to retry
     them too (a ticker that checks out fine on retry has its invalid flag cleared).
 
+    WORKERS tickers at a time: each one's profile call, share-count checks and database writes are
+    round trips, so one at a time runs far below FMP's rate limit (a full refresh of ~7,000
+    tickers took about 3.5 hours).
+
     Returns (total_checked, updated, marked_invalid).
     """
     resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
     tickers = ticker.fetch_stale_tickers(include_invalid=include_invalid)
 
-    updated = 0
-    marked_invalid = 0
-    resynced = 0
     today = date.today()
     stored_values = ticker_value.fetch_price_and_cap_series_between([t.id for t in tickers], pricing.VALUE_HISTORY_START, today)
+    # Full symbols first, in this thread: the resolver loads FMP's exchange list on first use.
+    targets = [(t, resolver.get_full_symbol(t)) for t in tickers]
 
-    for t in tickers:
-        full_symbol = resolver.get_full_symbol(t)
-        profile = api_stocks.get_stock_profile(full_symbol)
-        if not isinstance(profile, dict):
-            log.record_notice(f"Ticker profile refresh: no profile for '{full_symbol}': {profile}")
-            ticker.update_invalid(t.id, "Profile lookup failed")
-            marked_invalid += 1
-            continue
+    with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+        results = list(executor.map(lambda target: _refresh_one(*target, stored_values.get(target[0].id), today), targets))
 
-        exchange = profile.get('exchange')
-        name = profile.get('companyName')
-        is_active = profile.get('isActivelyTrading')
-
-        invalid_reason = None
-        if exchange == 'CRYPTO':
-            invalid_reason = 'Crypto'
-        elif not name or tu.is_unwanted_names(name):
-            invalid_reason = 'Fund or ETF'
-        elif is_active is not None and not is_active:
-            invalid_reason = 'Not actively trading'
-
-        updated_ticker = Ticker(
-            id=t.id,
-            symbol=t.symbol,
-            isin=profile.get('isin') or t.isin,
-            cusip=profile.get('cusip') or t.cusip,
-            cik=profile.get('cik') or t.cik,
-            name=name or t.name,
-            exchange=t.exchange,
-            industry=profile.get('industry') or t.industry,
-            sector=profile.get('sector') or t.sector,
-            country=profile.get('country') or t.country,
-            currency=profile.get('currency') or t.currency,
-            source=t.source,
-            type_from=t.type_from,
-            is_actively_trading=bool(is_active) if is_active is not None else None,
-            average_turnover=tu.profile_turnover(profile),
-        )
-        ticker.update(updated_ticker)  # stamps updated_at
-
-        ticker.update_invalid(t.id, invalid_reason)  # clears it if the retry now checks out fine
-        if invalid_reason:
-            marked_invalid += 1
-        else:
-            updated += 1
-            # Values are converted to USD from the listing's currency (util.listing_currency):
-            # when that changes, the stored history was converted from the old one.
-            new_currency = tu.listing_currency(t.exchange, updated_ticker.currency)
-            if new_currency != tu.listing_currency(t.exchange, t.currency):
-                result = pricing.resync_value_history(t.id, full_symbol, new_currency, verified_shares=t.verified_shares)
-                resynced += 1
-                log.record_notice(
-                    f"Ticker profile refresh: {full_symbol} currency {t.currency} -> {updated_ticker.currency}, "
-                    f"value history rewritten ({result})."
-                )
-            elif (reason := stored_cap_off_profile(stored_values.get(t.id), profile, new_currency, today)):
-                # A history FMP carries on a wrong share count throughout shows no jump for the
-                # glitch filter to catch (Uniper's new XETRA line at 8.7B shares against 416M);
-                # the profile fetched here anyway is the reference to rewrite it against.
-                result = pricing.resync_value_history(
-                    t.id, full_symbol, new_currency, reference_shares=profile['marketCap'] / profile['price'],
-                    verified_shares=t.verified_shares)
-                resynced += 1
-                log.record_notice(f"Ticker profile refresh: {full_symbol} {reason}, value history rewritten ({result}).")
-            else:
-                verified, why = verify_share_count(t, full_symbol, profile, stored_values.get(t.id), new_currency, today)
-                if why:
-                    ticker.update_verified_shares(t.id, verified)
-                    result = pricing.resync_value_history(t.id, full_symbol, new_currency, verified_shares=verified)
-                    resynced += 1
-                    log.record_notice(f"Ticker profile refresh: {full_symbol} {why}, value history rewritten ({result}).")
-
+    updated = sum(1 for outcome, _ in results if outcome == UPDATED)
+    marked_invalid = sum(1 for outcome, _ in results if outcome == INVALID)
+    resynced = sum(1 for _, rewritten in results if rewritten)
     log.record_status(
         f"Ticker profile refresh: {updated} updated, {marked_invalid} marked invalid, "
         f"{resynced} value histories rewritten (currency change or far off the profile), out of {len(tickers)} checked."
     )
     return len(tickers), updated, marked_invalid
+
+
+def _refresh_one(t: Ticker, full_symbol: str, stored: tuple[dict[date, float], dict[date, float]] | None,
+                 today: date) -> tuple[str, bool]:
+    """Refreshes one ticker's profile (see refresh_ticker_profiles): (UPDATED or INVALID, whether
+    its value history was rewritten)."""
+    profile = api_stocks.get_stock_profile(full_symbol)
+    if not isinstance(profile, dict):
+        log.record_notice(f"Ticker profile refresh: no profile for '{full_symbol}': {profile}")
+        ticker.update_invalid(t.id, "Profile lookup failed")
+        return INVALID, False
+
+    exchange = profile.get('exchange')
+    name = profile.get('companyName')
+    is_active = profile.get('isActivelyTrading')
+
+    invalid_reason = None
+    if exchange == 'CRYPTO':
+        invalid_reason = 'Crypto'
+    elif not name or tu.is_unwanted_names(name):
+        invalid_reason = 'Fund or ETF'
+    elif is_active is not None and not is_active:
+        invalid_reason = 'Not actively trading'
+
+    updated_ticker = Ticker(
+        id=t.id,
+        symbol=t.symbol,
+        isin=profile.get('isin') or t.isin,
+        cusip=profile.get('cusip') or t.cusip,
+        cik=profile.get('cik') or t.cik,
+        name=name or t.name,
+        exchange=t.exchange,
+        industry=profile.get('industry') or t.industry,
+        sector=profile.get('sector') or t.sector,
+        country=profile.get('country') or t.country,
+        currency=profile.get('currency') or t.currency,
+        source=t.source,
+        type_from=t.type_from,
+        is_actively_trading=bool(is_active) if is_active is not None else None,
+        average_turnover=tu.profile_turnover(profile),
+    )
+    ticker.update(updated_ticker)  # stamps updated_at
+
+    ticker.update_invalid(t.id, invalid_reason)  # clears it if the retry now checks out fine
+    if invalid_reason:
+        return INVALID, False
+
+    # Values are converted to USD from the listing's currency (util.listing_currency):
+    # when that changes, the stored history was converted from the old one.
+    new_currency = tu.listing_currency(t.exchange, updated_ticker.currency)
+    if new_currency != tu.listing_currency(t.exchange, t.currency):
+        result = pricing.resync_value_history(t.id, full_symbol, new_currency, verified_shares=t.verified_shares)
+        log.record_notice(
+            f"Ticker profile refresh: {full_symbol} currency {t.currency} -> {updated_ticker.currency}, "
+            f"value history rewritten ({result})."
+        )
+        return UPDATED, True
+    if (reason := stored_cap_off_profile(stored, profile, new_currency, today)):
+        # A history FMP carries on a wrong share count throughout shows no jump for the
+        # glitch filter to catch (Uniper's new XETRA line at 8.7B shares against 416M);
+        # the profile fetched here anyway is the reference to rewrite it against.
+        result = pricing.resync_value_history(
+            t.id, full_symbol, new_currency, reference_shares=profile['marketCap'] / profile['price'],
+            verified_shares=t.verified_shares)
+        log.record_notice(f"Ticker profile refresh: {full_symbol} {reason}, value history rewritten ({result}).")
+        return UPDATED, True
+    verified, why = verify_share_count(t, full_symbol, profile, stored, new_currency, today)
+    if why:
+        ticker.update_verified_shares(t.id, verified)
+        result = pricing.resync_value_history(t.id, full_symbol, new_currency, verified_shares=verified)
+        log.record_notice(f"Ticker profile refresh: {full_symbol} {why}, value history rewritten ({result}).")
+        return UPDATED, True
+    return UPDATED, False
 
 
 SHARES_CHECK_POINTS = 10   # the latest stored values stored_shares_off_profile looks at

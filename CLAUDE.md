@@ -159,7 +159,7 @@ Migration 17 made these the provider tables: the hand-configured, Playwright-scr
 | `modules/ticker/esg.py` | `populate_esg` (one ticker; new tickers at registration) and `refresh_all()` (weekly, every valid company — masters/standalone only) |
 | `modules/sim/orchestrator.py`, `modules/sim/benchmark_generator.py` | Fund simulation loop and historical benchmark backfill |
 | `modules/ticker/master.py` | Master-ticker grouping/same-company linking/realignment to the primary listing/repair, company market cap + region refresh |
-| `modules/ticker/refresh.py` | Ticker profile refresh (cik/isin/name/currency/validity), value-history resync on a currency change or a history off the profile's share count (`stored_cap_off_profile`) |
+| `modules/ticker/refresh.py` | Ticker profile refresh (cik/isin/name/currency/validity; `WORKERS` = 5 tickers in parallel), value-history resync on a currency change or a history off the profile's share count (`stored_cap_off_profile`) |
 | `modules/ticker/company.py` | Primary-listing rule behind the master, `company_market_cap` and `region`; non-equity / depositary line detection |
 | `modules/ticker/identity.py` | Evidence that two listing groups are one company (shared ISIN, name + cap, depositary receipt, dual listing) — master linking and the benchmark duplicate guard |
 | `modules/ticker/resolver.py` | Resolves holding lines to `ticker` (or `categorize_ticker`) rows: FMP lines (`resolve_fmp_line`: FMP's symbol when its profile's ISIN/CUSIP/name agree, else ISIN, else verified name search); `resolve(region, …)` for others |
