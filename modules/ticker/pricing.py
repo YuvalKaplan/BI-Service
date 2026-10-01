@@ -16,6 +16,12 @@ PRICE_TOLERANCE       = 0.005      # 0.5% relative diff
 MARKET_CAP_TOLERANCE  = 0.01       # 1.0% relative diff (looser: also depends on shares outstanding)
 GRACE_PERIOD_DAYS     = 5          # consecutive calendar days a ticker may go unrecorded while
                                     # mismatching before it gets flagged invalid
+REVISION_TOLERANCE    = 0.05       # every mismatch within this: FMP revised its history - its values replace ours
+BASIS_SPREAD          = 1.06       # only prices or only caps off, this steadily, on every mismatching day: our
+BASIS_MIN_POINTS      = 5          # history is on another basis (currency, split) - rewritten; at least this many
+                                   # days (an exchange rate moves a few % over the days compared: NZD 3.1% in Sep 2026)
+REVISION, BASIS = 'revision', 'basis'
+MISMATCH_REASON = "Price/market cap mismatch vs FMP history"   # how ticker.invalid starts for a mismatch
 VALUE_DATE_CUT_OFF_HOUR = 17       # New York time: before it, the latest completed trading day is the previous one
 
 
@@ -429,13 +435,32 @@ def compare_overlap(ticker_id: int, fetched: dict[date, tuple[float, float]], st
     return mismatches
 
 
+def mismatch_kind(mismatches: list[Mismatch]) -> str | None:
+    """Whether FMP's history disagrees with ours because ours is what's off:
+    - REVISION: every mismatch within REVISION_TOLERANCE - FMP revised a close (often one day);
+    - BASIS: only one of price and market cap is off - the other agrees - by a steady factor
+      (within BASIS_SPREAD) on every mismatching day, BASIS_MIN_POINTS or more: that stretch of
+      our history is on another basis - market caps stored unconverted from their currency
+      (Helsinki, Brussels, Dublin, Lisbon and New Zealand listings before those exchanges'
+      currencies were known; the days stored after agree), or prices from before a split FMP
+      adjusted for;
+    - None: anything else (FMP's data may be what's wrong, or the symbol another security's -
+      then both would be off)."""
+    if all(m.pct_diff <= REVISION_TOLERANCE for m in mismatches):
+        return REVISION
+    if len(mismatches) < BASIS_MIN_POINTS or len({m.field for m in mismatches}) != 1:
+        return None
+    ratios = [m.stored_value / m.fetched_value for m in mismatches if m.stored_value and m.fetched_value]
+    return BASIS if ratios and max(ratios) / min(ratios) <= BASIS_SPREAD else None
+
+
 def build_mismatch_reason(mismatches: list[Mismatch]) -> str:
     parts = [
         f"{m.value_date} {m.field}: stored={m.stored_value:.4g} fetched={m.fetched_value:.4g} ({m.pct_diff:.1%} diff)"
         for m in sorted(mismatches, key=lambda m: m.value_date)[:5]
     ]
     suffix = f" (+{len(mismatches) - 5} more)" if len(mismatches) > 5 else ""
-    return "Price/market cap mismatch vs FMP history on " + "; ".join(parts) + suffix
+    return MISMATCH_REASON + " on " + "; ".join(parts) + suffix
 
 
 VALUE_HISTORY_START = date(2026, 1, 1)  # start of stored ticker_value history (see scripts/data_fill_ticker_value_refresh.py)
@@ -478,7 +503,11 @@ def store_validated_ticker_value(
     compared with the stored values. `reference_shares` — the listing's share count from FMP's
     live quote, when the caller has it (the screener row) — is the glitch filter's reference;
     `verified_shares` (ticker.verified_shares) repairs a history on a wrong share count
-    (clean_market_caps), the same way the stored history was rewritten."""
+    (clean_market_caps), the same way the stored history was rewritten.
+
+    A mismatch withholds the value (and flags the ticker invalid after GRACE_PERIOD_DAYS) unless
+    it's ours that's off (mismatch_kind): FMP's revised values replace the stored ones, or a
+    history stored on another basis is rewritten from FMP - then the value is stored."""
     try:
         currency = tu.listing_currency(exchange, currency)
         # Not logging repaired/dropped glitches here: the same old glitch would be reported daily for months.
@@ -501,8 +530,22 @@ def store_validated_ticker_value(
             value_date - timedelta(days=1),
         )
         mismatches = compare_overlap(ticker_id, fetched, stored)
+        kind = mismatch_kind(mismatches) if mismatches else None
 
-        if mismatches:
+        if kind == REVISION:
+            for d in {m.value_date for m in mismatches}:
+                _upsert_tv(TickerValue(ticker_id=ticker_id, value_date=d, stock_price=fetched[d][0], market_cap=fetched[d][1]))
+            log.record_notice(f"FMP revised ticker_id={ticker_id} ({symbol}): {build_mismatch_reason(mismatches)} - "
+                              f"its values replace ours")
+        elif kind == BASIS:
+            written = resync_value_history(ticker_id, symbol, currency, reference_shares=reference_shares,
+                                           verified_shares=verified_shares)
+            log.record_notice(f"Stored history of ticker_id={ticker_id} ({symbol}) on another basis than FMP's "
+                              f"({build_mismatch_reason(mismatches)}): rewritten from FMP ({written})")
+            if isinstance(written, str):
+                kind = None    # not rewritten: withheld as any other mismatch
+
+        if mismatches and kind is None:
             last_good_date = fetch_latest_value_date(ticker_id)
             days_since_last_good = (value_date - last_good_date).days if last_good_date else GRACE_PERIOD_DAYS
             if days_since_last_good >= GRACE_PERIOD_DAYS:

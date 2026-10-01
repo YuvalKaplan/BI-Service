@@ -370,6 +370,17 @@ def update_invalid(ticker_id: int, reason: str | None) -> None:
         raise Exception(f"Error updating the Ticker invalid reason into the DB: {e}")
 
 
+def clear_invalid_with_prefix(prefix: str) -> int:
+    """Clears the invalid flag of every ticker whose reason starts with `prefix`. Returns how many."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE ticker SET invalid = NULL WHERE invalid LIKE %s;", (prefix.replace('%', r'\%') + '%',))
+                return cur.rowcount
+    except Error as e:
+        raise Exception(f"Error clearing the invalid flags starting with '{prefix}': {e}")
+
+
 def update_style_from_categorization_etfs() -> None:
     try:
         with db_pool_instance.get_connection() as conn:
