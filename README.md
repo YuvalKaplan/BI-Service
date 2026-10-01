@@ -96,7 +96,7 @@ When the run finishes (or fails), an email summary goes to the admins (step 10).
 The ETFs come from the [SEC active ETF list](#sec-active-etf-list), not from configuration: every actively managed US ETF whose own N-CEN filing and FMP profile show it to be an equity fund is a row of
 
 - **`provider`** – the fund's company (FMP's `etfCompany`, e.g. JPMorgan, Capital Group);
-- **`provider_etf`** – the ETF, keyed by its SEC series id, with [its profile](#5-equity-funds-and-their-profile-fmp): `region` (US / International / Global), `cap_type` (large / mid / small / smid / all), `style_type` (value / growth / blend, large-cap funds), stock holdings, sector weights and more – plus its `status` and `benchmark_id`.
+- **`provider_etf`** – the ETF, keyed by its SEC series id, with [its profile](#5-equity-funds-and-their-profile-fmp): `region` (US / International / Global), `cap_type` (large / mid / small / smid / all), `style_type` (value / growth / blend, large-cap funds), stock holdings, sector and country weights, emerging-market share and more – plus its `status` and `benchmark_id`.
 
 **`fund`** is a model fund we build, with its `strategy` stored as JSON (step 8).
 
@@ -108,6 +108,8 @@ The ETFs come from the [SEC active ETF list](#sec-active-etf-list), not from con
 | Cap size | `large` or `all` |
 | Stock holdings | 20 to 200 (lines matching an index fund's stock) |
 | Top sector | at most 40% of the fund (FMP's sector weights; when FMP has none, our tickers' sectors) |
+| Top country | at most 50% of the fund in one country – or a US fund whose top country is the US (a single-country fund otherwise: Japan, China, India funds) |
+| Emerging markets | an International fund at most 40% in emerging markets – stocks VWO holds, FTSE's view (Korea developed) – so International means developed international |
 | Holdings date | its latest holdings in `provider_etf_holding` at most 10 days old (FMP refreshes most funds weekly) |
 
 A value we don't know fails its rule. A fund that moved to another trust is on the SEC list twice under one ticker until its old series drops off (BRIF and TGLR in September 2026) – only the one with the latest filing can be active; the other fails as a **duplicate** (it would download the same holdings and count twice in the funds). Otherwise the ETF is **inactive** – except one that passes everything but has no holdings downloaded yet, which stays **pending** (every new ETF's status) until its first download. The rules run after every Sunday profile run and every holdings download (step 2), so a new ETF on the SEC list that passes is downloaded from the next Tuesday. The selection also sets each ETF's `benchmark_id` – its region's large-cap blend benchmark (step 6). There's no reason column: the admin email counts the ETFs failing each rule and lists those that changed status, and [`scripts/current_sec_active_etfs.py`](#sec-data) writes each ETF's failed rules.
@@ -483,14 +485,16 @@ Funds not terminated and with a filing in the last 15 months (a fund files every
 
 **Only `equity` funds go in the provider tables** – `provider` (the fund's company, from FMP) and `provider_etf` (a new one *pending* – [Providers and ETFs](#1-providers-and-etfs)). Each fund's profile, against the index funds' latest snapshot ([Index funds and size breakpoints](#index-funds-and-size-breakpoints)):
 
-- **Region** (`region`) – the share of its matched stocks the US fund holds: US at 80%+, International at 20% or less, otherwise Global;
+- **Region** (`region`, `us_weight`) – the US share of its stocks: each stock by our company's `region` (the benchmarks' rule – the primary listing, so Accenture and Medtronic are US), else by the index fund holding it (VTI US, VEA / VWO International); US at 80%+, International at 20% or less, otherwise Global. Our companies come first because ADR lines aren't in the index funds: by those alone, global dividend funds full of ADRs (DIVD, CVGD) passed for US. The index fallback covers a new fund whose small caps aren't our tickers yet (they are once its holdings are downloaded);
 - **Cap size** (`cap_type`) – each stock large at or above its market's 70% breakpoint, small below the 90% one, mid between (Morningstar-style); the fund large with 70%+ of its stocks large, small with 50%+ small, mid with 50%+ mid, smid with 70%+ mid and small, otherwise all;
 - **Value / growth** (`style_type`, large-cap funds only) – our companies' `style_type`, 60% for value or growth, else blend;
 - **Stock holdings** (`stock_holdings`) – its lines matching an index fund's stock;
 - **Sectors** (`sector_weights`, `top_sector`, `top_sector_weight`) – FMP's sector weights and the largest sector that isn't cash; when FMP has none (about 1 fund in 5), our tickers' sectors over the lines matching one of our companies, as shares of those lines, when they make up at least half the fund's stocks;
+- **Countries** (`country_weights`, `top_country`, `top_country_weight`) – our companies' domicile (`ticker.country`, ISO codes), a US-region company counting as US (so a US fund's US weight matches its region), over the lines matching one of our companies, as shares of those lines, when they make up at least half the fund's stocks;
+- **Emerging share** (`emerging_weight`) – the share of its stocks VWO holds (the company's listing in VWO, so an ADR counts; else the line itself), FTSE's view: Taiwan, China, India and Brazil are emerging, Korea isn't;
 - AUM, NAV, expense ratio, inception (`trading_since`), website, the shares behind each measure, and its average float cap.
 
-Region and size need half the fund matched to the index funds' stocks. The profile stores no holdings – step 2 downloads them. A fund that stops qualifying keeps its row with its new strategy, and the selection makes it inactive, as it does one that leaves the SEC list; then the selection rules run for every ETF (step 1). Samples (September 2026): CGDV, JGRO and DIVO large US; DFAC all; KMID and CGMM mid; AVUV, JSML, SMLL, BSVO and TMSL small; CGXU, NBJP and JADE International; JEPI / QQQI option income, BUFR a fund of funds, PJAN buffer, NVDL leveraged, JAAA fixed income – left out.
+Region and the emerging share need half the fund placed (one of our companies or an index fund's stock), size half the fund matched to the index funds' stocks. The profile stores no holdings – step 2 downloads them. A fund that stops qualifying keeps its row with its new strategy, and the selection makes it inactive, as it does one that leaves the SEC list; then the selection rules run for every ETF (step 1). Samples (September 2026): CGDV, JGRO and DIVO large US; DFAC all; KMID and CGMM mid; AVUV, JSML, SMLL, BSVO and TMSL small; CGXU, NBJP and JADE International; JEPI / QQQI option income, BUFR a fund of funds, PJAN buffer, NVDL leveraged, JAAA fixed income – left out.
 
 The script writes `.output/sec_active_etfs.csv`: every current fund with its strategy and, for the equity funds, their profile, status, latest holdings date and the rules they fail – next to the old hand-picked `old_provider_etf`'s cap / style / region where it had the fund – followed by the old enabled ETFs and what the rules make of them.
 

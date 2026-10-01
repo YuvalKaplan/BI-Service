@@ -59,6 +59,10 @@ class ProviderEtf:
     sector_weights: dict | None = None
     top_sector: str | None = None
     top_sector_weight: float | None = None
+    country_weights: dict | None = None       # ISO country -> share (a US-region company counts as US)
+    top_country: str | None = None
+    top_country_weight: float | None = None
+    emerging_weight: float | None = None      # share in stocks the emerging index fund (VWO) holds
 
 
 # Written by each profile; status, last_downloaded and benchmark_id are not.
@@ -67,8 +71,10 @@ PROFILE_COLUMNS = (
     'trading_since', 'website', 'asset_class', 'strategy', 'aum', 'nav', 'nav_currency', 'expense_ratio',
     'holdings_lines', 'stock_holdings', 'equity_weight', 'stock_weight', 'top10_weight', 'us_weight', 'avg_float_cap',
     'large_weight', 'mid_weight', 'small_weight', 'value_weight', 'growth_weight', 'style_coverage',
-    'sector_weights', 'top_sector', 'top_sector_weight',
+    'sector_weights', 'top_sector', 'top_sector_weight', 'country_weights', 'top_country', 'top_country_weight',
+    'emerging_weight',
 )
+_JSONB_COLUMNS = ('sector_weights', 'country_weights')
 
 _UPSERT_SQL = sql.SQL(
     "INSERT INTO provider_etf ({columns}, fmp_updated_at) VALUES ({placeholders}, (now() AT TIME ZONE 'utc')) "
@@ -86,7 +92,7 @@ _UPSERT_SQL = sql.SQL(
 
 def upsert_profile(item: ProviderEtf) -> tuple[int, bool]:
     """Inserts the fund (pending) or updates its profile, by SEC series id. Returns (id, inserted)."""
-    values = [Jsonb(item.sector_weights) if c == 'sector_weights' and item.sector_weights is not None else getattr(item, c)
+    values = [Jsonb(getattr(item, c)) if c in _JSONB_COLUMNS and getattr(item, c) is not None else getattr(item, c)
               for c in PROFILE_COLUMNS]
     try:
         with db_pool_instance.get_connection() as conn:

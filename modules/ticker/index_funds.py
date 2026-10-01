@@ -21,7 +21,9 @@ The breakpoints set size relative to the market rather than at fixed dollar line
     the S&P / Russell way: membership on the whole cap, a minimum float);
   - the funds' large / mid_small filter and the universe screener use the same cutoffs
     (large_cutoffs);
-  - the SEC ETF profiles size their stocks by the 0.70 / 0.90 breakpoints (Morningstar-style).
+  - the SEC ETF profiles size their stocks by the 0.70 / 0.90 breakpoints (Morningstar-style),
+    and count the stocks the emerging fund holds (EMERGING_FUNDS - FTSE's view: Korea is
+    developed) as a fund's emerging-market share.
 """
 import log
 import statistics
@@ -43,6 +45,7 @@ BREAKPOINT_COVERAGES = [round(0.50 + i / 100, 2) for i in range(50)]      # 0.50
 SCREEN_MARGIN = 0.8        # the universe screener fetches from this share of the lowest benchmark cutoff
 SNAPSHOT_MAX_AGE_DAYS = 7  # an older snapshot is refreshed before it's used
 FULL_UNIVERSE_STYLES = ('blend', 'core')
+EMERGING_FUNDS = ('VWO',)  # the index funds whose stocks are emerging markets (FTSE Emerging: Korea isn't)
 # FTSE includes China A shares (Shanghai / Shenzhen listings - VWO's .SS / .SZ lines) at 25% of
 # their investable float, so their holding is scaled up by it before it's valued: 2,077 of VWO's
 # 5,035 lines are A shares, 6% of its weight, and left as held they pulled VWO's scale ~20% up

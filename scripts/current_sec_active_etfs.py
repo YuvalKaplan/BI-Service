@@ -6,8 +6,8 @@ The SEC active ETF list, as the Sunday cron runs it:
      the window again (the result is the same).
   2. Profiles the listed funds due for it with FMP (modules/sec/etf_profile.py): each one's
      strategy (sec_etf_classification), and the actively managed equity funds - with region, cap
-     size, value / growth and sectors - placed in provider_etf. --refresh-all profiles every
-     listed fund again.
+     size, value / growth, sectors, countries and emerging share - placed in provider_etf.
+     --refresh-all profiles every listed fund again (needed once after migration 18).
   3. Applies the selection rules (modules/sec/etf_selection.py): each provider ETF's status.
 
 Writes .output/sec_active_etfs.csv: every current fund with its strategy and, for the equity
@@ -37,7 +37,7 @@ SEC_COLUMNS = ['series_id', 'ticker', 'fund_name', 'registrant_name', 'adviser_n
                'is_multiple_inverse', 'net_assets', 'report_period', 'filing_date']
 PROFILE_COLUMNS = ['region', 'cap_type', 'style_type', 'aum', 'stock_holdings', 'stock_weight', 'us_weight',
                    'avg_float_cap', 'large_weight', 'mid_weight', 'small_weight', 'value_weight', 'growth_weight',
-                   'top_sector', 'top_sector_weight', 'website']
+                   'top_sector', 'top_sector_weight', 'top_country', 'top_country_weight', 'emerging_weight', 'website']
 OLD_COLUMNS = ['old_provider_etf_id', 'old_enabled', 'old_cap_type', 'old_style_type', 'old_region']
 
 if __name__ == '__main__':

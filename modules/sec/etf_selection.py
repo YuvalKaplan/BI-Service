@@ -11,7 +11,13 @@ fund, and:
      stocks);
   4. its top sector is at most MAX_TOP_SECTOR_WEIGHT of the fund (FMP's sector weights, else our
      tickers' sectors - etf_profile.profile_fund);
-  5. its latest stored holdings (provider_etf_holding) are at most MAX_HOLDINGS_AGE_DAYS old. FMP
+  5. its top country is at most MAX_TOP_COUNTRY_WEIGHT of the fund - a single-country fund - unless
+     it's a US fund whose top country is the US (our companies' domicile, a US-region company
+     counting as US);
+  6. an International fund has at most MAX_EMERGING_WEIGHT in emerging markets (stocks the
+     emerging index fund holds - index_funds.EMERGING_FUNDS): the funds are developed
+     international;
+  7. its latest stored holdings (provider_etf_holding) are at most MAX_HOLDINGS_AGE_DAYS old. FMP
      refreshes most funds' holdings weekly (dated Sunday), some on other weekdays, so this allows
      a week and a few days' slack; best ideas and the valuation pass look back as far.
 A fund that moved to another trust is on the list twice under one ticker until its old series
@@ -19,8 +25,8 @@ drops off (BRIF, TGLR): only the one with the latest filing can be active - the 
 'duplicate' (they'd download the same holdings and count twice in the funds).
 Otherwise it's inactive - except a fund that passes everything but has no holdings stored yet,
 which stays pending until its first download. The holdings download (modules/cron/etf_downloader.py)
-fetches the active and pending funds, and those failing only rule 5 (download_targets), so a fund
-comes back as soon as FMP refreshes it.
+fetches the active and pending funds, and those failing only freshness (download_targets), so a
+fund comes back as soon as FMP refreshes it.
 
 run() follows every profile run (Sunday) and holdings download (Tuesday to Saturday). It also
 sets each ETF's benchmark_id: its region's enabled large-cap blend / core benchmark, which the
@@ -40,10 +46,12 @@ CAP_TYPES = ('large', 'all')
 MIN_STOCK_HOLDINGS = 20
 MAX_STOCK_HOLDINGS = 200
 MAX_TOP_SECTOR_WEIGHT = 0.40
+MAX_TOP_COUNTRY_WEIGHT = 0.50
+MAX_EMERGING_WEIGHT = 0.40
 MAX_HOLDINGS_AGE_DAYS = 10
 
 EQUITY = 'equity'   # the profile's strategy for an actively managed equity fund (etf_profile.classify)
-RULES = ('sec', 'duplicate', 'equity', 'region', 'cap', 'holdings', 'sector', 'fresh')
+RULES = ('sec', 'duplicate', 'equity', 'region', 'cap', 'holdings', 'sector', 'country', 'emerging', 'fresh')
 
 
 @dataclass
@@ -84,6 +92,11 @@ def failed_rules(etf: ProviderEtf, current_series: set[str], latest: date | None
         failed.append('holdings')
     if etf.top_sector_weight is None or etf.top_sector_weight > MAX_TOP_SECTOR_WEIGHT:
         failed.append('sector')
+    single_country = etf.top_country_weight is None or etf.top_country_weight > MAX_TOP_COUNTRY_WEIGHT
+    if single_country and not (etf.region == 'US' and etf.top_country == 'US'):
+        failed.append('country')
+    if etf.region == 'International' and (etf.emerging_weight is None or etf.emerging_weight > MAX_EMERGING_WEIGHT):
+        failed.append('emerging')
     if latest is None or latest < as_of - timedelta(days=MAX_HOLDINGS_AGE_DAYS):
         failed.append('fresh')
     return failed

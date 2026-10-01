@@ -17,14 +17,24 @@ an index, FMP's asset class, or its name), fund_of_funds (its N-CEN - left out),
 option_income (its name - FMP files many under equity), then FMP's asset class; equity needs an
 equity (or no) asset class and at least EQUITY_MIN_WEIGHT of the fund in stock lines. Only equity
 funds go in provider_etf, profiled by region (US / International / Global), cap size (large / mid /
-small / smid / all), value / growth (large-cap funds, from our tickers' style_type) and sector
-weights (FMP's, else our tickers' sectors). A provider ETF no longer equity keeps its row with its
+small / smid / all), value / growth (large-cap funds, from our tickers' style_type), sector
+weights (FMP's, else our tickers' sectors), country weights and emerging-market share.
+
+Region, countries and the emerging share go by our company where a line is one (its listings, by
+symbol / ISIN / CUSIP) - ADR lines aren't in the index funds, so a fund of them would otherwise
+pass for US. Region is the company's region (ticker.region, primary listing - the benchmarks'
+rule: Accenture is US), else the market of the index fund holding the stock; country is the
+company's domicile (ticker.country), a US-region company counting as US; emerging is held by an
+emerging index fund (index_funds.EMERGING_FUNDS - FTSE's view), the company's else the line's.
+The index fallback matters for a new fund: its small caps aren't our tickers until its holdings
+are downloaded. A provider ETF no longer equity keeps its row with its
 new strategy, and the selection makes it inactive. Every checked fund's strategy is kept in
 sec_etf_classification, so it's checked again only after PROFILE_REFRESH_DAYS (an active fund:
 PROFILE_REFRESH_DAYS_ACTIVE, so the rules read a profile at most a week old) or a newer filing.
 """
 import log
 import re
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -37,14 +47,14 @@ from modules.object.sec_active_etf import SecActiveEtf
 from modules.object.sec_etf_classification import SecEtfClassification
 from modules.sec import etf_selection, ncen
 from modules.sec.etf_selection import SelectionStats
-from modules.ticker import index_funds
+from modules.ticker import company, index_funds
 
 PROFILE_REFRESH_DAYS = 28   # a fund's profile is checked again after this long (or after a newer filing)
 PROFILE_REFRESH_DAYS_ACTIVE = 6  # ... an active fund's: every Sunday run
 FETCH_WORKERS = 4           # funds fetched in parallel, all under api_stocks' 200-calls-a-minute throttle
 EQUITY_MIN_WEIGHT = 0.8     # share of the fund in stock lines an equity fund needs
-MIN_COVERAGE = 0.5          # share of the fund matched to the index funds' stocks needed for region and size
-US_MIN = 0.8                # US share of the matched stocks for 'US'; at most 1 - US_MIN for 'International'
+MIN_COVERAGE = 0.5          # share of the fund placed (company or index fund) needed for region, size and emerging
+US_MIN = 0.8                # US share of the placed stocks for 'US'; at most 1 - US_MIN for 'International'
 LARGE_COVERAGE = 0.70       # a stock is large at or above its market's breakpoint at this coverage...
 MID_COVERAGE = 0.90         # ... mid down to this one, small below (Morningstar-style)
 LARGE_MIN = 0.7             # cap size: large share for 'large'
@@ -54,6 +64,7 @@ SMID_MIN = 0.7              # ... mid + small share for 'smid'; otherwise 'all'
 STYLE_MIN = 0.6             # value (growth) share of the style-classified weight for 'value' ('growth')
 STYLE_MIN_COVERAGE = 0.5    # style-classified share of the stock weight needed for value / growth
 SECTOR_MIN_COVERAGE = 0.5   # sector-classified share of the stock weight needed for our own sector weights
+COUNTRY_MIN_COVERAGE = 0.5  # country-classified share of the stock weight needed for country weights
 MAX_FAILED_SHARE = 0.1
 MIN_FAILED_TO_RAISE = 5
 
@@ -92,12 +103,15 @@ class IndexStock:
 @dataclass
 class Reference:
     """Built once per run: the index funds' stocks (stored snapshot), the size breakpoints, and our
-    listings for value / growth."""
+    listings and companies for region, country, emerging share and value / growth."""
     index: dict[str, IndexStock]                  # symbol / ISIN / CUSIP -> the index stock
     large_min: dict[str, float]                   # market -> float cap of the 70% breakpoint
     small_below: dict[str, float]                 # market -> float cap of the 90% breakpoint
     listings: index_funds.Listings
     style_of: dict[int, str | None]               # company id -> style_type
+    fund_of: dict[int, str]                       # company id -> the index fund holding it
+    region_of: dict[int, str | None]              # company id -> region (ticker.region)
+    country_of: dict[int, str | None]             # company id -> domicile (ticker.country), US for a US-region company
 
 
 @dataclass
@@ -123,6 +137,10 @@ class Profile:
     sector_weights: dict | None = None
     top_sector: str | None = None
     top_sector_weight: float | None = None
+    country_weights: dict | None = None
+    top_country: str | None = None
+    top_country_weight: float | None = None
+    emerging_weight: float | None = None
 
 
 @dataclass
@@ -137,6 +155,7 @@ class ProfileRunStats:
     etfs_updated: int = 0
     no_longer_equity: int = 0                                 # provider ETFs whose profile isn't equity any more
     sectors_from_holdings: int = 0                            # equity funds FMP has no sector weights for
+    no_country_weights: int = 0                               # equity funds too few of whose stocks are our companies
     selection: SelectionStats | None = None
 
 
@@ -144,25 +163,40 @@ def _keys(line: dict) -> list[str]:
     return [k for k in (line.get('asset'), line.get('isin'), line.get('securityCusip')) if k]
 
 
+def _line_company(line: dict, listings: index_funds.Listings) -> int | None:
+    """The one company of ours a holding line is (its listings by symbol, ISIN or CUSIP), or None."""
+    companies = {listings.company_of[tid] for tid in index_funds.matched_listings(line, listings)}
+    return next(iter(companies)) if len(companies) == 1 else None
+
+
 def build_reference(as_of: date | None = None) -> Reference:
     """The index funds' stocks from their stored snapshot (refreshed first when it's more than a
-    week old), the 70% / 90% breakpoints per market, and our listings."""
+    week old), the 70% / 90% breakpoints per market, and our listings and companies."""
     index: dict[str, IndexStock] = {}
+    fund_of: dict[int, str] = {}
     snapshot = index_funds.snapshot(as_of)
+    listings = index_funds.our_listings()
     for fund, (market, rows) in sorted(snapshot.items(), key=lambda kv: kv[1][0] != index_funds.US):  # US first
         for r in rows:
             if r.get('float_cap'):
                 stock = IndexStock(fund=fund, market=market, float_cap=r['float_cap'])
                 for key in _keys(r):
                     index.setdefault(key, stock)
+            cid = _line_company(r, listings)
+            if cid is not None:
+                fund_of.setdefault(cid, fund)
     markets = {market for market, _rows in snapshot.values()}
-    listings = index_funds.our_listings()
+    region_of = {cid: listings.by_id[cid].region for cid in listings.members if cid in listings.by_id}
     return Reference(
         index=index,
         large_min={m: index_funds.cutoff(m, LARGE_COVERAGE, as_of) for m in markets},
         small_below={m: index_funds.cutoff(m, MID_COVERAGE, as_of) for m in markets},
         listings=listings,
         style_of={cid: listings.by_id[cid].style_type for cid in listings.members if cid in listings.by_id},
+        fund_of=fund_of,
+        region_of=region_of,
+        country_of={cid: 'US' if region_of.get(cid) == REGION_US else company.company_country(members, cid)
+                    for cid, members in listings.members.items()},
     )
 
 
@@ -199,12 +233,13 @@ def is_stock_line(line: dict, stock: IndexStock | None) -> bool:
 
 
 def profile_fund(etf: SecActiveEtf, info: dict | None, holdings: list[dict], ref: Reference) -> Profile:
-    """A fund's strategy and, for an equity fund, its region, cap size, value / growth and
-    sectors. Weights are shares of the fund's positive holding weight."""
+    """A fund's strategy and, for an equity fund, its region, cap size, value / growth, sectors,
+    countries and emerging share. Weights are shares of the fund's positive holding weight."""
     asset_class = (info or {}).get('assetClass') or None
     lines = [r for r in holdings if (r.get('weightPercentage') or 0) > 0]
     total = sum(r['weightPercentage'] for r in lines)
     p = Profile(strategy=None, asset_class=asset_class, holdings_lines=len(holdings))
+    matched: list[tuple[float, IndexStock | None]] = []
     stock: list[tuple[float, IndexStock]] = []
     if total > 0:
         matched = [(r['weightPercentage'] / total, ref.index.get(next((k for k in _keys(r) if k in ref.index), ''))) for r in lines]
@@ -217,10 +252,22 @@ def profile_fund(etf: SecActiveEtf, info: dict | None, holdings: list[dict], ref
     if p.strategy != EQUITY:
         return p
 
+    # Each line's weight, its company of ours (or None) and its index stock (or None)
+    owned = [(w, _line_company(r, ref.listings), s) for (w, s), r in zip(matched, lines)]
+
+    # Region: each stock's company region (the benchmarks' rule), else its index fund's market
+    markets, placed = _tally((w, ref.region_of.get(cid) or (s.market if s else None)) for w, cid, s in owned)
+    if placed >= MIN_COVERAGE:
+        p.us_weight = markets.get(index_funds.US, 0.0) / placed
+        p.region = REGION_US if p.us_weight >= US_MIN else (REGION_INTERNATIONAL if p.us_weight <= 1 - US_MIN else REGION_GLOBAL)
+
+    # Emerging: held by an emerging index fund - the company (so an ADR counts), else the line itself
+    funds, placed = _tally((w, ref.fund_of.get(cid) or (s.fund if s else None)) for w, cid, s in owned)
+    if placed >= MIN_COVERAGE:
+        p.emerging_weight = sum(v for f, v in funds.items() if f in index_funds.EMERGING_FUNDS) / placed
+
     if p.stock_weight and p.stock_weight >= MIN_COVERAGE:
         sw = p.stock_weight
-        p.us_weight = sum(w for w, s in stock if s.market == index_funds.US) / sw
-        p.region = REGION_US if p.us_weight >= US_MIN else (REGION_INTERNATIONAL if p.us_weight <= 1 - US_MIN else REGION_GLOBAL)
         p.avg_float_cap = sum(w * s.float_cap for w, s in stock) / sw
         p.large_weight = sum(w for w, s in stock if s.float_cap >= ref.large_min[s.market]) / sw
         p.small_weight = sum(w for w, s in stock if s.float_cap < ref.small_below[s.market]) / sw
@@ -229,13 +276,7 @@ def profile_fund(etf: SecActiveEtf, info: dict | None, holdings: list[dict], ref
                       else 'mid' if p.mid_weight >= MID_MIN else 'smid' if p.mid_weight + p.small_weight >= SMID_MIN else 'all')
 
     if p.cap_size == 'large':  # value / growth only for large-cap funds, from our companies' style
-        styled: dict[str, float] = defaultdict(float)
-        for r in lines:
-            companies = {ref.listings.company_of[tid] for tid in index_funds.matched_listings(r, ref.listings)}
-            style = ref.style_of.get(next(iter(companies))) if len(companies) == 1 else None
-            if style:
-                styled[style] += r['weightPercentage'] / total
-        classified = sum(styled.values())
+        styled, classified = _tally((w, ref.style_of.get(cid)) for w, cid, _s in owned)
         p.style_coverage = classified / p.equity_weight if p.equity_weight else None
         if classified > 0:
             p.value_weight = styled['value'] / classified
@@ -246,31 +287,56 @@ def profile_fund(etf: SecActiveEtf, info: dict | None, holdings: list[dict], ref
     sectors = {s.get('industry'): (s.get('exposure') or 0) / 100 for s in (info or {}).get('sectorsList') or []
                if s.get('industry') and (s.get('exposure') or 0) > 0}
     if not sectors:
-        sectors = holding_sectors(lines, total, ref, p.equity_weight)
+        sectors = holding_sectors(owned, ref, p.equity_weight)
     if sectors:
         p.sector_weights = dict(sorted(sectors.items(), key=lambda kv: -kv[1]))
         top = next(((k, v) for k, v in p.sector_weights.items() if not k.lower().startswith('cash')), None)
         if top:
             p.top_sector, p.top_sector_weight = top
+
+    countries = holding_countries(owned, ref, p.equity_weight)
+    if countries:
+        p.country_weights = dict(sorted(countries.items(), key=lambda kv: -kv[1]))
+        p.top_country, p.top_country_weight = next(iter(p.country_weights.items()))
     return p
 
 
-def holding_sectors(lines: list[dict], total: float, ref: Reference, equity_weight: float | None) -> dict[str, float]:
-    """Sector weights from our tickers when FMP has none: each line resolving to one of our
-    companies weighs in its sector (ticker.sector), as shares of the sector-classified weight -
-    {} unless that covers SECTOR_MIN_COVERAGE of the fund's stock lines."""
-    if total <= 0 or not equity_weight:
+Owned = list[tuple[float, int | None, IndexStock | None]]   # (weight, company id, index stock) per line
+
+
+def _tally(pairs: Iterable[tuple[float, str | None]]) -> tuple[dict[str, float], float]:
+    """({key: weight} over the pairs with a key, their total weight)."""
+    out: dict[str, float] = defaultdict(float)
+    for w, key in pairs:
+        if key:
+            out[key] += w
+    return out, sum(out.values())
+
+
+def _company_shares(owned: Owned, of_company: Callable[[int], str | None], equity_weight: float | None,
+                    min_coverage: float) -> dict[str, float]:
+    """Each line resolving to one of our companies weighs in that company's of_company, as shares
+    of the classified weight - {} unless that covers min_coverage of the fund's stock lines."""
+    if not equity_weight:
         return {}
-    by_sector: dict[str, float] = defaultdict(float)
-    for r in lines:
-        companies = {ref.listings.company_of[tid] for tid in index_funds.matched_listings(r, ref.listings)}
-        company = ref.listings.by_id.get(next(iter(companies))) if len(companies) == 1 else None
-        if company is not None and company.sector:
-            by_sector[company.sector] += r['weightPercentage'] / total
-    classified = sum(by_sector.values())
-    if classified < SECTOR_MIN_COVERAGE * equity_weight:
+    weights, classified = _tally((w, of_company(cid) if cid is not None else None) for w, cid, _s in owned)
+    if classified < min_coverage * equity_weight:
         return {}
-    return {sector: w / classified for sector, w in by_sector.items()}
+    return {k: w / classified for k, w in weights.items()}
+
+
+def holding_sectors(owned: Owned, ref: Reference, equity_weight: float | None) -> dict[str, float]:
+    """Sector weights from our tickers when FMP has none (ticker.sector), when they cover
+    SECTOR_MIN_COVERAGE of the fund's stock lines."""
+    by_id = ref.listings.by_id
+    return _company_shares(owned, lambda cid: by_id[cid].sector if cid in by_id else None, equity_weight,
+                           SECTOR_MIN_COVERAGE)
+
+
+def holding_countries(owned: Owned, ref: Reference, equity_weight: float | None) -> dict[str, float]:
+    """Country weights from our companies (domicile; a US-region company counts as US), when they
+    cover COUNTRY_MIN_COVERAGE of the fund's stock lines."""
+    return _company_shares(owned, ref.country_of.get, equity_weight, COUNTRY_MIN_COVERAGE)
 
 
 def _targets(refresh_all: bool, as_of: date) -> list[SecActiveEtf]:
@@ -313,6 +379,8 @@ def _save_equity(etf: SecActiveEtf, info: dict, p: Profile, stats: ProfileRunSta
         large_weight=p.large_weight, mid_weight=p.mid_weight, small_weight=p.small_weight,
         value_weight=p.value_weight, growth_weight=p.growth_weight, style_coverage=p.style_coverage,
         sector_weights=p.sector_weights, top_sector=p.top_sector, top_sector_weight=p.top_sector_weight,
+        country_weights=p.country_weights, top_country=p.top_country, top_country_weight=p.top_country_weight,
+        emerging_weight=p.emerging_weight,
     ))
     stats.etfs_added += inserted
     stats.etfs_updated += not inserted
@@ -340,6 +408,7 @@ def _apply(etf: SecActiveEtf, info: dict | None, holdings: list[dict], error: Ex
         stats.equity_by_region[p.region or 'unknown'] += 1
         stats.equity_by_cap[p.cap_size or 'unknown'] += 1
         stats.sectors_from_holdings += bool(not (info or {}).get('sectorsList') and p.sector_weights)
+        stats.no_country_weights += p.country_weights is None
         _save_equity(etf, info or {}, p, stats)
     elif etf.series_id in provider_series:
         provider_etf.set_strategy_by_series(etf.series_id, p.strategy)
@@ -353,7 +422,7 @@ def summary(stats: ProfileRunStats) -> str:
         f"SEC ETF profiles (FMP): {stats.checked} fund(s) checked, {len(stats.failed)} failed, {stats.not_on_fmp} not on FMP - {strategies or 'none'}",
         f"Equity funds: by region {dict(stats.equity_by_region)}, by cap size {dict(stats.equity_by_cap)}; "
         f"provider ETFs {stats.etfs_added} added, {stats.etfs_updated} updated, {stats.no_longer_equity} no longer equity; "
-        f"sector weights from our tickers for {stats.sectors_from_holdings}",
+        f"sector weights from our tickers for {stats.sectors_from_holdings}, no country weights for {stats.no_country_weights}",
     ]
     lines += [f"  failed: {f}" for f in stats.failed[:10]]
     if stats.selection is not None:
