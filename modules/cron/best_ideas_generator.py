@@ -14,7 +14,7 @@ from modules.sec import etf_selection
 from modules.ticker import company
 
 DAYS_NO_MARKET_CAP = 5
-MIN_HOLDINGS_WITH_PRICES_PCT = 0.95
+MIN_HOLDINGS_WITH_PRICES_PCT = 0.90
 LOOK_BACK_WINDOW = etf_selection.MAX_HOLDINGS_AGE_DAYS  # an active ETF's holdings are never older
 MAX_BEST_IDEAS_PER_FUND = 10
 HOLDING_DELTA_LIMIT_DROP_OFF = 0.20

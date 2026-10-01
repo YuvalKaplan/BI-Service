@@ -192,7 +192,7 @@ The large-cap line is **relative to the market**, not a fixed amount: a benchmar
 A manager's best ideas are the stocks they hold at a **higher weight than the market would**. For each active ETF:
 
 1. **Holdings** – the latest holdings downloaded in the last 14 days (the selection's holdings-date limit), with duplicate lines summed or quarantined ([Registration](#registration)).
-2. **Market caps** – for each holding, the latest market cap within 5 days of the holdings date. Holdings without one are reported as stale. If fewer than **95%** of the holdings have a market cap, the ETF is skipped for the week and reported.
+2. **Market caps** – for each holding, the latest market cap within 5 days of the holdings date. Holdings without one are reported as stale. If fewer than **90%** of the holdings have a market cap, the ETF is skipped for the week and reported.
 3. **Company level** – siblings are folded into their master and the ETF's exposure across share classes is summed.
 4. **Active weight** for each company:
 
