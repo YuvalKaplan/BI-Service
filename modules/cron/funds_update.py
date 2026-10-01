@@ -11,13 +11,14 @@ from modules.ticker import company, index_funds
 COMPANY_CAP_WINDOW_DAYS = 10  # matches best_idea.fetch_all_as_df's market-cap lookback
 
 
-def build_shared_context(as_of_date: date) -> tuple[pd.DataFrame, dict]:
+def build_shared_context(as_of_date: date, look_back_days: int) -> tuple[pd.DataFrame, dict]:
     """
     Builds the (all_best_ideas_df, mc_map) inputs shared by every fund for a given
     as_of_date. Computed once per run/date and passed into activate_fund() rather
-    than recomputed per fund.
+    than recomputed per fund. look_back_days must cover the longest look-back
+    (recalc_frequency_days) of the funds it's used for.
     """
-    all_best_ideas_df = best_idea.fetch_all_as_df(as_of_date=as_of_date)
+    all_best_ideas_df = best_idea.fetch_all_as_df(as_of_date=as_of_date, look_back_days=look_back_days)
     all_best_ideas_df = model_fund.resolve_canonical_ticker_ids(all_best_ideas_df)
 
     # A multi-listing company's master is measured by the company's cap as of the date (its
@@ -87,9 +88,7 @@ def activate_fund(
             )
             return None
 
-    fund_ideas_df = all_best_ideas_df[
-        all_best_ideas_df['benchmark_mode'] == strategy.benchmark
-    ]
+    fund_ideas_df = model_fund.fund_best_ideas(all_best_ideas_df, strategy, as_of_date)
 
     results = model_fund.generate(
         today=as_of_date,
@@ -179,7 +178,8 @@ def run() -> List[model_fund.FundChangesResult]:
         log.record_status(f"Running Fund Update batch job ID {batch_run_id} - will process {len(funds)} funds.")
 
         today = date.today()
-        all_best_ideas_df, mc_map = build_shared_context(today)
+        look_back_days = max((model_fund.getStrategyFromJson(f.strategy).recalc_frequency_days for f in funds), default=0)
+        all_best_ideas_df, mc_map = build_shared_context(today, look_back_days)
 
         all_results = [
             r for r in (activate_fund(f.id, today, all_best_ideas_df, mc_map) for f in funds)

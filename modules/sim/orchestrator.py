@@ -62,7 +62,7 @@ def run(
     current = first_recalc_date
     while current <= end_date:
         best_ideas_generator.run(as_of_date=current)
-        all_best_ideas_df, mc_map = funds_update.build_shared_context(current)
+        all_best_ideas_df, mc_map = funds_update.build_shared_context(current, strategy.recalc_frequency_days)
         results = funds_update.activate_fund(fund_id, current, all_best_ideas_df, mc_map)
         if results is not None:
             weekly_results.append((current, results))

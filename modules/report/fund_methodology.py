@@ -105,8 +105,8 @@ class _Context:
         self.buys = {c.ticker_id: c for c in fund_holding_change.fetch_for_date(fund_id, self.as_of_date) if c.direction == 'buy'}
 
         # Re-run the fund's selection exactly as funds_update.activate_fund did.
-        all_df, self.mc_map = funds_update.build_shared_context(self.as_of_date)
-        self.ideas_df = all_df[all_df['benchmark_mode'] == self.mode]
+        all_df, self.mc_map = funds_update.build_shared_context(self.as_of_date, self.strategy.recalc_frequency_days)
+        self.ideas_df = model_fund.fund_best_ideas(all_df, self.strategy, self.as_of_date)
         self.previous = fund_holding.fetch_funds_holdings(fund_id, self.as_of_date - timedelta(days=1))
         self.held_ids = {p.ticker_id for p in self.previous}
         self.recomputed = model_fund.generate(
@@ -391,7 +391,11 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
         'Bucket (region / style)': bucket(h.ticker_id),
         'Status': 'bought' if h.ticker_id in ctx.buys else 'kept from previous',
         'Matches stored': 'Y' if matches(h) else 'N',
-    } for h in sorted(ctx.stored_holdings, key=lambda h: -(h.weight or 0))])
+    } for h in ctx.stored_holdings])
+    # Stored holdings come back in no particular order: weight first, then the selection's own
+    # order (rank, appearances, delta) - with equal weights, the weight alone orders nothing.
+    holdings = holdings.sort_values(['Weight', 'Ranking', 'Appearances', 'Max delta'],
+                                    ascending=[False, True, False, False], na_position='last', ignore_index=True)
 
     selected = {h.ticker_id for h in ctx.stored_holdings}
     candidates = pd.DataFrame([{
@@ -416,7 +420,7 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
          ('All rows match stored', all(holdings['Matches stored'] == 'Y') if not holdings.empty else False),
          ('', '')] + [(f"strategy.{k}", v) for k, v in strategy_rows] + [('', '')] + [
             ('Candidate ranking level', s.ranking_to + (5 if s.allocation == 'market_cap' else 2)),
-            ('Ranking = ', 'a company\'s best rank in any fund ETF on its latest date'),
+            ('Ranking = ', f"a company's best rank in any fund ETF (each ETF's latest best ideas from the last {s.recalc_frequency_days} days)"),
             ('Order', 'ranking asc, appearances desc, max delta desc'),
             ('MC weight alpha / cap / floor', f"{model_fund.MC_WEIGHT_ALPHA} / {model_fund.MC_WEIGHT_CAP:.0%} / {model_fund.MC_WEIGHT_FLOOR:.0%}"),
         ],
@@ -453,7 +457,8 @@ def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
         "## Steps",
         "",
         f"1. **ETF holdings** — `etfs/` has one workbook per constituent ETF ({len(etf_files)}), with the holdings file "
-        f"downloaded from the provider for the date shown. A ticker listed on several lines is summed when all lines "
+        f"downloaded from the provider for the date shown: each ETF's latest within the fund's {s.recalc_frequency_days}-day "
+        "look-back, every ETF counting equally whatever its date. A ticker listed on several lines is summed when all lines "
         f"imply the same price (within {DUP_PRICE_TOLERANCE - 1:.0%}), and excluded (quarantined) when they don't. "
         "Listings of one company (share classes such as GOOGL/GOOG, and foreign listings) are combined under the company's master ticker (*Master used*), measured by the company market cap of its primary listing.",
         f"2. **Benchmark** — mode `{ctx.mode}`: {bm_text}.",
@@ -463,7 +468,7 @@ def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
         "4. **Best ideas** — `best_ideas.xlsx` lists all ETFs' best ideas, and whether each passes the fund's filters "
         f"(ETF list, style `{s.style.name}`, cap `{s.cap.name}`, region, exchange, ESG) and ranking cut.",
         "5. **Fund selection** — eligible ideas are combined per company: its best rank across the fund's ETFs, the "
-        "number of ETFs naming it (appearances) and its largest delta. Companies are ordered by rank, then appearances, "
+        "number of ETFs ranking it there (appearances) and its largest delta. Companies are ordered by rank, then appearances, "
         f"then delta, and the top {s.holdings} are taken (split by region/style where the strategy says so). "
         f"Weights: {'market-cap based (square-root compressed, capped and floored)' if s.allocation == 'market_cap' else 'equal'}. "
         "See `fund.xlsx` — *Holdings* shows the justification per holding, *Candidates* shows who wasn't selected and why.",
@@ -471,6 +476,7 @@ def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
         "## Constants",
         "",
         f"- Best ideas per ETF: {big.MAX_BEST_IDEAS_PER_FUND}; delta limit: {big.HOLDING_DELTA_LIMIT_DROP_OFF:.0%}",
+        f"- Look-back: each ETF's latest best ideas from the last {s.recalc_frequency_days} days (`recalc_frequency_days`)",
         "- Large-cap cutoffs (whole company cap, with at least "
         f"{index_funds.MIN_FLOAT_FACTOR:.0%} floating; each region's full-universe benchmark coverage of its market's float cap, per the index funds): "
         + ", ".join(f"{region} ${cut:,.0f} ({index_funds.full_universe_coverage()[region]:.0%})"

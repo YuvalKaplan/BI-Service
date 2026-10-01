@@ -110,7 +110,7 @@ The ETFs come from the [SEC active ETF list](#sec-active-etf-list), not from con
 | Top sector | at most 40% of the fund (FMP's sector weights; when FMP has none, our tickers' sectors) |
 | Top country | at most 50% of the fund in one country – or a US fund whose top country is the US (a single-country fund otherwise: Japan, China, India funds) |
 | Emerging markets | an International fund at most 40% in emerging markets – stocks VWO holds, FTSE's view (Korea developed) – so International means developed international |
-| Holdings date | its latest holdings in `provider_etf_holding` at most 10 days old (FMP refreshes most funds weekly) |
+| Holdings date | its latest holdings in `provider_etf_holding` at most 14 days old (FMP refreshes most funds weekly; two weeks covers the longest fund look-back) |
 
 A value we don't know fails its rule. A fund that moved to another trust is on the SEC list twice under one ticker until its old series drops off (BRIF and TGLR in September 2026) – only the one with the latest filing can be active; the other fails as a **duplicate** (it would download the same holdings and count twice in the funds). Otherwise the ETF is **inactive** – except one that passes everything but has no holdings downloaded yet, which stays **pending** (every new ETF's status) until its first download. The rules run after every Sunday profile run and every holdings download (step 2), so a new ETF on the SEC list that passes is downloaded from the next Tuesday. The selection also sets each ETF's `benchmark_id` – its region's large-cap blend benchmark (step 6). There's no reason column: the admin email counts the ETFs failing each rule and lists those that changed status, and [`scripts/current_sec_active_etfs.py`](#sec-data) writes each ETF's failed rules.
 
@@ -191,7 +191,7 @@ The large-cap line is **relative to the market**, not a fixed amount: a benchmar
 
 A manager's best ideas are the stocks they hold at a **higher weight than the market would**. For each active ETF:
 
-1. **Holdings** – the latest holdings downloaded in the last 10 days (the selection's holdings-date limit), with duplicate lines summed or quarantined ([Registration](#registration)).
+1. **Holdings** – the latest holdings downloaded in the last 14 days (the selection's holdings-date limit), with duplicate lines summed or quarantined ([Registration](#registration)).
 2. **Market caps** – for each holding, the latest market cap within 5 days of the holdings date. Holdings without one are reported as stale. If fewer than **95%** of the holdings have a market cap, the ETF is skipped for the week and reported.
 3. **Company level** – siblings are folded into their master and the ETF's exposure across share classes is summed.
 4. **Active weight** for each company:
@@ -247,15 +247,15 @@ Each fund is defined by a JSON **strategy**, for example:
 | `exchanges` | limit to stocks on these exchanges |
 | `esg_only` | only ESG-qualified companies |
 | `ranking_from` / `ranking_to` | which ranks of each ETF's best ideas count (e.g. 1–3 = each manager's top three) |
-| `recalc_frequency_days` | the fund is skipped until this many days have passed since its last recalculation |
+| `recalc_frequency_days` | the fund is skipped until this many days have passed since its last recalculation; also its look-back: each ETF's latest best ideas within that many days, every ETF counting equally |
 
-**Building the candidate list.** All stored best ideas (latest per ETF) are filtered by the strategy:
+**Building the candidate list.** Each ETF's latest best ideas within the fund's look-back (`recalc_frequency_days`) are filtered by the strategy. Every ETF counts equally whatever the date of its holdings file – a newer file doesn't override another ETF's view of a company:
 
 - **Region** – `US` takes ideas from US ETFs in companies whose `ticker.region` is `US`; `International` takes ideas from international ETFs in companies whose region is `International` (region = primary listing, see [Share-class consolidation](#share-class-consolidation-master-tickers)). With a split, the international list is built first and those companies are excluded from the US list.
 - **Cap** – large is the benchmark's rule (step 6): the company's cap on the date against its region's cutoff for that date, with at least 10% floating. For a `large` fund, a stock that has fallen below the cutoff is still allowed *only if the fund already holds it*, so it isn't sold for that reason alone; it can never be a new buy.
 - **Style, exchanges, ESG** as configured.
 
-The candidates are then combined per company: its best (lowest) rank across the ETFs on its latest date, the number of ETFs that picked it (**appearances**), its highest delta, and the ETF with that highest delta (the **source ETF**). They're ordered by rank, then appearances, then delta. The ideal fund is the top of this list within `ranking_to` (split by style and region percentages where configured).
+The candidates are then combined per company: its best (lowest) rank across the ETFs, the number of ETFs ranking it there (**appearances**), its highest delta, and the ETF with that highest delta (the **source ETF**). They're ordered by rank, then appearances, then delta. The ideal fund is the top of this list within `ranking_to` (split by style and region percentages where configured).
 
 **Changes to the previous holdings.**
 
@@ -342,7 +342,7 @@ Every day of the ticker maintenance (Tue–Sat), every ticker whose profile hasn
 
 `modules/ticker/valuation.py` (which tickers, once each, in parallel), `modules/ticker/pricing.py` (validation, glitches, USD)
 
-Once a day, in the ticker maintenance, every ticker in use gets its price and market cap for the latest completed trading day stored in `ticker_value` (`pricing.latest_value_date`: before 17:00 New York time that is the previous day, and a weekend steps back to Friday – the date every step stores and reads values under): the valid tickers in each active ETF's latest holdings from the last 10 days (the holdings best ideas can use – the selection's holdings-date limit; about 3,600) and, on Wednesdays, the registered lines of the stored screen (about 900 more). Each ticker is valued once however many ETFs hold it, 5 in parallel (FMP's rate limit of 200 calls a minute is the bound), and one already valued for the date is skipped. The company builder values the few foreign lines it admits the same way.
+Once a day, in the ticker maintenance, every ticker in use gets its price and market cap for the latest completed trading day stored in `ticker_value` (`pricing.latest_value_date`: before 17:00 New York time that is the previous day, and a weekend steps back to Friday – the date every step stores and reads values under): the valid tickers in each active ETF's latest holdings from the last 14 days (the holdings best ideas can use – the selection's holdings-date limit; about 3,600) and, on Wednesdays, the registered lines of the stored screen (about 900 more). Each ticker is valued once however many ETFs hold it, 5 in parallel (FMP's rate limit of 200 calls a minute is the bound), and one already valued for the date is skipped. The company builder values the few foreign lines it admits the same way.
 
 FMP's profile endpoint occasionally returns wrong values, so the numbers are taken from FMP's **historical** price and market-cap endpoints and **validated**: the last 21 days fetched now are compared against what we stored before. If any overlapping day differs by more than 0.5% (price) or 1% (market cap), today's value is withheld. If a ticker has gone 5 days without a good value, it's marked invalid with the mismatch details. Two kinds of mismatch mean our stored values are what's off, and FMP's are taken instead (`pricing.mismatch_kind`, logged):
 

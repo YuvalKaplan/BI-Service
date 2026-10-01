@@ -101,45 +101,27 @@ class BestIdeaRanked:
     source_etf_id: int
     all_provider_ids: List[int]
 
-def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
+def fetch_all_as_df(as_of_date: date, look_back_days: int) -> pd.DataFrame:
     """
-    Load all best ideas within the lookback window for all benchmark modes, of the ETFs that are
-    active now (an ETF that turned inactive stops feeding the funds at once), including ticker
-    attributes needed for per-fund filtering.
+    Load the best ideas of every date within the last look_back_days (inclusive) for all
+    benchmark modes, of the ETFs that are active now (an ETF that turned inactive stops feeding
+    the funds at once), including ticker attributes needed for per-fund filtering. An ETF can
+    have several dates here: model_fund.fund_best_ideas picks each ETF's latest within a fund's
+    own look-back.
     Returned DataFrame columns: provider_etf_id, ticker_id, value_date, ranking,
     delta, benchmark_mode, style_type, exchange, country, region, esg_qualified, name,
     master_ticker_id, market_cap, etf_region.
-    market_cap is the listing's own latest cap within the window; funds_update.build_shared_context
+    market_cap is the listing's own latest cap within 10 days; funds_update.build_shared_context
     replaces it with the company's cap as of the date for multi-listing companies' masters.
-    Callers should filter by benchmark_mode to match each fund's strategy.
     """
     sql = """
-        WITH latest_date_per_etf AS (
-            SELECT provider_etf_id, MAX(value_date) AS latest_date
-            FROM best_idea
-            WHERE value_date BETWEEN %(date)s - INTERVAL '10 days' AND %(date)s
-            GROUP BY provider_etf_id
-        ),
-        latest_ideas AS (
-            SELECT
-                bi.provider_etf_id,
-                bi.ticker_id,
-                bi.value_date,
-                bi.ranking,
-                bi.delta,
-                bi.benchmark_mode
-            FROM best_idea bi
-            JOIN latest_date_per_etf ld
-                ON bi.provider_etf_id = ld.provider_etf_id
-               AND bi.value_date = ld.latest_date
-        )
         SELECT
-            li.provider_etf_id,
-            li.ticker_id,
-            li.value_date,
-            li.ranking,
-            li.delta,
-            li.benchmark_mode,
+            bi.provider_etf_id,
+            bi.ticker_id,
+            bi.value_date,
+            bi.ranking,
+            bi.delta,
+            bi.benchmark_mode,
             t.style_type,
             t.exchange,
             t.country,
@@ -149,24 +131,25 @@ def fetch_all_as_df(as_of_date: date) -> pd.DataFrame:
             t.master_ticker_id,
             tv.market_cap,
             pe.region AS etf_region
-        FROM latest_ideas li
-        JOIN ticker t ON t.id = li.ticker_id
-        JOIN provider_etf pe ON pe.id = li.provider_etf_id AND pe.status = 'active'
+        FROM best_idea bi
+        JOIN ticker t ON t.id = bi.ticker_id
+        JOIN provider_etf pe ON pe.id = bi.provider_etf_id AND pe.status = 'active'
         LEFT JOIN LATERAL (
             SELECT market_cap
             FROM ticker_value
-            WHERE ticker_id = li.ticker_id
+            WHERE ticker_id = bi.ticker_id
               AND value_date BETWEEN %(date)s - INTERVAL '10 days' AND %(date)s
             ORDER BY value_date DESC
             LIMIT 1
         ) tv ON TRUE
-        WHERE t.invalid IS NULL
-        ORDER BY li.provider_etf_id, li.ranking ASC
+        WHERE bi.value_date BETWEEN %(date)s - %(look_back_days)s * INTERVAL '1 day' AND %(date)s
+          AND t.invalid IS NULL
+        ORDER BY bi.provider_etf_id, bi.value_date, bi.ranking ASC
     """
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, {'date': as_of_date})
+                cur.execute(sql, {'date': as_of_date, 'look_back_days': look_back_days})
                 rows = cur.fetchall()
                 cols = [desc[0] for desc in cur.description] if cur.description else []
         return pd.DataFrame(rows, columns=cols)

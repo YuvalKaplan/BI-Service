@@ -1,6 +1,6 @@
 import log
 import pandas as pd
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, List, Optional, cast
 from dataclasses import dataclass
 from pydantic import BaseModel
@@ -119,7 +119,10 @@ def results_to_string(results: FundChangesResult, include_header: bool = True, i
     if include_holdings:
         aggregator += f"Holdings ({len(results.holdings)}):\n"
         aggregator += "{:<12}{:<35}{}\n".format("Symbol", "Name", "Weight")
-        for h in sorted(results.holdings, key=lambda h: h.weight or 0, reverse=True):
+        # Weight, then the selection's order (rank, appearances - known for this run's buys -
+        # delta): with equal weights the weight alone leaves the holdings in storage order.
+        appearances = {ch.ticker_id: ch.appearances or 0 for ch in results.changes if ch.direction == 'buy'}
+        for h in sorted(results.holdings, key=lambda h: (-(h.weight or 0), h.ranking, -appearances.get(h.ticker_id, 0), -(h.max_delta or 0))):
             t = ticker_by_id.get(h.ticker_id)
             weight_str = f"{h.weight * 100:.2f}%" if h.weight is not None else "---"
             aggregator += "{:<12}{:<35}{}\n".format(
@@ -169,6 +172,17 @@ def resolve_canonical_ticker_ids(df: pd.DataFrame) -> pd.DataFrame:
     # pandas' fillna-downcast FutureWarning on a mixed-dtype object column).
     canonical = [t if pd.isna(m) else m for m, t in zip(df['master_ticker_id'], df['ticker_id'])]
     return df.assign(canonical_ticker_id=pd.array(canonical, dtype='int64'))
+
+
+def fund_best_ideas(all_best_ideas_df: pd.DataFrame, strategy: Strategy, as_of_date: date) -> pd.DataFrame:
+    """
+    The best ideas a fund draws on: its benchmark mode, from each ETF's latest date within the
+    fund's look-back (recalc_frequency_days, inclusive). Every ETF contributes one set of best
+    ideas and all count equally - a newer file doesn't outrank another ETF's view of a company.
+    """
+    df = all_best_ideas_df[all_best_ideas_df['benchmark_mode'] == strategy.benchmark]
+    df = df[df['value_date'] >= as_of_date - timedelta(days=strategy.recalc_frequency_days)]
+    return df[df['value_date'] == df.groupby('provider_etf_id')['value_date'].transform('max')]
 
 
 def large_cap_mask(df: pd.DataFrame) -> pd.Series:
@@ -244,10 +258,10 @@ def _filter_and_aggregate(
     held_ticker_ids: set[int] | None = None,
 ) -> pd.DataFrame:
     """
-    Filter the global best-ideas DataFrame for a specific fund configuration
-    and aggregate per ticker, preserving the same semantics as the SQL function:
-    latest date per ticker, best ranking on that date, appearances/max_delta/
-    source_etf_id all relative to this fund's ETF list.
+    Filter the fund's best-ideas DataFrame (fund_best_ideas: one date per ETF) for a specific
+    fund configuration and aggregate per ticker: its best ranking across the ETFs, and
+    appearances/max_delta/source_etf_id among the ETFs ranking it there, all relative to this
+    fund's ETF list.
     """
     key = 'canonical_ticker_id'
 
@@ -266,11 +280,7 @@ def _filter_and_aggregate(
     if filtered.empty:
         return empty
 
-    # Per company: keep only rows from its latest date (mirrors symbol_latest_date CTE)
-    ticker_max_date = filtered.groupby(key)['value_date'].transform('max')
-    filtered = filtered[filtered['value_date'] == ticker_max_date]
-
-    # Per company on its latest date: keep only its best ranking (mirrors symbol_targets CTE)
+    # Per company: keep only its best ranking across the ETFs
     ticker_best_rank = filtered.groupby(key)['ranking'].transform('min')
     filtered = filtered[filtered['ranking'] == ticker_best_rank]
 

@@ -18,8 +18,9 @@ fund, and:
      emerging index fund holds - index_funds.EMERGING_FUNDS): the funds are developed
      international;
   7. its latest stored holdings (provider_etf_holding) are at most MAX_HOLDINGS_AGE_DAYS old. FMP
-     refreshes most funds' holdings weekly (dated Sunday), some on other weekdays, so this allows
-     a week and a few days' slack; best ideas and the valuation pass look back as far.
+     refreshes most funds' holdings weekly (dated Sunday), some on other weekdays; two weeks
+     covers the longest fund look-back (recalc_frequency_days, at most 14), so every active ETF
+     can feed every fund. Best ideas and the valuation pass look back as far.
 A fund that moved to another trust is on the list twice under one ticker until its old series
 drops off (BRIF, TGLR): only the one with the latest filing can be active - the other fails
 'duplicate' (they'd download the same holdings and count twice in the funds).
@@ -48,7 +49,7 @@ MAX_STOCK_HOLDINGS = 200
 MAX_TOP_SECTOR_WEIGHT = 0.40
 MAX_TOP_COUNTRY_WEIGHT = 0.50
 MAX_EMERGING_WEIGHT = 0.40
-MAX_HOLDINGS_AGE_DAYS = 10
+MAX_HOLDINGS_AGE_DAYS = 14
 
 EQUITY = 'equity'   # the profile's strategy for an actively managed equity fund (etf_profile.classify)
 RULES = ('sec', 'duplicate', 'equity', 'region', 'cap', 'holdings', 'sector', 'country', 'emerging', 'fresh')
