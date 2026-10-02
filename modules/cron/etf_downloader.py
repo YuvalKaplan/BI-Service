@@ -1,5 +1,5 @@
 """
-The provider ETFs' holdings from FMP (etf/holdings), Tuesday to Saturday.
+The provider ETFs' holdings from FMP (etf/holdings), on the daily run days.
 
 Downloads every ETF the selection rules make a download target (modules/sec/etf_selection.py:
 the active and pending ETFs, and those failing only the freshness rule - so a fund comes back as
@@ -13,8 +13,8 @@ A line's ticker, first match wins:
      etf_profile.is_stock_line) or has no positive weight (a short or an accrual);
   3. the same line (symbol, ISIN, CUSIP, name) in the ETF's previous holdings: its ticker - this
      covers the stocks FMP lists by name only ("SAMSUNG ELECTRONICS CO"). A line left unresolved
-     there is tried again only with retry_unresolved (by default on Wednesdays, before the
-     generators);
+     there is tried again only with retry_unresolved (by default on the generation day -
+     modules/cron/schedule.py - before the generators);
   4. resolved from FMP (TickerResolver.resolve_fmp_line: its symbol's profile, else its ISIN, else a
      verified name search), registering a new ticker with its ESG - the ticker maintenance that
      follows (profiles, values, masters, style) takes it from there.
@@ -25,6 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from modules.core import api_stocks
+from modules.cron import schedule
 from modules.object import batch_run, provider_etf, provider_etf_holding
 from modules.object.batch_run import BatchRun
 from modules.object.provider_etf_holding import ProviderEtfHolding
@@ -35,7 +36,6 @@ from modules.ticker.index_funds import Listings
 from modules.ticker.resolver import TickerResolver
 
 FETCH_WORKERS = 4               # ETFs fetched in parallel, all under api_stocks' 200-calls-a-minute throttle
-RETRY_UNRESOLVED_WEEKDAY = 2    # Wednesday: lines unresolved before are tried again, before the generators
 MAX_FAILED_SHARE = 0.1
 MIN_FAILED_TO_RAISE = 5
 
@@ -155,10 +155,11 @@ def run(as_of: date | None = None, retry_unresolved: bool | None = None) -> Down
     """
     Downloads, resolves and stores the holdings of every download target, then applies the
     selection rules. Raises - so the cron emails the failure - when more than MAX_FAILED_SHARE of
-    the targets fail or come back empty.
+    the targets fail or come back empty. Lines left unresolved before are tried again with
+    retry_unresolved - by default on the generation day (the cron passes its own).
     """
     today = as_of or date.today()
-    retry = today.weekday() == RETRY_UNRESOLVED_WEEKDAY if retry_unresolved is None else retry_unresolved
+    retry = schedule.is_generation_day(today) if retry_unresolved is None else retry_unresolved
     batch_run_id = batch_run.insert(BatchRun(process='etf_downloader', activation='auto'))
     stats = DownloadStats(as_of=today, retry_unresolved=retry)
     try:

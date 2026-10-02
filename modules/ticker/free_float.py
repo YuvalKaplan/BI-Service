@@ -170,7 +170,7 @@ def refresh() -> FloatRunStats:
     company_of = {t.id: company.company_id(t, by_id) for t in valid}
     by_sym, by_isin, by_cusip = company.listing_index(valid, full_symbol)
 
-    # 1. Index funds (their stored snapshot - index_funds.refresh, before this step on Wednesdays):
+    # 1. Index funds (their stored snapshot - index_funds.refresh, before this step on the generation day):
     #    each company's holding lines (the listing, the fund's shares, their value), and which
     #    listings they hold.
     try:

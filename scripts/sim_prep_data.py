@@ -1,5 +1,5 @@
 """
-Prepares ticker data needed before a historical simulation, in the live Wednesday order:
+Prepares ticker data needed before a historical simulation, in the live generation day's order:
 screens today's FMP large caps (stored, dated at the data cutoff), refreshes stale ticker
 profile data (cik/isin/name/etc., needed for master-ticker grouping), values the tickers in use
 and the screen for that date, groups listings into companies (master tickers) and refreshes
@@ -78,7 +78,7 @@ if __name__ == '__main__':
             + _section("Listings with no equity float (notes / preferreds, left out of the companies)", floats.zero_float)))
 
         # require_value=False: the backfill re-fetches every listing's history, so a withheld or
-        # failed value on the screen date mustn't drop a company from every historical Wednesday.
+        # failed value on the screen date mustn't drop a company from every historical generation day.
         companies = company_builder.run(screen_date=screen_date, require_value=False)
         print(company_builder.summary(companies))
         report_sections.append("\n".join(

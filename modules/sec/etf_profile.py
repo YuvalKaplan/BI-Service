@@ -7,7 +7,7 @@ best ideas; their holdings are downloaded by modules/cron/etf_downloader.py.
 Per fund, two FMP calls: etf/info (asset class, provider, description, website, AUM, NAV,
 inception, sector weights) and etf/holdings. The reference for a fund's stocks is the index funds'
 stored snapshot (modules/ticker/index_funds.py - universe_etf: VTI for the US, VEA + VWO for
-International; downloaded on Wednesdays): a stock the US fund holds is US, one the international
+International; downloaded on the generation day): a stock the US fund holds is US, one the international
 funds hold is international, and each carries its company's float cap. A stock is large when its
 float cap reaches its market's 70% breakpoint (the companies making up the top 70% of the
 market's float cap), small below the 90% one, mid in between - Morningstar-style.
@@ -50,7 +50,7 @@ from modules.sec.etf_selection import SelectionStats
 from modules.ticker import company, index_funds
 
 PROFILE_REFRESH_DAYS = 28   # a fund's profile is checked again after this long (or after a newer filing)
-PROFILE_REFRESH_DAYS_ACTIVE = 6  # ... an active fund's: every Sunday run
+PROFILE_REFRESH_DAYS_ACTIVE = 6  # ... an active fund's: every weekly run
 FETCH_WORKERS = 4           # funds fetched in parallel, all under api_stocks' 200-calls-a-minute throttle
 EQUITY_MIN_WEIGHT = 0.8     # share of the fund in stock lines an equity fund needs
 MIN_COVERAGE = 0.5          # share of the fund placed (company or index fund) needed for region, size and emerging

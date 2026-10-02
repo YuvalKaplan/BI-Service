@@ -3,7 +3,7 @@ The market as the index funds see it, and where its size breakpoints fall.
 
 The index funds (universe_etf: VTI, CRSP US Total Market, for the US; VEA, FTSE Developed All Cap
 ex US, and VWO, FTSE Emerging All Cap, together International) hold nearly every listed company
-at its float-adjusted weight. Weekly (refresh, Wednesday before the free float):
+at its float-adjusted weight. Weekly (refresh, on the generation day before the free float):
 
   1. Each fund's holdings are downloaded (FMP etf/holdings) and stored as a snapshot
      (universe_etf_holding), so every decision based on them can be traced back.

@@ -1,8 +1,8 @@
 """
 Refreshes every listing's free float and every company's float factor (the investable share of
 its market cap per the Vanguard index funds — information and a market-cap check; benchmark
-weights use the whole company cap; modules/ticker/free_float.py), as the Wednesday cron does
-before the company builder, and reports: the large-cap market caps below the index funds'
+weights use the whole company cap; modules/ticker/free_float.py), as the cron does on the
+generation day before the company builder, and reports: the large-cap market caps below the index funds'
 float cap (too low — worth checking), the latest screened companies without a factor and the lowest factors,
 and the listings found with no equity float (notes / preferreds the company builder leaves out).
 

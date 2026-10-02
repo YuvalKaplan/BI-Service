@@ -5,7 +5,7 @@ from typing import List
 from modules.object import batch_run
 from modules.object import best_idea, fund, fund_analysis, fund_holding, fund_holding_change, provider_etf, ticker
 from modules.calc import model_fund
-from modules.cron import best_ideas_generator
+from modules.cron import best_ideas_generator, schedule
 from modules.ticker import company, index_funds
 
 COMPANY_CAP_WINDOW_DAYS = 10  # matches best_idea.fetch_all_as_df's market-cap lookback
@@ -66,7 +66,10 @@ def activate_fund(
     """
     Updates a single fund's holdings for as_of_date and persists the result.
     Returns None if the fund's strategy.recalc_frequency_days hasn't elapsed
-    since its last recalculation (the fund's holdings are left untouched).
+    since its last recalculation (the fund's holdings are left untouched). It's counted
+    between the two dates' weeks (Monday to Monday), not their days: the generation day can
+    move a day around a holiday (modules/cron/schedule.py), and a Thursday generation followed
+    by the next Wednesday's is 6 days apart - a weekly fund would skip that week.
     """
     f = fund.fetch_by_id(fund_id)
     if f is None:
@@ -80,11 +83,12 @@ def activate_fund(
     _to_current_masters(previous_holdings)
 
     if previous_holdings:
-        days_since_recalc = (as_of_date - previous_holdings[0].holding_date).days
+        last_recalc = previous_holdings[0].holding_date
+        days_since_recalc = (schedule.week_start(as_of_date) - schedule.week_start(last_recalc)).days
         if days_since_recalc < strategy.recalc_frequency_days:
             log.record_status(
-                f"[funds_update] Skipping '{f.name}' — {days_since_recalc}d since last recalculation, "
-                f"frequency is {strategy.recalc_frequency_days}d."
+                f"[funds_update] Skipping '{f.name}' — last recalculated {last_recalc}, {days_since_recalc // 7} week(s) "
+                f"ago, frequency is {strategy.recalc_frequency_days}d."
             )
             return None
 

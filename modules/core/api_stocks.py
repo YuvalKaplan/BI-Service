@@ -196,6 +196,20 @@ def fetch_available_exchanges() -> list[dict]:
         log.record_notice(f"Failed to fetch available exchanges: {e}")
         return []
 
+def get_exchange_holidays(exchange: str, start: date, end: date) -> list[dict] | str:
+    """The exchange's holidays over [start, end]: {exchange, date, name, isClosed, adjOpenTime,
+    adjCloseTime} per day - a full closure has isClosed true, an early close isClosed null (and
+    isFullyClosed false). An empty list is a valid answer (no holidays published for the range)."""
+    try:
+        throttle_api_calls()
+        url = (f"{FMP_API_URL}/holidays-by-exchange?exchange={_q(exchange)}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        result = get_jsonparsed_data(url)
+        if not isinstance(result, list):
+            return f"Unexpected holidays response for {exchange}: {str(result)[:200]}"
+        return result
+    except Exception as e:
+        return f"Failed to get the holidays of {exchange}. Response from service provider: {e}"
+
 def get_symbol_historic_prices(symbol: str, start: date, end: date) -> list[dict[str,str]] | str:
     try:
         throttle_api_calls()

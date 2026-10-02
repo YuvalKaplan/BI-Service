@@ -196,7 +196,7 @@ def fetch_stale_tickers(include_invalid: bool = False) -> list['Ticker']:
     """
     Every ticker whose profile hasn't been refreshed via the FMP profile API within the last
     week (or ever) — the single shared candidate pool for any ticker-profile-refresh flow
-    (scripts/data_fill_ticker_profile.py, scripts/sim_prep_data.py, the live Tue-Sat cron
+    (scripts/data_fill_ticker_profile.py, scripts/sim_prep_data.py, the live cron's daily run
     step), so they all go over the same list instead of each having their own variant query.
     Excludes tickers already marked invalid unless include_invalid=True (retry them too).
     """

@@ -5,7 +5,7 @@ from modules.object.exit import cleanup
 from modules.core.db import db_pool_instance, ENVIRONMENT
 from modules.core import sender
 from modules.calc.model_fund import results_to_string
-from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, benchmark_generator, screener, company_builder
+from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, benchmark_generator, screener, company_builder, schedule
 from modules.ticker import esg, free_float, index_funds, master, refresh, style, valuation
 from modules.sec import etf_profile, ncen
 
@@ -22,20 +22,29 @@ if __name__ == '__main__':
         log.record_status(f"Starting cron service in Environment: {ENVIRONMENT}")
 
         start_time = datetime.now(timezone.utc)
-        weekday = start_time.weekday() # 0 = Monday, 4 = Friday, 6 = Sunday
+        run_day = start_time.date()
+        weekday = run_day.weekday()
+        # The generators' day this week (modules/cron/schedule.py): GENERATION_WEEKDAY, moved a
+        # day when the close it would work on is an NYSE holiday.
+        generation = schedule.is_generation_day(run_day)
         message_actions = ""
 
-        if 1 <= weekday <= 5: # Tuesday through Saturday
+        # A moved generation is reported on its usual day (why nothing is generated) and on the day it runs.
+        generation_note = schedule.generation_note(run_day)
+        if generation_note and (generation or weekday == schedule.GENERATION_WEEKDAY):
+            message_actions += generation_note + "\n" + BREAKER_LINE
+
+        if weekday in schedule.DAILY_RUN_DAYS:
             # Listings in first — the provider ETFs' FMP holdings (stage 2, then the selection rules on
             # their new dates) and the large-cap screener (stage 3), which register their tickers as
             # they read them — then ticker maintenance (stage 4) runs the
             # ticker utilities over every ticker, in order: profiles (so values use current
             # currencies and skip tickers no longer valid) -> values (once per ticker in use; on
-            # Wednesday also the stored screen's lines) -> share-class consolidation (company caps
-            # come from the values) -> style (after grouping, so a new listing isn't classified on
-            # its own). The Wednesday generators only ever use maintained tickers.
+            # the generation day also the stored screen's lines) -> share-class consolidation (company
+            # caps come from the values) -> style (after grouping, so a new listing isn't classified
+            # on its own). The generators only ever use maintained tickers.
             try:
-                downloads = etf_downloader.run()
+                downloads = etf_downloader.run(retry_unresolved=generation)
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
                 raise e
@@ -45,7 +54,7 @@ if __name__ == '__main__':
             message_actions += BREAKER_LINE
 
             try:
-                screen = screener.run(store=(weekday == 2))
+                screen = screener.run(store=generation)
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the FMP large-cap screener with error:\n{e}\n\n")
                 raise e
@@ -86,7 +95,7 @@ if __name__ == '__main__':
 
             message_actions += BREAKER_LINE
 
-        if weekday == 6:  # Sunday — ticker maintenance, Sunday part: style reference data, then ESG; then the SEC active ETF list
+        if weekday == schedule.WEEKLY_WEEKDAY:  # The weekly day — ticker maintenance, weekly part: style reference data, then ESG; then the SEC active ETF list
             try:
                 total_etfs = categorize_downloader.run()
             except Exception as e:
@@ -117,7 +126,7 @@ if __name__ == '__main__':
 
             # Then the listed funds' FMP profiles: the actively managed equity ones go to the provider
             # tables, sized against the index funds' snapshot, and the selection rules set which of
-            # them are active (their holdings are downloaded from Tuesday).
+            # them are active (their holdings are downloaded from the next daily run).
             try:
                 profile_stats = etf_profile.run()
             except Exception as e:
@@ -127,8 +136,8 @@ if __name__ == '__main__':
             message_actions += etf_profile.summary(profile_stats) + "\n"
             message_actions += BREAKER_LINE
 
-        if weekday == 2: # Wednesday
-            # The generators, after the Tue–Sat steps above (which stored and valued the screen): the
+        if generation:
+            # The generators, after the daily steps above (which stored and valued the screen): the
             # listings' free floats and companies' float factors (the note/preferred lines the
             # company builder leaves out, and a check of the market caps against the index funds), then
             # the companies are built from the stored screen and the listings' links, then benchmarks,

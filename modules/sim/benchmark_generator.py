@@ -4,10 +4,11 @@ from modules.object import batch_run, benchmark, ticker, ticker_value, screener_
 from modules.object.screener_listing import ScreenerListing
 from modules.ticker import company, pricing
 from modules.ticker import util as tu
+from modules.cron import schedule
 from modules.cron.benchmark_generator import (benchmark_cutoffs, company_float_factors, current_companies, company_styles,
                                               select_holdings, store_holdings)
 
-WINDOW_DAYS = 5    # how far from a Wednesday to search for the closest available market cap
+WINDOW_DAYS = 5    # how far from a generation day to search for the closest available market cap
 DATA_LAG_DAYS = 3  # FMP's historical price/market-cap endpoints don't have data yet for the most recent days
 
 
@@ -26,19 +27,8 @@ def data_cutoff_date() -> date:
     return _most_recent_weekday(date.today() - timedelta(days=DATA_LAG_DAYS))
 
 
-def _wednesdays_between(start: date, end: date) -> list[date]:
-    offset = (2 - start.weekday()) % 7
-    first = start + timedelta(days=offset)
-    wednesdays = []
-    d = first
-    while d <= end:
-        wednesdays.append(d)
-        d += timedelta(days=7)
-    return wednesdays
-
-
 def _company_caps_for_date(
-    wednesday: date,
+    day: date,
     history: dict[int, dict[date, float]],
     listing_order: dict[int, list[int]],   # company id -> its listings with history, primary first
     region_lookup: dict[int, str],         # company id -> 'US' | 'International'
@@ -53,7 +43,7 @@ def _company_caps_for_date(
     rows: list[tuple[int, str, float]] = []
     for cid, listing_ids in listing_order.items():
         for tid in listing_ids:
-            mc = pricing.closest_value_for_date(history[tid], wednesday, window_days=WINDOW_DAYS)
+            mc = pricing.closest_value_for_date(history[tid], day, window_days=WINDOW_DAYS)
             if mc and mc > 0:
                 rows.append((cid, region_lookup[cid], mc))
                 break
@@ -62,16 +52,16 @@ def _company_caps_for_date(
 
 def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
     """
-    Backfills historical Wednesday-dated benchmark_holding rows for every enabled benchmark,
-    from inception_date through the data cutoff (FMP's historical endpoints don't have
-    price/market-cap data yet for the most recent few days) — otherwise the same weekday the
-    live cron refreshes the benchmarks on.
+    Backfills benchmark_holding rows for every enabled benchmark, dated on each generation day
+    (modules/cron/schedule.py — the days the live cron refreshes the benchmarks on, and the sim's
+    fund recalculation days) from inception_date through the data cutoff (FMP's historical
+    endpoints don't have price/market-cap data yet for the most recent few days).
 
     The companies are the ones scripts/sim_prep_data.py stored (it screens, syncs masters and
     builds them, dated at the data cutoff — the screener has no historical mode, so today's
     large caps are used); failing that, the latest stored ones.
     Each company's screened listings then get their historical market-cap series — the stored
-    values when they cover every Wednesday, else FMP's history — and for each Wednesday every
+    values when they cover every generation day, else FMP's history — and for each of them every
     company takes its primary listing's value; the benchmarks are formed with the same selection
     and weighting as live (select_holdings, store_holdings).
 
@@ -101,15 +91,15 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
         tickers_by_id = {t.id: t for t in ticker.fetch_by_ids(
             list({l.ticker_id for ms in members.values() for l in ms} | set(region_lookup)))}
 
-        wednesdays = _wednesdays_between(inception_date, cutoff)
-        if not wednesdays:
-            raise Exception(f"No Wednesday between {inception_date} and the data cutoff {cutoff}.")
+        generation_days = schedule.generation_days_between(inception_date, cutoff)
+        if not generation_days:
+            raise Exception(f"No generation day between {inception_date} and the data cutoff {cutoff}.")
 
         # Each listing's market-cap series. The stored values come first: they're the ones live
         # validated (USD at each date's FX rate, from the listing's own currency; FMP glitches
         # repaired — scripts/data_fill_ticker_value_refresh.py --outliers / --profile-check for
         # older history), and most listings — ETF holdings valued daily, weekly-screened lines —
-        # have one near every Wednesday. Only a listing whose stored values miss a Wednesday
+        # have one near every generation day. Only a listing whose stored values miss one
         # (registered recently, or not in use then) gets its full history from FMP, in one call —
         # the live path's fetch (pricing.fetch_price_and_market_cap_history): USD at each date's
         # own historical FX rate, and FMP glitches repaired from the price or dropped
@@ -118,7 +108,7 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
         # the screener quote's share count as the reference.
         listing_ids = [l.ticker_id for ms in members.values() for l in ms if l.ticker_id in tickers_by_id]
         stored = ticker_value.fetch_market_caps_between(
-            listing_ids, wednesdays[0] - timedelta(days=WINDOW_DAYS), wednesdays[-1] + timedelta(days=WINDOW_DAYS))
+            listing_ids, generation_days[0] - timedelta(days=WINDOW_DAYS), generation_days[-1] + timedelta(days=WINDOW_DAYS))
         history: dict[int, dict[date, float]] = {}
         from_store = fetched_count = 0
         for ms in members.values():
@@ -127,7 +117,7 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
                 if t is None:
                     continue
                 series = stored.get(l.ticker_id)
-                if series and all(pricing.closest_value_for_date(series, w, window_days=WINDOW_DAYS) for w in wednesdays):
+                if series and all(pricing.closest_value_for_date(series, d, window_days=WINDOW_DAYS) for d in generation_days):
                     history[l.ticker_id] = series
                     from_store += 1
                     continue
@@ -163,18 +153,18 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
         benchmarks = benchmark.fetch_all()
         styles = company_styles(list(listing_order), benchmarks)
         float_factors = company_float_factors(list(listing_order))  # today's: no history of them is kept
-        log.record_status(f"Backfilling {len(wednesdays)} historical Wednesdays from {inception_date} to {cutoff}.")
+        log.record_status(f"Backfilling {len(generation_days)} historical generation days from {inception_date} to {cutoff}.")
 
         benchmarks_created: list[tuple[str, date, int]] = []
-        for wednesday in wednesdays:
-            rows = _company_caps_for_date(wednesday, history, listing_order, region_lookup)
-            # The breakpoints of the index funds' snapshot on or before the Wednesday - the earliest
-            # stored one for a Wednesday before snapshots were kept.
-            selected = select_holdings(rows, benchmarks, benchmark_cutoffs(benchmarks, wednesday), float_factors, styles)
+        for day in generation_days:
+            rows = _company_caps_for_date(day, history, listing_order, region_lookup)
+            # The breakpoints of the index funds' snapshot on or before the day - the earliest
+            # stored one for a day before snapshots were kept.
+            selected = select_holdings(rows, benchmarks, benchmark_cutoffs(benchmarks, day), float_factors, styles)
             for b in benchmarks:
                 if selected[b.id]:
-                    store_holdings(b, selected[b.id], wednesday)
-                    benchmarks_created.append((b.name, wednesday, len(selected[b.id])))
+                    store_holdings(b, selected[b.id], day)
+                    benchmarks_created.append((b.name, day, len(selected[b.id])))
 
         batch_run.update_completed_at(batch_run_id)
         log.record_status("Sim Benchmark Generator completed.\n")

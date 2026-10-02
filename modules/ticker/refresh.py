@@ -17,7 +17,7 @@ def refresh_ticker_profiles(include_invalid: bool = False) -> tuple[int, int, in
     Refreshes full ticker profile data (isin/cusip/cik/name/industry/sector/country/currency/
     is_actively_trading) from FMP for every ticker whose profile hasn't been checked within
     the last week (ticker.fetch_stale_tickers) — the single shared implementation used by
-    scripts/data_fill_ticker_profile.py, scripts/sim_prep_data.py, and the live Tue-Sat cron
+    scripts/data_fill_ticker_profile.py, scripts/sim_prep_data.py, and the live cron's daily run
     step, so all three go over the exact same ticker list rather than each having their own
     narrower variant (e.g. the old cik-only backfill).
 

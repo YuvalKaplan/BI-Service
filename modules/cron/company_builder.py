@@ -53,7 +53,7 @@ def _listing_caps(
     in its grace period all week) the listing is left out when require_value (live: a snapshot
     needs a genuinely validated value); the sim passes False and falls back to the latest stored
     value — it re-fetches each listing's whole history anyway, so one bad data point mustn't
-    throw a company out of every historical Wednesday. A listing flagged invalid is always left out,
+    throw a company out of every historical generation day. A listing flagged invalid is always left out,
     and so is a note or preferred line by its current data (company.is_non_equity_line: FMP reports
     no equity float for it, or its name is cut after a coupon) — the screener classified it by the
     screen's name alone, and a company screened only through such a line (Algonquin via its

@@ -1,6 +1,6 @@
 """
 The style reference ETFs (categorize_etf, usage 'style': a growth and a value ETF per cap size),
-read from FMP by ticker (etf/holdings), weekly on Sunday. Each stock line is resolved into
+read from FMP by ticker (etf/holdings), on the weekly day. Each stock line is resolved into
 categorize_ticker with its ETF's style and cap and its FMP factors
 (TickerResolver.POPULATE_CATEGORY_TICKER) - the value / growth classifier's training set
 (modules/calc/classification.py) and the CAT_ETF step of style assignment (modules/ticker/style.py).

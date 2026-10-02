@@ -29,7 +29,7 @@ which stays pending until its first download. The holdings download (modules/cro
 fetches the active and pending funds, and those failing only freshness (download_targets), so a
 fund comes back as soon as FMP refreshes it.
 
-run() follows every profile run (Sunday) and holdings download (Tuesday to Saturday). It also
+run() follows every profile run (the weekly day) and holdings download (the daily run days). It also
 sets each ETF's benchmark_id: its region's enabled large-cap blend / core benchmark, which the
 full_universe best ideas compare it with.
 """

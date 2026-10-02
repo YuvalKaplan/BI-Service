@@ -1,5 +1,5 @@
 """
-Backfills historical Wednesday-dated benchmark_holding snapshots (every enabled benchmark) from
+Backfills historical benchmark_holding snapshots dated on each generation day (every enabled benchmark) from
 inception_date up to the most recent date with published FMP data, for use by a historical
 simulation (sim_fund.py).
 

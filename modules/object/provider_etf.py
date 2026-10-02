@@ -15,7 +15,7 @@ class ProviderEtf:
     An actively managed equity ETF found from the SEC's N-CEN filings and FMP
     (modules/sec/etf_profile.py), with the FMP profile it was classified by. status is set by the
     selection rules (modules/sec/etf_selection.py): 'pending' until its first check (or its first
-    holdings download), then 'active' - its holdings are downloaded Tuesday to Saturday
+    holdings download), then 'active' - its holdings are downloaded on the daily run days
     (modules/cron/etf_downloader.py) and it feeds best ideas - or 'inactive'.
     Fields in table-column order (keyword-only, so the required ones needn't come first).
     """

@@ -18,7 +18,7 @@ def populate_esg(ticker_id: int, full_symbol: str) -> None:
 
 
 def refresh_all() -> int:
-    """Refreshes the ESG data of every valid company (the weekly Sunday run)."""
+    """Refreshes the ESG data of every valid company (the weekly day's run)."""
     symbols = resolver.TickerResolver(resolver.TickerResolver.POPULATE_TICKER)
     batch_run_id = batch_run.insert(batch_run.BatchRun(process='esg_update', activation='auto'))
     # ESG is a company-level attribute: share-class siblings (master_ticker_id set) are skipped,

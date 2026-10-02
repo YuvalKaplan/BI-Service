@@ -1,6 +1,6 @@
 """
 Runs the screener by hand: registers the FMP large-cap screen's home-market listings
-and stores the screen for the latest completed trading day (the Wednesday mode — follow with
+and stores the screen for the latest completed trading day (the generation day's mode — follow with
 scripts/current_ticker_values.py to value it). With --register-only, only registers the listings
 as tickers (the other days' mode).
 

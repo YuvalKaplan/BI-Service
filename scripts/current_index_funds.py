@@ -1,7 +1,7 @@
 """
 Downloads the index funds' holdings (universe_etf: VTI, VEA, VWO), stores the snapshot with each
 line's company float cap (universe_etf_holding) and the market's size breakpoints
-(market_breakpoint), as the Wednesday cron does before the free float
+(market_breakpoint), as the cron does on the generation day before the free float
 (modules/ticker/index_funds.py), and prints the breakpoints with the benchmarks' cutoffs.
 
 Usage:

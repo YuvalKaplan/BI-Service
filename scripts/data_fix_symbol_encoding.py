@@ -20,7 +20,7 @@ For each such ticker (found by its FMP symbol):
      has none, since what's stored is another company's.
 Then the master sync and company data refresh run (master.sync_masters_and_company_data), so the
 companies are regrouped on the corrected identifiers. Style and ESG are filled again by the next
-ticker maintenance (style: Tue-Sat; ESG: Sunday, or at the next registration).
+ticker maintenance (style: the daily run days; ESG: the weekly day, or at the next registration).
 
 Run it only once the encoding fix is deployed, or the next profile refresh / valuation brings the
 wrong data back.

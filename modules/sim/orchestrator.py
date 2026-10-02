@@ -4,7 +4,7 @@ import log
 from datetime import date, timedelta
 from modules.core.db import ENVIRONMENT
 from modules.object import provider_etf_holding, fund, fund_analysis, fund_holding, fund_holding_change
-from modules.cron import best_ideas_generator, funds_update
+from modules.cron import best_ideas_generator, funds_update, schedule
 from modules.calc import model_fund
 
 DEFAULT_INCEPTION_DATE = date(2026, 1, 15)
@@ -46,27 +46,27 @@ def run(
     fund_holding_change.delete_all_for_fund(fund_id)
     fund_analysis.delete_all_for_fund(fund_id)
 
-    # First recalculation date: the first Wednesday on/after inception_date — the live cron's
-    # recalculation day, and the day sim_benchmark.py dates its snapshots, so each recalculation
-    # uses that same day's benchmark (as live does) rather than the previous week's.
-    days_until_wednesday = (2 - inception_date.weekday()) % 7
-    first_recalc_date = inception_date + timedelta(days=days_until_wednesday)
+    # Every generation day from inception_date on (modules/cron/schedule.py) — the live cron's
+    # recalculation days, and the days sim_benchmark.py dates its snapshots, so each recalculation
+    # uses that same day's benchmark (as live does) rather than the previous week's. Best ideas
+    # are generated on each, as live; activate_fund skips the fund until recalc_frequency_days
+    # have passed (counted in weeks, as live).
+    generation_days = schedule.generation_days_between(inception_date, end_date)
 
     log.record_status(
         f"[sim] Running fund_id={fund_id} simulation from {inception_date} to {end_date}, "
-        f"recalculating every {strategy.recalc_frequency_days} days starting {first_recalc_date}"
+        f"recalculating every {strategy.recalc_frequency_days} days on {len(generation_days)} generation day(s)"
+        + (f" starting {generation_days[0]}" if generation_days else "")
     )
 
     weekly_results: list[tuple[date, model_fund.FundChangesResult]] = []
 
-    current = first_recalc_date
-    while current <= end_date:
+    for current in generation_days:
         best_ideas_generator.run(as_of_date=current)
         all_best_ideas_df, mc_map = funds_update.build_shared_context(current, strategy.recalc_frequency_days)
         results = funds_update.activate_fund(fund_id, current, all_best_ideas_df, mc_map)
         if results is not None:
             weekly_results.append((current, results))
-        current += timedelta(days=strategy.recalc_frequency_days)
 
     log.record_status(f"[sim] Finished fund_id={fund_id} simulation from {inception_date} to {end_date}")
 

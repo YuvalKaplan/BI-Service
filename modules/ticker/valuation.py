@@ -63,7 +63,7 @@ def targets_for_listings(listings: list[ScreenerListing]) -> list[ValueTarget]:
 def targets_in_use(value_date: date, stats: ValuationStats | None = None) -> list[ValueTarget]:
     """Every ticker the generators use, once: the valid tickers in each active ETF's latest
     holdings from the last HOLDINGS_LOOK_BACK_DAYS, and the registered lines of the screen stored
-    for value_date (Wednesdays) — whose target wins, for its quote's share count."""
+    for value_date (the generation day) — whose target wins, for its quote's share count."""
     held = targets_for_tickers(ticker.fetch_by_ids(provider_etf_holding.fetch_valid_ticker_ids_in_recent_holdings(HOLDINGS_LOOK_BACK_DAYS)))
     screened = targets_for_listings(screener_listing.fetch_for_date(value_date))
     by_id = {t.ticker_id: t for t in held}

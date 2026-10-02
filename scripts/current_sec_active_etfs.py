@@ -1,5 +1,5 @@
 """
-The SEC active ETF list, as the Sunday cron runs it:
+The SEC active ETF list, as the cron runs it on the weekly day:
   1. Reads the Form N-CEN filings on EDGAR not read yet (the last five quarters) into the list of
      actively managed ETFs (sec_active_etf - modules/sec/ncen.py). The first run reads about
      4,000 filings (15-25 minutes); later runs only the new ones. --reload reads every filing in

@@ -242,8 +242,8 @@ def summary(stats: ScreenerRunStats) -> str:
 def run(screen_date: date | None = None, store: bool = False) -> ScreenerRunStats:
     """
     Screens FMP's large caps (every line classified, _classify) and registers the home-market
-    lines as tickers, so the daily ticker maintenance covers every listing the Wednesday
-    generators will use. With `store` (Wednesdays, the sim, by hand) the screen is also stored in
+    lines as tickers, so the daily ticker maintenance covers every listing the generators
+    will use. With `store` (the generation day, the sim, by hand) the screen is also stored in
     screener_listing — foreign lines included, decided by the company builder after the master
     sync — and the valuation pass (modules/ticker/valuation.py) then values its registered lines
     for screen_date. Registering takes about a minute; valuing the screen is what's weekly.

@@ -4,7 +4,7 @@ Saturday cron does (modules/cron/etf_downloader.py): every active and pending ET
 failing only the freshness rule; each line resolved to a ticker (new ones registered) and stored
 under FMP's holdings date.
 
---retry-unresolved tries again the lines left unresolved before (the cron does on Wednesdays) -
+--retry-unresolved tries again the lines left unresolved before (the cron does on the generation day) -
 use it after the first run on a new database.
 
 Usage:

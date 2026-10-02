@@ -19,7 +19,7 @@ never modified.
 
 `provider_etf_id` is remapped too: each environment builds its own provider_etf list from the SEC
 active ETF list (modules/sec/etf_profile.py), so ETFs are matched by their `sec_series_id`. A
-production ETF development doesn't have yet (its Sunday profile run hasn't caught up) is skipped
+production ETF development doesn't have yet (its weekly profile run hasn't caught up) is skipped
 with a warning - run `scripts/current_sec_active_etfs.py --dev` first to add it.
 
 The script connects directly to both databases at once via psycopg (bypassing
