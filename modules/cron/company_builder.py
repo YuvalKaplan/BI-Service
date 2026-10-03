@@ -30,14 +30,18 @@ class CompanyBuildStats:
 
 
 def summary(stats: CompanyBuildStats) -> str:
-    """One line for the cron email."""
-    return (
-        f"Company builder {stats.screen_date}: {stats.us_companies} US and {stats.intl_companies} International companies — "
-        f"{len(stats.no_value)} listings without a validated value (or invalid) and {len(stats.non_equity)} note/preferred "
-        f"lines left out; skipped "
-        f"{len(stats.foreign_duplicates)} foreign duplicate and {len(stats.foreign_currency)} other-currency lines; "
-        f"admitted {len(stats.foreign_admitted)} foreign lines; dropped {len(stats.duplicate_companies)} duplicate companies"
-    )
+    """The cron email's section: a title, then one short bullet per fact."""
+    return "\n".join([
+        f"Company builder {stats.screen_date}",
+        f"- {stats.us_companies:,} US companies",
+        f"- {stats.intl_companies:,} International companies",
+        f"- {len(stats.no_value):,} listings without a validated value (or invalid) left out",
+        f"- {len(stats.non_equity):,} note/preferred lines left out",
+        f"- {len(stats.foreign_admitted):,} foreign lines admitted",
+        f"- {len(stats.foreign_duplicates):,} foreign duplicate lines skipped",
+        f"- {len(stats.foreign_currency):,} other-currency lines skipped",
+        f"- {len(stats.duplicate_companies):,} duplicate companies dropped",
+    ])
 
 
 def _listing_caps(

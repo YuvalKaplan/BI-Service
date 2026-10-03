@@ -131,23 +131,26 @@ def _store(target: Evaluated, rows: list[dict], listings: Listings, resolver: Ti
 
 
 def summary(stats: DownloadStats) -> str:
-    """A few lines for the cron email."""
+    """The cron email's section: a title, then one short bullet per fact."""
     lines = [
-        f"Provider ETF holdings (FMP) {stats.as_of}: {stats.stored} of {stats.targets} ETF(s) stored, "
-        f"{len(stats.no_date)} without a holdings date, {len(stats.failed)} failed"
-        f"{' (unresolved lines retried)' if stats.retry_unresolved else ''}",
-        f"  {stats.lines} lines: {stats.outcomes[MATCHED]} matched to our tickers, {stats.outcomes[CARRIED]} carried over, "
-        f"{stats.outcomes[RESOLVED]} resolved from FMP, {stats.outcomes[UNRESOLVED]} stock line(s) unresolved, "
-        f"{stats.outcomes[NOT_STOCK]} not stocks",
+        f"Provider ETF holdings (FMP) {stats.as_of}{' - unresolved lines retried' if stats.retry_unresolved else ''}",
+        f"- {stats.stored} of {stats.targets} ETF(s) stored",
+        f"- {len(stats.no_date)} without a holdings date" + (f": {', '.join(stats.no_date[:10])}" if stats.no_date else ""),
+        f"- {len(stats.failed)} failed" + (":" if stats.failed else ""),
+        *(f"  - {f}" for f in stats.failed[:10]),
+        f"- {stats.lines:,} lines:",
+        f"  - {stats.outcomes[MATCHED]:,} matched to our tickers",
+        f"  - {stats.outcomes[CARRIED]:,} carried over",
+        f"  - {stats.outcomes[RESOLVED]:,} resolved from FMP",
+        f"  - {stats.outcomes[UNRESOLVED]:,} stock line(s) unresolved",
+        f"  - {stats.outcomes[NOT_STOCK]:,} not stocks",
     ]
     worst = sorted(stats.unresolved_weight.items(), key=lambda kv: -kv[1])[:5]
     if worst:
-        lines.append("  most unresolved stock weight: " + ", ".join(f"{t} {w:.1%}" for t, w in worst))
-    if stats.no_date:
-        lines.append(f"  without a date: {', '.join(stats.no_date[:10])}")
-    lines += [f"  failed: {f}" for f in stats.failed[:10]]
+        lines.append("- Most unresolved stock weight:")
+        lines += [f"  - {t} {w:.1%}" for t, w in worst]
     if stats.selection is not None:
-        lines.append(etf_selection.summary(stats.selection))
+        lines += ["", etf_selection.summary(stats.selection)]
     return "\n".join(lines)
 
 

@@ -104,7 +104,7 @@ def write_report(
         sections.append(f"{header}\n{'=' * len(header)}\n" + model_fund.results_to_string(
             results, include_header=False, include_holdings=show_holdings,
         ))
-    report_body = report_header + "\n".join(sections)
+    report_body = report_header + "\n\n".join(sections) + "\n"
 
     safe_name = re.sub(r'[\\/:*?"<>|]', '-', fund.name)
     os.makedirs(".output", exist_ok=True)

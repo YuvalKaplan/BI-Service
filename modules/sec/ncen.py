@@ -280,16 +280,24 @@ def filed_since(as_of: date | None = None) -> date:
 
 
 def summary(stats: NcenRunStats) -> str:
-    """A few lines for the cron email."""
+    """The cron email's section: a title, then one short bullet per fact."""
     lines = [
-        f"SEC active ETFs (N-CEN, {stats.window}): {stats.read} new filing(s) read of {stats.indexed} indexed"
-        f"{f', {len(stats.failed)} failed' if stats.failed else ''} - {stats.added} ETF(s) added, {stats.updated} updated, "
-        f"{stats.removed} removed (index fund / not an ETF by a newer filing), {stats.terminated} terminated",
-        f"Current list: {stats.current} active ETFs, {stats.tracked} of them equity funds in provider_etf",
+        f"SEC active ETFs (N-CEN, {stats.window})",
+        f"- {stats.read:,} new filing(s) read of {stats.indexed:,} indexed",
     ]
-    lines += [f"  failed: {f}" for f in stats.failed[:10]]
-    if len(stats.failed) > 10:
-        lines.append(f"  ... and {len(stats.failed) - 10} more (sec_ncen_filing.error)")
+    if stats.failed:
+        lines.append(f"- {len(stats.failed)} failed:")
+        lines += [f"  - {f}" for f in stats.failed[:10]]
+        if len(stats.failed) > 10:
+            lines.append(f"  - ... and {len(stats.failed) - 10} more (sec_ncen_filing.error)")
+    lines += [
+        f"- {stats.added:,} ETF(s) added",
+        f"- {stats.updated:,} updated",
+        f"- {stats.removed:,} removed (index fund / not an ETF by a newer filing)",
+        f"- {stats.terminated:,} terminated",
+        f"- Current list: {stats.current:,} active ETFs",
+        f"- {stats.tracked:,} of them equity funds in provider_etf",
+    ]
     return "\n".join(lines)
 
 

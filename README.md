@@ -284,7 +284,7 @@ Every time a fund is recalculated, `fund_analysis` stores the full calculation b
 
 - **`log`** table – status, notice and error messages from every stage.
 - **`batch_run`** / **`batch_run_log`** – one row per stage run (start/end time) and the problems found during it.
-- **Email** (Mailgun) – a summary to the admins when the cron completes, and an alert when a stage fails, naming the stage and the error.
+- **Email** (Mailgun) – a summary to the admins when the cron completes, and an alert when a stage fails, naming the stage and the error. The summary is plain text written to be read on a phone: one section per step – a title line, then one short `- ` bullet per fact (lists nested under it) – no aligned columns, which a phone's proportional font breaks. Each fund lists its buys and sells before its holdings.
 
 ---
 

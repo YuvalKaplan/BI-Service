@@ -9,10 +9,12 @@ from modules.cron import categorize_downloader, etf_downloader, best_ideas_gener
 from modules.ticker import esg, free_float, index_funds, master, refresh, style, valuation
 from modules.sec import etf_profile, ncen
 
-SEPERATOR_LINE = "-" * 20 + "\n"
-BREAKER_LINE = "=" * 20 + "\n\n"
-
 atexit.register(cleanup)
+
+
+def _duration(seconds: float) -> str:
+    minutes = round(seconds / 60)
+    return f"{minutes // 60}h {minutes % 60}m" if minutes >= 60 else f"{minutes}m"
 
 if __name__ == '__main__':
     try:
@@ -27,12 +29,14 @@ if __name__ == '__main__':
         # The generators' day this week (modules/cron/schedule.py): GENERATION_WEEKDAY, moved a
         # day when the close it would work on is an NYSE holiday.
         generation = schedule.is_generation_day(run_day)
-        message_actions = ""
+        # The email's sections: a title line, then one short "- " bullet per fact, so it reads on a
+        # phone (plain text shows in a proportional font there - aligned columns don't survive).
+        sections: list[str] = []
 
         # A moved generation is reported on its usual day (why nothing is generated) and on the day it runs.
         generation_note = schedule.generation_note(run_day)
-        if generation_note and (generation or weekday == schedule.GENERATION_WEEKDAY):
-            message_actions += generation_note + "\n" + BREAKER_LINE
+        if not (generation_note and (generation or weekday == schedule.GENERATION_WEEKDAY)):
+            generation_note = None
 
         if weekday in schedule.DAILY_RUN_DAYS:
             # Listings in first — the provider ETFs' FMP holdings (stage 2, then the selection rules on
@@ -49,9 +53,7 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on holdings download with error:\n{e}\n")
                 raise e
 
-            message_actions += f"Holdings Download\n" + SEPERATOR_LINE
-            message_actions += etf_downloader.summary(downloads) + "\n"
-            message_actions += BREAKER_LINE
+            sections.append(etf_downloader.summary(downloads))
 
             try:
                 screen = screener.run(store=generation)
@@ -59,17 +61,20 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the FMP large-cap screener with error:\n{e}\n\n")
                 raise e
 
-            message_actions += screener.summary(screen) + "\n"
-            message_actions += BREAKER_LINE
+            sections.append(screener.summary(screen))
 
-            message_actions += f"Ticker Maintenance\n" + SEPERATOR_LINE
             try:
                 profiles_checked, profiles_updated, profiles_marked_invalid = refresh.refresh_ticker_profiles()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on ticker profile refresh with error:\n{e}\n")
                 raise e
 
-            message_actions += f"Ticker profiles refreshed: {profiles_updated} updated, {profiles_marked_invalid} marked invalid, out of {profiles_checked} checked\n"
+            sections.append("\n".join([
+                "Ticker profiles",
+                f"- {profiles_checked:,} checked",
+                f"- {profiles_updated:,} updated",
+                f"- {profiles_marked_invalid:,} marked invalid",
+            ]))
 
             try:
                 values = valuation.run()
@@ -77,7 +82,7 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on ticker values with error:\n{e}\n\n")
                 raise e
 
-            message_actions += valuation.summary(values) + "\n"
+            sections.append(valuation.summary(values))
 
             try:
                 masters_updated, unlinked, caps_updated = master.sync_masters_and_company_data()
@@ -85,15 +90,18 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the master ticker sync with error:\n{e}\n\n")
                 raise e
 
-            message_actions += f"Ticker master sync: {masters_updated} link(s), {unlinked} unlinked, {caps_updated} company cap(s) refreshed\n"
+            sections.append("\n".join([
+                "Ticker master sync",
+                f"- {masters_updated:,} link(s)",
+                f"- {unlinked:,} unlinked",
+                f"- {caps_updated:,} company cap(s) refreshed",
+            ]))
 
             try:
                 style.assign_styles()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on style assignment with error:\n{e}\n\n")
                 raise e
-
-            message_actions += BREAKER_LINE
 
         if weekday == schedule.WEEKLY_WEEKDAY:  # The weekly day — ticker maintenance, weekly part: style reference data, then ESG; then the SEC active ETF list
             try:
@@ -102,17 +110,17 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed in categorize ETF download with error:\n{e}\n\n")
                 raise e
 
-            message_actions += f"Categorization ETFs processed: {total_etfs}\n"
-            message_actions += BREAKER_LINE
-
             try:
                 total_esg = esg.refresh_all()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on ESG update with error:\n{e}\n\n")
                 raise e
 
-            message_actions += f"ESG tickers refreshed: {total_esg}\n"
-            message_actions += BREAKER_LINE
+            sections.append("\n".join([
+                "Weekly ticker maintenance",
+                f"- {total_etfs:,} categorization ETFs processed",
+                f"- {total_esg:,} ESG tickers refreshed",
+            ]))
 
             # The week's new Form N-CEN filings on EDGAR -> the list of actively managed ETFs.
             # Nothing else reads it, so it runs last.
@@ -122,7 +130,7 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the SEC active ETF list (N-CEN) with error:\n{e}\n\n")
                 raise e
 
-            message_actions += ncen.summary(ncen_stats) + "\n"
+            sections.append(ncen.summary(ncen_stats))
 
             # Then the listed funds' FMP profiles: the actively managed equity ones go to the provider
             # tables, sized against the index funds' snapshot, and the selection rules set which of
@@ -133,8 +141,7 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the SEC ETF profiles (FMP) with error:\n{e}\n\n")
                 raise e
 
-            message_actions += etf_profile.summary(profile_stats) + "\n"
-            message_actions += BREAKER_LINE
+            sections.append(etf_profile.summary(profile_stats))
 
         if generation:
             # The generators, after the daily steps above (which stored and valued the screen): the
@@ -153,7 +160,7 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the index funds download with error:\n{e}\n\n")
                 raise e
 
-            message_actions += index_funds.summary(index_stats) + "\n"
+            sections.append(index_funds.summary(index_stats))
 
             try:
                 floats = free_float.refresh()
@@ -161,7 +168,7 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the free float refresh with error:\n{e}\n\n")
                 raise e
 
-            message_actions += free_float.summary(floats) + "\n"
+            sections.append(free_float.summary(floats))
 
             try:
                 companies = company_builder.run()
@@ -169,8 +176,7 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the company builder with error:\n{e}\n\n")
                 raise e
 
-            message_actions += company_builder.summary(companies) + "\n"
-            message_actions += BREAKER_LINE
+            sections.append(company_builder.summary(companies))
 
             try:
                 bench = benchmark_generator.run()
@@ -178,9 +184,7 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on benchmark generation with error:\n{e}\n\n")
                 raise e
 
-            message_actions += f"Benchmark holdings refreshed:\n" + SEPERATOR_LINE
-            message_actions += benchmark_generator.summary(bench) + "\n"
-            message_actions += BREAKER_LINE
+            sections.append(benchmark_generator.summary(bench))
 
             try:
                 etfs_processed, generated_etfs, problems = best_ideas_generator.run()
@@ -188,12 +192,13 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on best ideas processing with error:\n{e}\n\n")
                 raise e
 
-            message_actions += f"Total ETFs available: {etfs_processed}\n"
-            message_actions += f"ETFS with best ideas: {generated_etfs}\n"
-            message_actions += f"ETFS with problems: {len(problems)}\n" + SEPERATOR_LINE
-            for p in problems:
-                message_actions += f"{p}\n"
-            message_actions += BREAKER_LINE
+            sections.append("\n".join([
+                "Best ideas",
+                f"- {etfs_processed:,} ETFs available",
+                f"- {generated_etfs:,} with best ideas",
+                f"- {len(problems):,} problem(s)" + (":" if problems else ""),
+                *(f"  - {p}" for p in problems),
+            ]))
 
             try:
                 results = funds_update.run()
@@ -201,14 +206,17 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on model fund update with error:\n{e}\n\n")
                 raise e
 
-            message_actions += f"Fund Updates:\n" + SEPERATOR_LINE
-            for r in results:
-                message_actions += f"{results_to_string(r)}\n"
-                message_actions += BREAKER_LINE
+            sections += [results_to_string(r) for r in results]
 
         end = datetime.now(timezone.utc)
-        message_full = f"Activated at {start_time.strftime("%H:%M:%S")}\nCompleted at {end.strftime("%H:%M:%S")}.\n\n"
-        sender.send_admin(subject="Best Ideas Cron Completed", message=message_full + message_actions)
+        run_lines = [
+            f"Cron run {run_day:%a} {run_day}",
+            f"- Started {start_time:%H:%M:%S} UTC",
+            f"- Completed {end:%H:%M:%S} UTC ({_duration((end - start_time).total_seconds())})",
+        ]
+        if generation_note:
+            run_lines.append(f"- {generation_note}")
+        sender.send_admin(subject="Best Ideas Cron Completed", message="\n\n".join(["\n".join(run_lines), *sections]) + "\n")
 
     except Exception as e:
         log.record_error(f"Error in Best Ideas cron service: {e}")

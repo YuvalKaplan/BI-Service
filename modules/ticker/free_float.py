@@ -59,14 +59,18 @@ class FloatRunStats:
 
 
 def summary(stats: FloatRunStats) -> str:
-    """One line for the cron email."""
-    funds = ", ".join(f"{f} {m}/{n} holdings matched" for f, (n, m) in stats.index_holdings.items())
-    sources = ", ".join(f"{k} {v}" for k, v in stats.by_source.items())
-    return (
-        f"Free float: {stats.listings_with_float} listings, {len(stats.zero_float)} with no equity float (notes/preferreds); "
-        f"index funds: {funds or 'none'}; company float factors by source: {sources or 'not updated'}; "
-        f"{len(stats.cap_checks)} large-cap market cap(s) below the index funds' float cap, {len(stats.cap_fixes)} fixed"
-    )
+    """The cron email's section: a title, then one short bullet per fact."""
+    return "\n".join([
+        "Free float",
+        f"- {stats.listings_with_float:,} listings",
+        f"- {len(stats.zero_float):,} with no equity float (notes/preferreds)",
+        "- Index fund holdings matched:" if stats.index_holdings else "- Index fund holdings matched: none",
+        *(f"  - {f} {m:,} of {n:,}" for f, (n, m) in stats.index_holdings.items()),
+        "- Float factors by source:" if stats.by_source else "- Float factors: not updated",
+        *(f"  - {k} {v:,}" for k, v in sorted(stats.by_source.items(), key=lambda kv: -kv[1])),
+        f"- {len(stats.cap_checks)} large cap(s) below the index funds' float cap",
+        f"- {len(stats.cap_fixes)} of them fixed",
+    ])
 
 
 def _value_holdings(fund_lines: dict[str, dict[int, list[tuple[int, float, float]]]],

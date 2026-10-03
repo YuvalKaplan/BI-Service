@@ -105,7 +105,7 @@ MC_WEIGHT_FLOOR = 0.01  # minimum weight per holding
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def results_to_string(results: FundChangesResult, include_header: bool = True, include_holdings: bool = True) -> str:
-    aggregator = ""
+    """The fund's changes, then its holdings, one "- " bullet each (the cron email is read on phones)."""
     all_ids: list[int] = list({
         *{h.ticker_id for h in results.holdings},
         *{ch.ticker_id for ch in results.changes},
@@ -113,45 +113,32 @@ def results_to_string(results: FundChangesResult, include_header: bool = True, i
     tickers = ticker.fetch_by_ids(all_ids)
     ticker_by_id = {t.id: t for t in tickers}
 
-    if include_header:
-        aggregator += f"{results.fund.name}\n" + "=" * 20 + "\n"
+    def label(ticker_id: int) -> str:
+        t = ticker_by_id.get(ticker_id)
+        return f"{t.symbol} - {t.name}" if t else str(ticker_id)
+
+    lines: list[str] = [results.fund.name] if include_header else []
+
+    if not results.changes:
+        lines.append("- No changes")
+    else:
+        buys = sum(1 for ch in results.changes if ch.direction == 'buy')
+        lines.append(f"- Changes: {buys} buy(s), {len(results.changes) - buys} sell(s)")
+        for ch in results.changes:
+            details = [f"rank {ch.ranking}" if ch.ranking else None, f"{ch.appearances} ETF(s)" if ch.appearances else None]
+            details = ", ".join(d for d in details if d)
+            lines.append(f"  - {ch.direction.capitalize()} {label(ch.ticker_id)}{f' ({details})' if details else ''}")
 
     if include_holdings:
-        aggregator += f"Holdings ({len(results.holdings)}):\n"
-        aggregator += "{:<12}{:<35}{}\n".format("Symbol", "Name", "Weight")
+        lines.append(f"- Holdings ({len(results.holdings)}):")
         # Weight, then the selection's order (rank, appearances - known for this run's buys -
         # delta): with equal weights the weight alone leaves the holdings in storage order.
         appearances = {ch.ticker_id: ch.appearances or 0 for ch in results.changes if ch.direction == 'buy'}
         for h in sorted(results.holdings, key=lambda h: (-(h.weight or 0), h.ranking, -appearances.get(h.ticker_id, 0), -(h.max_delta or 0))):
-            t = ticker_by_id.get(h.ticker_id)
             weight_str = f"{h.weight * 100:.2f}%" if h.weight is not None else "---"
-            aggregator += "{:<12}{:<35}{}\n".format(
-                t.symbol if t else str(h.ticker_id),
-                t.name if t else "---",
-                weight_str,
-            )
-        aggregator += "\n"
+            lines.append(f"  - {weight_str} {label(h.ticker_id)}")
 
-    if not results.changes:
-        aggregator += "No changes\n\n"
-    else:
-        aggregator += "{:<12}{:<15}{:<12}{:<15}{:<10}{}\n".format(
-            "Direction", "Date", "Ranking", "Appearances", "Symbol", "Name"
-        )
-        for ch in results.changes:
-            t = ticker_by_id.get(ch.ticker_id)
-            date_str = ch.change_date.strftime("%Y-%m-%d") if ch.change_date else "---"
-            aggregator += "{:<12}{:<15}{:<12}{:<15}{:<10}{}\n".format(
-                ch.direction,
-                date_str,
-                ch.ranking if ch.ranking else "---",
-                ch.appearances if ch.appearances else "---",
-                t.symbol if t else str(ch.ticker_id),
-                t.name if t else "---",
-            )
-        aggregator += "-" * 30 + "\n\n"
-
-    return aggregator
+    return "\n".join(lines)
 
 
 # ── Core computation ─────────────────────────────────────────────────────────

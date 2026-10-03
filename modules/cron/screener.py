@@ -225,18 +225,15 @@ class ScreenerRunStats:
 
 
 def summary(stats: ScreenerRunStats) -> str:
-    """One line for the cron email."""
-    if not stats.stored:
-        return (
-            f"Screener {stats.screen_date} (registration only): {stats.screened} listings — {stats.registered} of "
-            f"{stats.home} home-market lines registered; {stats.foreign} foreign, {len(stats.non_equity)} non-equity "
-            f"and {stats.order_book} order-book lines not used"
-        )
-    return (
-        f"Screener {stats.screen_date} (stored): {stats.screened} listings — {stats.registered} of {stats.home} "
-        f"home-market lines registered, {stats.foreign} foreign lines stored for the company builder, {len(stats.non_equity)} "
-        f"non-equity and {stats.order_book} order-book lines skipped"
-    )
+    """The cron email's section: a title, then one short bullet per fact."""
+    return "\n".join([
+        f"Screener {stats.screen_date} ({'stored' if stats.stored else 'registration only'})",
+        f"- {stats.screened:,} listings",
+        f"- {stats.registered:,} of {stats.home:,} home-market lines registered",
+        f"- {stats.foreign:,} foreign lines {'stored for the company builder' if stats.stored else 'not used'}",
+        f"- {len(stats.non_equity):,} non-equity lines skipped",
+        f"- {stats.order_book:,} order-book lines skipped",
+    ])
 
 
 def run(screen_date: date | None = None, store: bool = False) -> ScreenerRunStats:

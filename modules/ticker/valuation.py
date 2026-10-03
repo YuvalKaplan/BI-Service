@@ -35,12 +35,16 @@ class ValuationStats:
 
 
 def summary(stats: ValuationStats) -> str:
-    """One line for the cron email."""
-    return (
-        f"Ticker values {stats.value_date}: {stats.targets} tickers ({stats.held} held by ETFs, {stats.screened} "
-        f"from the stored screen) — {stats.validated} validated, {stats.already_valued} already valued, "
-        f"{stats.withheld} withheld"
-    )
+    """The cron email's section: a title, then one short bullet per fact."""
+    return "\n".join([
+        f"Ticker values {stats.value_date}",
+        f"- {stats.targets:,} tickers:",
+        f"  - {stats.held:,} held by ETFs",
+        f"  - {stats.screened:,} from the stored screen",
+        f"- {stats.validated:,} validated",
+        f"- {stats.already_valued:,} already valued",
+        f"- {stats.withheld:,} withheld",
+    ])
 
 
 def targets_for_tickers(tickers: list[Ticker]) -> list[ValueTarget]:

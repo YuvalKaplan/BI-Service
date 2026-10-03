@@ -277,7 +277,8 @@ def record_problem(batch_run_id: int, provider: provider.Provider, etf: provider
     record = f"{item_info}\t{error}\t{message or ''}"
     log.record_status(record)
     batch_run_log.insert(batch_run_log.BatchRunLog(batch_run_id=batch_run_id, note=record))
-    problem_etfs.append(record)
+    # The cron email's bullet: the fund's ticker, without the provider and ids the log keeps.
+    problem_etfs.append(f"{etf.ticker or etf.name}: {error}{f' - {message}' if message else ''}")
 
 def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
     """

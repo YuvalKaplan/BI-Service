@@ -173,14 +173,19 @@ def run(as_of: date | None = None) -> SelectionStats:
 
 
 def summary(stats: SelectionStats) -> str:
-    """A few lines for the cron email."""
-    failing = ", ".join(f"{r} {stats.failing[r]}" for r in RULES if stats.failing[r])
+    """The cron email's section: a title, then one short bullet per fact."""
+    failing = [f"  - {r} {stats.failing[r]}" for r in RULES if stats.failing[r]]
     lines = [
-        f"ETF selection {stats.as_of}: {stats.by_status[ACTIVE]} active, {stats.by_status[PENDING]} pending, "
-        f"{stats.by_status[INACTIVE]} inactive ({stats.changed} changed) - inactive failing: {failing or 'none'}",
+        f"ETF selection {stats.as_of}",
+        f"- {stats.by_status[ACTIVE]} active",
+        f"- {stats.by_status[PENDING]} pending",
+        f"- {stats.by_status[INACTIVE]} inactive, failing:" if failing else f"- {stats.by_status[INACTIVE]} inactive",
+        *failing,
+        f"- {stats.changed} changed status",
     ]
     if stats.activated:
-        lines.append(f"  activated ({len(stats.activated)}): {', '.join(sorted(stats.activated))}")
+        lines.append(f"- Activated ({len(stats.activated)}): {', '.join(sorted(stats.activated))}")
     if stats.deactivated:
-        lines.append(f"  deactivated ({len(stats.deactivated)}): {', '.join(sorted(stats.deactivated))}")
+        lines.append(f"- Deactivated ({len(stats.deactivated)}):")
+        lines += [f"  - {d}" for d in sorted(stats.deactivated)]
     return "\n".join(lines)

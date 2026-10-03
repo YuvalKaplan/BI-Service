@@ -416,17 +416,27 @@ def _apply(etf: SecActiveEtf, info: dict | None, holdings: list[dict], error: Ex
 
 
 def summary(stats: ProfileRunStats) -> str:
-    """A few lines for the cron email."""
-    strategies = ", ".join(f"{k} {v}" for k, v in stats.by_strategy.most_common())
+    """The cron email's section: a title, then one short bullet per fact."""
+    def counts(counter: Counter) -> str:
+        return ", ".join(f"{k} {v}" for k, v in counter.most_common()) or "none"
+
     lines = [
-        f"SEC ETF profiles (FMP): {stats.checked} fund(s) checked, {len(stats.failed)} failed, {stats.not_on_fmp} not on FMP - {strategies or 'none'}",
-        f"Equity funds: by region {dict(stats.equity_by_region)}, by cap size {dict(stats.equity_by_cap)}; "
-        f"provider ETFs {stats.etfs_added} added, {stats.etfs_updated} updated, {stats.no_longer_equity} no longer equity; "
-        f"sector weights from our tickers for {stats.sectors_from_holdings}, no country weights for {stats.no_country_weights}",
+        "SEC ETF profiles (FMP)",
+        f"- {stats.checked:,} fund(s) checked",
+        f"- {len(stats.failed)} failed" + (":" if stats.failed else ""),
+        *(f"  - {f}" for f in stats.failed[:10]),
+        f"- {stats.not_on_fmp:,} not on FMP",
+        "- By strategy:" if stats.by_strategy else "- By strategy: none",
+        *(f"  - {k} {v:,}" for k, v in stats.by_strategy.most_common()),
+        f"- Equity by region: {counts(stats.equity_by_region)}",
+        f"- Equity by cap size: {counts(stats.equity_by_cap)}",
+        f"- Provider ETFs: {stats.etfs_added} added, {stats.etfs_updated} updated",
+        f"- {stats.no_longer_equity} no longer equity",
+        f"- {stats.sectors_from_holdings} with sector weights from our tickers",
+        f"- {stats.no_country_weights} without country weights",
     ]
-    lines += [f"  failed: {f}" for f in stats.failed[:10]]
     if stats.selection is not None:
-        lines.append(etf_selection.summary(stats.selection))
+        lines += ["", etf_selection.summary(stats.selection)]
     return "\n".join(lines)
 
 

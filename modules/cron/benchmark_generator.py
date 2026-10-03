@@ -81,12 +81,15 @@ class BenchmarkRunStats:
 
 
 def summary(stats: BenchmarkRunStats) -> str:
-    """One line per benchmark for the cron email."""
-    return "\n".join(
-        f"{name} {stats.holding_date}: {count} companies (cutoff ${cut / 1e9:,.1f}B at {coverage:.0%} of its market), "
-        f"total market cap ${total / 1e12:.2f}T"
-        for name, count, total, coverage, cut in stats.benchmarks
-    )
+    """The cron email's section: a title, then a few short bullets per benchmark."""
+    lines = [f"Benchmarks {stats.holding_date}"]
+    for name, count, total, coverage, cut in stats.benchmarks:
+        lines += [
+            f"- {name}: {count:,} companies",
+            f"  - cutoff ${cut / 1e9:,.1f}B at {coverage:.0%} of its market",
+            f"  - total market cap ${total / 1e12:.2f}T",
+        ]
+    return "\n".join(lines)
 
 
 def run(screen_date: date | None = None) -> BenchmarkRunStats:
