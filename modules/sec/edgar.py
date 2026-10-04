@@ -51,9 +51,26 @@ def _user_agent() -> str:
     return user_agent
 
 
+def _error_page_heading(e: HTTPError) -> str:
+    """The heading of the SEC's error page, which says why it refused: "Your Request Originates
+    from an Undeclared Automated Tool" (the User-Agent, or the IP taken for a bot), "Request Rate
+    Threshold Exceeded", or "Access Denied" (an IP block at the SEC's CDN)."""
+    try:
+        body = e.read()
+        if e.headers.get('Content-Encoding') == 'gzip':
+            body = gzip.decompress(body)
+        page = body.decode('utf-8', 'replace')
+    except Exception:
+        return 'no error page'
+    heading = re.search(r'<h1[^>]*>(.*?)</h1>', page, re.S | re.I)
+    text = heading.group(1) if heading else re.sub(r'(?s)<(script|style).*?</\1>', '', page)
+    return re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', text)).strip()[:200] or 'empty error page'
+
+
 def get(url: str) -> bytes:
-    """The body at url, gunzipped. Retries server errors, rate limiting and timeouts; a 404
-    raises the HTTPError at once."""
+    """The body at url, gunzipped. Retries server errors and timeouts; a 404 raises the HTTPError
+    at once, and so does a 403 (the SEC refusing the User-Agent or blocking the IP), with the SEC
+    page's heading - retrying can't help and only prolongs an IP block."""
     headers = {'User-Agent': _user_agent(), 'Accept-Encoding': 'gzip'}
     last_exc: Exception | None = None
     for attempt in range(API_RETRIES):
@@ -65,6 +82,8 @@ def get(url: str) -> bytes:
         except HTTPError as e:
             if e.code == 404:
                 raise
+            if e.code == 403:
+                raise Exception(f"EDGAR refused the request ({url}): HTTP Error 403: {_error_page_heading(e)}") from e
             last_exc = e
         except Exception as e:
             last_exc = e
