@@ -51,17 +51,21 @@ def _user_agent() -> str:
     return user_agent
 
 
-def _error_page_heading(e: HTTPError) -> str:
-    """The heading of the SEC's error page, which says why it refused: "Your Request Originates
-    from an Undeclared Automated Tool" (the User-Agent, or the IP taken for a bot), "Request Rate
-    Threshold Exceeded", or "Access Denied" (an IP block at the SEC's CDN)."""
+def error_page_heading(e: HTTPError) -> str:
+    """The heading of the SEC's error page behind an HTTPError."""
     try:
         body = e.read()
         if e.headers.get('Content-Encoding') == 'gzip':
             body = gzip.decompress(body)
-        page = body.decode('utf-8', 'replace')
     except Exception:
         return 'no error page'
+    return page_heading(body.decode('utf-8', 'replace'))
+
+
+def page_heading(page: str) -> str:
+    """The heading of an SEC error page, which says why it refused: "Your Request Originates from
+    an Undeclared Automated Tool" (the User-Agent, or the IP taken for a bot), "Request Rate
+    Threshold Exceeded", or "Access Denied" (an IP block at the SEC's CDN)."""
     heading = re.search(r'<h1[^>]*>(.*?)</h1>', page, re.S | re.I)
     text = heading.group(1) if heading else re.sub(r'(?s)<(script|style).*?</\1>', '', page)
     return re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', text)).strip()[:200] or 'empty error page'
@@ -83,7 +87,7 @@ def get(url: str) -> bytes:
             if e.code == 404:
                 raise
             if e.code == 403:
-                raise Exception(f"EDGAR refused the request ({url}): HTTP Error 403: {_error_page_heading(e)}") from e
+                raise Exception(f"EDGAR refused the request ({url}): HTTP Error 403: {error_page_heading(e)}") from e
             last_exc = e
         except Exception as e:
             last_exc = e

@@ -570,6 +570,7 @@ All scripts are run from the project root with the virtual environment active. C
 
 | Script | What it does |
 |--------|--------------|
+| `scripts/debug_sec_access.py` | Checks whether EDGAR accepts requests from the machine it runs on, telling a User-Agent problem from a refusal of the machine itself (both get the SEC's "Undeclared Automated Tool" 403): shows `SECRET_SEC_USER_AGENT` as the process sees it (whitespace, quotes, invisible characters), then requests the form index three ways – the value rebuilt in plain ASCII, the value as set, and through curl – and says what the results point to. No database. On Render run it as `python -m scripts.debug_sec_access` (from the project root, so `modules` resolves without `PYTHONPATH`). |
 | `scripts/debug_holding_duplicates.py` | Read-only report of tickers appearing on several lines of one ETF/date, split into consistent (summed) and inconsistent (quarantined) groups. Report: `.output/holding_duplicates_report.md`. |
 
 ### Ticker data maintenance
