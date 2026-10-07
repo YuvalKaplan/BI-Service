@@ -149,8 +149,6 @@ def summary(stats: DownloadStats) -> str:
     if worst:
         lines.append("- Most unresolved stock weight:")
         lines += [f"  - {t} {w:.1%}" for t, w in worst]
-    if stats.selection is not None:
-        lines += ["", etf_selection.summary(stats.selection)]
     return "\n".join(lines)
 
 

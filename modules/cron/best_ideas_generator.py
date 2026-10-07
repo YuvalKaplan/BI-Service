@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from functools import partial
+from modules.core.text_format import table
 from modules.object import batch_run, batch_run_log
 from modules.object import provider, provider_etf, ticker
 from modules.object.provider_etf_holding import ProviderEtfHolding, QuarantinedHolding, fetch_latest_holdings_for_etf, aggregate_holdings
@@ -272,15 +273,53 @@ def build_analysis_rows(
     return rows
 
 
-def record_problem(batch_run_id: int, provider: provider.Provider, etf: provider_etf.ProviderEtf, error: str, message: str | None, problem_etfs: list[str]) -> None:
+@dataclass
+class EtfRunStats:
+    """One ETF's line in the cron email (the problems' details are in batch_run_log)."""
+    etf: str                                   # its ticker
+    holding_date: date | None = None
+    priced: int = 0                            # holdings with a market cap ...
+    total: int = 0                             # ... of its holdings
+    self_ideas: int | None = None              # best ideas stored, self mode (None: not generated)
+    full_ideas: int | None = None              # ... full_universe mode (None: no benchmark)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RunStats:
+    etfs: list[EtfRunStats] = field(default_factory=list)
+
+    @property
+    def generated(self) -> int:
+        return sum(1 for e in self.etfs if e.self_ideas is not None)
+
+
+def summary(stats: RunStats) -> str:
+    """The cron email's section: the totals, then a table of the ETFs."""
+    return "\n".join([
+        "Best ideas",
+        f"- {len(stats.etfs):,} ETFs available",
+        f"- {stats.generated:,} with best ideas",
+        f"- {sum(1 for e in stats.etfs if e.notes):,} with problems",
+        "",
+        table(["ETF", "Date", "Priced", "Self", "Full", "Notes"], [[
+            e.etf,
+            f"{e.holding_date:%m-%d}" if e.holding_date else "-",
+            f"{e.priced}/{e.total}" if e.total else "-",
+            "-" if e.self_ideas is None else e.self_ideas,
+            "-" if e.full_ideas is None else e.full_ideas,
+            "; ".join(e.notes),
+        ] for e in sorted(stats.etfs, key=lambda e: e.etf)]),
+    ])
+
+
+def record_problem(batch_run_id: int, provider: provider.Provider, etf: provider_etf.ProviderEtf, error: str, message: str | None) -> None:
     item_info = f"[Provider: '{provider.name}' ({provider.id}), ETF: '{etf.name}' ({etf.id})]"
     record = f"{item_info}\t{error}\t{message or ''}"
     log.record_status(record)
     batch_run_log.insert(batch_run_log.BatchRunLog(batch_run_id=batch_run_id, note=record))
-    # The cron email's bullet: the fund's ticker, without the provider and ids the log keeps.
-    problem_etfs.append(f"{etf.ticker or etf.name}: {error}{f' - {message}' if message else ''}")
 
-def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
+def run(as_of_date: date | None = None) -> RunStats:
     """
     Generates best ideas for every active provider ETF (status 'active' - the selection rules,
     modules/sec/etf_selection.py). When as_of_date is None (live),
@@ -299,26 +338,27 @@ def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
         providers = sorted(provider.fetch_by_ids(list(etfs_by_provider)), key=lambda p: p.name)
         log.record_status(f"{log_prefix}Running Best Ideas Generator batch job ID {batch_run_id} - will proccess {len(providers)} providers.")
 
-        total_etfs = 0
-        generated_etfs = 0
-        problem_etfs: list[str] = []
+        stats = RunStats()
 
         # {benchmark_id: ({ticker_id: weight}, holding_date)}, fetched once per unique benchmark_id.
         _bm_cache: dict[int, tuple[dict[int, float], date | None]] = {}
 
         for p in providers:
             pe_list = etfs_by_provider[p.id]
-            total_etfs += len(pe_list)
             log.record_status(f"Starting processing provider {p.name} with {len(pe_list)} ETFs")
 
             for pe in pe_list:
+                etf_stats = EtfRunStats(etf=pe.ticker or pe.name or str(pe.id))
+                stats.etfs.append(etf_stats)
                 try:
                     # 1. Holdings for the latest holding date within the look-back window, with
                     #    duplicate lines summed or quarantined, plus market caps and master info.
                     inputs = prepare_etf_inputs(pe, as_of_date)
                     if inputs is None:
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"No holdings have been downloaded for the past {LOOK_BACK_WINDOW} days", message=None, problem_etfs=problem_etfs)
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"No holdings have been downloaded for the past {LOOK_BACK_WINDOW} days", message=None)
+                        etf_stats.notes.append(f"no holdings in {LOOK_BACK_WINDOW} days")
                         continue
+                    etf_stats.holding_date, etf_stats.priced, etf_stats.total = inputs.holding_date, len(inputs.holdings), inputs.total_holdings
 
                     # 2. Report quarantined duplicates (one record per ETF, not per ticker)
                     if inputs.quarantined:
@@ -326,22 +366,27 @@ def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
                             f"ticker_id={q.ticker_id} x{len(q.lines)} @ " + "/".join(f"{p_:.2f}" if p_ else "?" for p_ in q.implied_prices)
                             for q in inputs.quarantined
                         )
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="QUARANTINED DUPLICATES", message=f"{len(inputs.quarantined)} ticker(s) listed on several lines with inconsistent prices, excluded: {details}", problem_etfs=problem_etfs)
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="QUARANTINED DUPLICATES", message=f"{len(inputs.quarantined)} ticker(s) listed on several lines with inconsistent prices, excluded: {details}")
+                        etf_stats.notes.append(f"{len(inputs.quarantined)} quarantined")
 
                     # 3. Identify and report stale tickers (no market cap within window)
                     for ticker_id in inputs.unpriced_ticker_ids:
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="STALE HOLDING", message=f"ticker_id={ticker_id} has no market cap for over {DAYS_NO_MARKET_CAP} days", problem_etfs=problem_etfs)
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="STALE HOLDING", message=f"ticker_id={ticker_id} has no market cap for over {DAYS_NO_MARKET_CAP} days")
+                    if inputs.unpriced_ticker_ids:
+                        etf_stats.notes.append(f"{len(inputs.unpriced_ticker_ids)} stale")
 
                     # 4. Coverage check
                     if inputs.coverage_ratio < MIN_HOLDINGS_WITH_PRICES_PCT:
                         missing_count = inputs.total_holdings - len(inputs.holdings)
                         msg = f"Coverage {inputs.coverage_ratio:.1%}. Missing {missing_count} market caps for holding date {inputs.holding_date.strftime('%Y-%m-%d')}"
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Insufficient market cap coverage", message=msg, problem_etfs=problem_etfs)
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Insufficient market cap coverage", message=msg)
+                        etf_stats.notes.append(f"coverage {inputs.coverage_ratio:.0%}, skipped")
                         continue
 
                     # 5a. Always generate self-benchmark best ideas
                     self_df = _find_best_ideas(inputs, MAX_BEST_IDEAS_PER_FUND)
                     best_idea.insert_bulk(pe.id, inputs.holding_date, 'self', best_idea.df_to_rows(self_df, provider_etf_id=pe.id, value_date=inputs.holding_date, benchmark_mode='self'))
+                    etf_stats.self_ideas = len(self_df)
 
                     # 5b. If this ETF has a benchmark configured, also generate full_universe best ideas
                     if pe.benchmark_id:
@@ -349,17 +394,17 @@ def run(as_of_date: date | None = None) -> tuple[int, int, list[str]]:
                         if bm_weights:
                             universe_df = _find_best_ideas(inputs, MAX_BEST_IDEAS_PER_FUND, benchmark_weights=bm_weights)
                             best_idea.insert_bulk(pe.id, inputs.holding_date, 'full_universe', best_idea.df_to_rows(universe_df, provider_etf_id=pe.id, value_date=inputs.holding_date, benchmark_mode='full_universe'))
-
-                    generated_etfs += 1
+                            etf_stats.full_ideas = len(universe_df)
 
                 except Exception as e:
-                    record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"{e}", message=None, problem_etfs=problem_etfs)
+                    record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"{e}", message=None)
+                    etf_stats.notes.append(f"error: {e}")
 
             log.record_status(f"Completed processing provider {p.name}")
 
         batch_run.update_completed_at(batch_run_id)
-        log.record_status(f"{log_prefix}Finished Best Ideas Generator batch run on {total_etfs} etfs.\n")
-        return total_etfs, generated_etfs, problem_etfs
+        log.record_status(f"{log_prefix}Finished Best Ideas Generator batch run on {len(stats.etfs)} etfs.\n")
+        return stats
 
     except Exception as e:
         log.record_error(f"{log_prefix}Error in best ideas generator batch run: {e}")

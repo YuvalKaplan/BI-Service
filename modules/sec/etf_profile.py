@@ -435,8 +435,6 @@ def summary(stats: ProfileRunStats) -> str:
         f"- {stats.sectors_from_holdings} with sector weights from our tickers",
         f"- {stats.no_country_weights} without country weights",
     ]
-    if stats.selection is not None:
-        lines += ["", etf_selection.summary(stats.selection)]
     return "\n".join(lines)
 
 

@@ -9,7 +9,8 @@ development = ENV_TYPE != 'production'
 TTL_TOKEN = 60 * 24 * 7
 DOMAIN = 'insightful.investments'
 
-def send_admin(subject: str, message: str) -> None:
+def send_admin(subject: str, message: str, html: str | None = None) -> None:
+    """message is the plain-text body; with html, mail clients show that instead."""
     try:
         mg_client = mailgun_client_instance.get_client();
         mgData = {
@@ -19,6 +20,8 @@ def send_admin(subject: str, message: str) -> None:
             "subject": subject,
             "text": message,
         }
+        if html:
+            mgData["html"] = html
         mg_client.messages.create(data=mgData, domain=DOMAIN)
 
     except Exception as e:

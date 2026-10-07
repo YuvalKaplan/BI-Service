@@ -45,6 +45,8 @@ if __name__ == '__main__':
     profiles = etf_profile.run(refresh_all='--refresh-all' in sys.argv)
     print(ncen.summary(stats))
     print(etf_profile.summary(profiles))
+    if profiles.selection is not None:
+        print("\n" + etf_selection.summary(profiles.selection))
 
     current = sec_active_etf.fetch_current(ncen.filed_since())
     classes = sec_etf_classification.fetch_all()

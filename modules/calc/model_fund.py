@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from typing import Any, List, Optional, cast
 from dataclasses import dataclass
 from pydantic import BaseModel
+from modules.core.text_format import table
 from modules.object import best_idea, ticker
 from modules.ticker import company, index_funds
 
@@ -105,7 +106,8 @@ MC_WEIGHT_FLOOR = 0.01  # minimum weight per holding
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def results_to_string(results: FundChangesResult, include_header: bool = True, include_holdings: bool = True) -> str:
-    """The fund's changes, then its holdings, one "- " bullet each (the cron email is read on phones)."""
+    """The fund's buys and sells, then its holdings, each a table (text_format.table; the cron
+    email renders them as HTML tables), blocks separated by a blank line."""
     all_ids: list[int] = list({
         *{h.ticker_id for h in results.holdings},
         *{ch.ticker_id for ch in results.changes},
@@ -113,32 +115,33 @@ def results_to_string(results: FundChangesResult, include_header: bool = True, i
     tickers = ticker.fetch_by_ids(all_ids)
     ticker_by_id = {t.id: t for t in tickers}
 
-    def label(ticker_id: int) -> str:
+    def symbol_name(ticker_id: int) -> list[str]:
         t = ticker_by_id.get(ticker_id)
-        return f"{t.symbol} - {t.name}" if t else str(ticker_id)
+        return [t.symbol, t.name] if t else [str(ticker_id), "-"]
 
-    lines: list[str] = [results.fund.name] if include_header else []
+    blocks: list[str] = [results.fund.name] if include_header else []
 
-    if not results.changes:
-        lines.append("- No changes")
-    else:
-        buys = sum(1 for ch in results.changes if ch.direction == 'buy')
-        lines.append(f"- Changes: {buys} buy(s), {len(results.changes) - buys} sell(s)")
-        for ch in results.changes:
-            details = [f"rank {ch.ranking}" if ch.ranking else None, f"{ch.appearances} ETF(s)" if ch.appearances else None]
-            details = ", ".join(d for d in details if d)
-            lines.append(f"  - {ch.direction.capitalize()} {label(ch.ticker_id)}{f' ({details})' if details else ''}")
+    for direction in ('buy', 'sell'):
+        changes = [ch for ch in results.changes if ch.direction == direction]
+        if not changes:
+            blocks.append(f"{direction.capitalize()}: none")
+            continue
+        blocks.append(f"{direction.capitalize()} ({len(changes)})\n" + table(
+            ["Rank", "Appearances", "Symbol", "Name"],
+            [[ch.ranking or "-", ch.appearances or "-", *symbol_name(ch.ticker_id)] for ch in changes],
+        ))
 
     if include_holdings:
-        lines.append(f"- Holdings ({len(results.holdings)}):")
         # Weight, then the selection's order (rank, appearances - known for this run's buys -
         # delta): with equal weights the weight alone leaves the holdings in storage order.
         appearances = {ch.ticker_id: ch.appearances or 0 for ch in results.changes if ch.direction == 'buy'}
-        for h in sorted(results.holdings, key=lambda h: (-(h.weight or 0), h.ranking, -appearances.get(h.ticker_id, 0), -(h.max_delta or 0))):
-            weight_str = f"{h.weight * 100:.2f}%" if h.weight is not None else "---"
-            lines.append(f"  - {weight_str} {label(h.ticker_id)}")
+        holdings = sorted(results.holdings, key=lambda h: (-(h.weight or 0), h.ranking, -appearances.get(h.ticker_id, 0), -(h.max_delta or 0)))
+        blocks.append(f"Holdings ({len(holdings)})\n" + table(
+            ["Percent", "Symbol", "Name"],
+            [[f"{h.weight * 100:.2f}%" if h.weight is not None else "-", *symbol_name(h.ticker_id)] for h in holdings],
+        ))
 
-    return "\n".join(lines)
+    return "\n\n".join(blocks)
 
 
 # ── Core computation ─────────────────────────────────────────────────────────

@@ -68,7 +68,6 @@ class Evaluated:
 class SelectionStats:
     as_of: date
     by_status: Counter = field(default_factory=Counter)
-    failing: Counter = field(default_factory=Counter)             # rule -> inactive ETFs failing it
     activated: list[str] = field(default_factory=list)
     deactivated: list[str] = field(default_factory=list)         # "TICKER (rules)"
     changed: int = 0
@@ -156,8 +155,6 @@ def run(as_of: date | None = None) -> SelectionStats:
     changes: list[tuple[int, str, int | None]] = []
     for e in evaluate(today):
         stats.by_status[e.status] += 1
-        if e.status == INACTIVE:
-            stats.failing.update(e.failed)
         if e.etf.id is None or (e.status == e.etf.status and e.benchmark_id == e.etf.benchmark_id):
             continue
         changes.append((e.etf.id, e.status, e.benchmark_id))
@@ -174,13 +171,11 @@ def run(as_of: date | None = None) -> SelectionStats:
 
 def summary(stats: SelectionStats) -> str:
     """The cron email's section: a title, then one short bullet per fact."""
-    failing = [f"  - {r} {stats.failing[r]}" for r in RULES if stats.failing[r]]
     lines = [
         f"ETF selection {stats.as_of}",
         f"- {stats.by_status[ACTIVE]} active",
         f"- {stats.by_status[PENDING]} pending",
-        f"- {stats.by_status[INACTIVE]} inactive, failing:" if failing else f"- {stats.by_status[INACTIVE]} inactive",
-        *failing,
+        f"- {stats.by_status[INACTIVE]} inactive",
         f"- {stats.changed} changed status",
     ]
     if stats.activated:

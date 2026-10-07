@@ -3,13 +3,16 @@ import log
 from datetime import datetime, timezone
 from modules.object.exit import cleanup
 from modules.core.db import db_pool_instance, ENVIRONMENT
-from modules.core import sender
+from modules.core import sender, text_format
 from modules.calc.model_fund import results_to_string
 from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, benchmark_generator, screener, company_builder, schedule
 from modules.ticker import esg, free_float, index_funds, master, refresh, style, valuation
-from modules.sec import etf_profile, ncen
+from modules.sec import etf_profile, etf_selection, ncen
 
 atexit.register(cleanup)
+
+SECTION_DIVIDER = "============="   # between the email's sections
+FUND_DIVIDER = "-------------"      # between the funds
 
 
 def _duration(seconds: float) -> str:
@@ -29,8 +32,8 @@ if __name__ == '__main__':
         # The generators' day this week (modules/cron/schedule.py): GENERATION_WEEKDAY, moved a
         # day when the close it would work on is an NYSE holiday.
         generation = schedule.is_generation_day(run_day)
-        # The email's sections: a title line, then one short "- " bullet per fact, so it reads on a
-        # phone (plain text shows in a proportional font there - aligned columns don't survive).
+        # The email's sections (modules/core/text_format.py): a title line, then one short "- "
+        # bullet per fact, and tables - sent as HTML too, where a phone keeps a table's columns.
         sections: list[str] = []
 
         # A moved generation is reported on its usual day (why nothing is generated) and on the day it runs.
@@ -54,6 +57,8 @@ if __name__ == '__main__':
                 raise e
 
             sections.append(etf_downloader.summary(downloads))
+            if downloads.selection is not None:
+                sections.append(etf_selection.summary(downloads.selection))
 
             try:
                 screen = screener.run(store=generation)
@@ -142,6 +147,8 @@ if __name__ == '__main__':
                 raise e
 
             sections.append(etf_profile.summary(profile_stats))
+            if profile_stats.selection is not None:
+                sections.append(etf_selection.summary(profile_stats.selection))
 
         if generation:
             # The generators, after the daily steps above (which stored and valued the screen): the
@@ -162,13 +169,12 @@ if __name__ == '__main__':
 
             sections.append(index_funds.summary(index_stats))
 
+            # Not in the email (its summary is logged; scripts/current_float_factors.py reports it).
             try:
-                floats = free_float.refresh()
+                free_float.refresh()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the free float refresh with error:\n{e}\n\n")
                 raise e
-
-            sections.append(free_float.summary(floats))
 
             try:
                 companies = company_builder.run()
@@ -187,18 +193,12 @@ if __name__ == '__main__':
             sections.append(benchmark_generator.summary(bench))
 
             try:
-                etfs_processed, generated_etfs, problems = best_ideas_generator.run()
+                ideas = best_ideas_generator.run()
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on best ideas processing with error:\n{e}\n\n")
                 raise e
 
-            sections.append("\n".join([
-                "Best ideas",
-                f"- {etfs_processed:,} ETFs available",
-                f"- {generated_etfs:,} with best ideas",
-                f"- {len(problems):,} problem(s)" + (":" if problems else ""),
-                *(f"  - {p}" for p in problems),
-            ]))
+            sections.append(best_ideas_generator.summary(ideas))
 
             try:
                 results = funds_update.run()
@@ -206,7 +206,9 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on model fund update with error:\n{e}\n\n")
                 raise e
 
-            sections += [results_to_string(r) for r in results]
+            # One section, the funds divided from each other.
+            if results:
+                sections.append(f"\n\n{FUND_DIVIDER}\n\n".join(results_to_string(r) for r in results))
 
         end = datetime.now(timezone.utc)
         run_lines = [
@@ -216,7 +218,8 @@ if __name__ == '__main__':
         ]
         if generation_note:
             run_lines.append(f"- {generation_note}")
-        sender.send_admin(subject="Best Ideas Cron Completed", message="\n\n".join(["\n".join(run_lines), *sections]) + "\n")
+        message = f"\n\n{SECTION_DIVIDER}\n\n".join(["\n".join(run_lines), *sections]) + "\n"
+        sender.send_admin(subject="Best Ideas Cron Completed", message=message, html=text_format.to_html(message))
 
     except Exception as e:
         log.record_error(f"Error in Best Ideas cron service: {e}")

@@ -160,15 +160,14 @@ def holdings_date(rows: list[dict]) -> date | None:
 
 
 def summary(stats: RefreshStats) -> str:
-    """The cron email's section: a title, then one short bullet per fact."""
-    shown = [(m, c) for m, c in stats.breakpoints if c in (0.70, 0.80, 0.90, 0.93)]
-    return "\n".join([
-        f"Index funds {stats.as_of}",
-        *(f"- {f} {n:,} lines (scale {stats.scale.get(f, 0):.1f})" for f, n in stats.lines.items()),
-        "- Breakpoints:" if shown else "- Breakpoints: none",
-        *(f"  - {m} {c:.0%} ${stats.breakpoints[(m, c)][0] / 1e9:,.1f}B ({stats.breakpoints[(m, c)][1]:,} companies)"
-          for m, c in sorted(shown)),
-    ])
+    """The cron email's section: the breakpoints in use - each region's full-universe benchmark's
+    (scripts/current_index_funds.py prints the others)."""
+    lines = [f"Index funds {stats.as_of} - active breakpoints"]
+    for market, coverage in sorted(full_universe_coverage().items(), key=lambda mc: mc[0] != US):
+        coverage = round(float(coverage), 2)   # numeric column: a Decimal, not the float key
+        point = stats.breakpoints.get((market, coverage))
+        lines.append(f"- {market} {coverage:.0%}: " + (f"${point[0] / 1e9:,.1f}B ({point[1]:,} companies)" if point else "none"))
+    return "\n".join(lines)
 
 
 def refresh(as_of: date | None = None) -> RefreshStats:

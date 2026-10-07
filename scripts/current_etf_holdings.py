@@ -15,9 +15,12 @@ import atexit
 import sys
 from modules.object.exit import cleanup
 from modules.cron import etf_downloader
+from modules.sec import etf_selection
 
 atexit.register(cleanup)
 
 if __name__ == '__main__':
     stats = etf_downloader.run(retry_unresolved=True if '--retry-unresolved' in sys.argv else None)
     print(etf_downloader.summary(stats))
+    if stats.selection is not None:
+        print("\n" + etf_selection.summary(stats.selection))
