@@ -58,6 +58,20 @@ _NON_EQUITY_SYMBOL = re.compile(r'-P[A-Z]?$')  # preferred series, e.g. FITB-PM,
 _TRUNCATED_COUPON_NAME = re.compile(
     r'\b(limited|ltd|llc|inc|corp|corporation|company|co|series|nts?|pfd|due|[a-z])\.?\s+\d+(\.\d*)?$', re.IGNORECASE)
 _DEPOSITARY_NAME = re.compile(r'\b(depositary|depository|adrs?|ads|gdrs?|cdrs?|sdrs?|edrs?)\b', re.IGNORECASE)
+# A fund holding line that is another security than shares, by words describing the security
+# rather than the company - it often carries its issuer's or underlying's symbol / CUSIP
+# ("JPMORGAN CHASE ELN 08/27" as JPM, "Alphabet Inc 6.25% 05/15/2029", "NOV26 AVGO C @ 390"):
+# equity-linked notes ("ELN", or a coupon then month / year: "WELLS FARGO BANK 7.5 1/27"),
+# coupons and maturity dates, option codes (also OCC "META  261016C00820000" and "NDX_1"), rights
+# and warrants, private holdings (SPVs, PBC share series, convertible preferreds), lock-up lines.
+# Unlike etf_profile's other non-stock words (cash, forward, treasury, bond...), which also occur
+# in company names (Forward Air, Treasury Wine Estates), these are safe before a line is matched
+# to our tickers: none hit a company among the 19,602 matched lines checked (Oct 2026).
+_INSTRUMENT_LINE_NAME = re.compile(
+    r'\beln\b|\s\d+(?:\.\d+)?\s+\d{1,2}/\d{2}$|%|\b\d{1,2}/\d{1,2}/\d{2,4}\b'
+    r'|\s[cp] @ \d|\b\d{6}[cp]\d{8}\b|^[a-z]{2,5}_\d+$'
+    r'|\brights?\b|\bwts\b|\bwarrants?\b'
+    r'|\bspv\b|\bpbc\b.*\bseries\b|\bcvt pfd\b|\block[- ]?up\b', re.IGNORECASE)
 
 _KRX_EXCHANGES = {'KSC', 'KOE'}
 
@@ -81,6 +95,13 @@ def is_depositary_line(name: str | None) -> bool:
     """A depositary receipt (ADR/ADS, GDR, and the Canadian/Singapore CDRs/SDRs of foreign
     companies) as far as its FMP name says so — many ADRs' names carry no marker."""
     return bool(name and _DEPOSITARY_NAME.search(name))
+
+
+def is_instrument_line(name: str | None) -> bool:
+    """A fund holding line that is a note, option, right, warrant or private holding rather than
+    shares (_INSTRUMENT_LINE_NAME) - never matched to our tickers (index_funds.matched_listings),
+    whatever symbol it carries."""
+    return bool(name and _INSTRUMENT_LINE_NAME.search(name.strip()))
 
 
 def is_secondary_line(t: Ticker) -> bool:

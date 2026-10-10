@@ -9,8 +9,13 @@ runs again on the new holdings dates.
 
 A line's ticker, first match wins:
   1. one of our tickers by FMP symbol, ISIN or CUSIP (index_funds.matched_ticker_id) - no FMP call;
-  2. none for a line that isn't a stock (cash, currencies, money-market funds, derivatives -
-     etf_profile.is_stock_line) or has no positive weight (a short or an accrual);
+     never for a note, option, right or warrant described as one (company.is_instrument_line:
+     "JPMORGAN CHASE ELN 08/27" carries JPM's symbol, "Alphabet Inc 6.25% 05/15/2029" GOOGL's);
+  2. none for a line that isn't a stock or has no positive weight (a short or an accrual): those
+     instrument lines, a fund or ETF FMP knows (one of our tickers marked invalid as one - MAGS,
+     XLV, a money-market fund), cash, currencies, money-market funds, derivatives by word
+     (etf_profile.is_stock_line). An ETF line seen for the first time is registered as one at
+     step 4 and counts as a non-stock from the next run;
   3. the same line (symbol, ISIN, CUSIP, name) in the ETF's previous holdings: its ticker - this
      covers the stocks FMP lists by name only ("SAMSUNG ELECTRONICS CO"). A line left unresolved
      there is tried again only with retry_unresolved (by default on the generation day -
@@ -78,7 +83,7 @@ def _resolve(line: dict, previous: dict[LineKey, int | None], listings: Listings
     tid = index_funds.matched_ticker_id(line, listings)
     if tid is not None:
         return tid, MATCHED
-    if (line.get('weightPercentage') or 0) <= 0 or not etf_profile.is_stock_line(line, None):
+    if (line.get('weightPercentage') or 0) <= 0 or not etf_profile.is_stock_line(line, None, listings):
         return None, NOT_STOCK
     key = _line_key(line)
     if key in previous and (previous[key] is not None or not retry):

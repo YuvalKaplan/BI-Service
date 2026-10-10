@@ -219,6 +219,18 @@ def fetch_stale_tickers(include_invalid: bool = False) -> list['Ticker']:
         raise Exception(f"Error fetching stale tickers: {e}")
 
 
+def fetch_invalid_for(reasons: list[str]) -> list['Ticker']:
+    """Every ticker marked invalid for one of these reasons, however recently its profile was
+    checked — what refresh.refresh_ticker_profiles(recheck_reasons=...) checks again."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                cur.execute("SELECT * FROM ticker WHERE invalid = ANY(%s) ORDER BY id;", (list(reasons),))
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching the tickers invalid for {reasons}: {e}")
+
+
 def fetch_by_ids(ids: list[int]) -> list[Ticker]:
     try:
         with db_pool_instance.get_connection() as conn:

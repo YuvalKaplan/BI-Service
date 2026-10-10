@@ -221,6 +221,7 @@ class ScreenerRunStats:
     foreign: int = 0
     order_book: int = 0
     non_equity: list[str] = field(default_factory=list)  # described lines, for reports
+    not_trading: int = 0                                 # listings FMP calls inactive, not ours: left out
     registered: int = 0                                  # home lines registered as tickers
 
 
@@ -233,6 +234,7 @@ def summary(stats: ScreenerRunStats) -> str:
         f"- {stats.foreign:,} foreign lines {'stored for the company builder' if stats.stored else 'not used'}",
         f"- {len(stats.non_equity):,} non-equity lines skipped",
         f"- {stats.order_book:,} order-book lines skipped",
+        f"- {stats.not_trading:,} listings FMP marks not trading skipped",
     ])
 
 
@@ -248,6 +250,11 @@ def run(screen_date: date | None = None, store: bool = False) -> ScreenerRunStat
     screen_date defaults to the latest completed trading day (pricing.latest_value_date — the
     date every value is stored under). The sim passes its data cutoff instead.
 
+    A listing FMP marks not actively trading (~10% of the screen, mostly long gone: Pioneer,
+    VMware, Twitter) is kept only when it's a valid ticker of ours - one whose daily prices
+    still show trading (resolver.profile_invalid_reason: Energy Transfer, Dillard's) - so the
+    dead ones aren't registered.
+
     Raises — so the cron stops before the master sync and the generators — when a screener call
     still fails after its retries.
     """
@@ -259,11 +266,15 @@ def run(screen_date: date | None = None, store: bool = False) -> ScreenerRunStat
         listings: list[ScreenerListing] = []
         min_cap = screen_threshold(screen_date)
         log.record_status(f"Screening from ${min_cap / 1e9:,.1f}B (the lowest benchmark cutoff x {index_funds.SCREEN_MARGIN:g}).")
+        valid = {(t.symbol, t.exchange) for t in ticker.fetch_all() if not t.invalid}
         for row in _fetch_all_screener_results(min_cap):
             symbol = row.get('symbol')
             if not symbol:
                 continue
             exchange = row.get('exchangeShortName') or ''
+            if row.get('isActivelyTrading') is False and (row_symbol(symbol), exchange) not in valid:
+                stats.not_trading += 1
+                continue
             name, country = row.get('companyName') or '', row.get('country') or None
             listings.append(ScreenerListing(
                 screen_date=screen_date, symbol=symbol, exchange=exchange,

@@ -36,7 +36,7 @@ from modules.object.market_breakpoint import MarketBreakpoint
 from modules.object.ticker import Ticker
 from modules.object.universe_etf_holding import UniverseEtfHolding
 from modules.ticker import company
-from modules.ticker.resolver import TickerResolver
+from modules.ticker.resolver import FUND_REASONS, TickerResolver
 
 US = company.US
 INTERNATIONAL = company.INTERNATIONAL
@@ -69,6 +69,7 @@ class Listings:
     by_cusip: dict
     company_of: dict[int, int]            # listing id -> company id
     members: dict[int, list[Ticker]]      # company id -> its listings
+    funds: set[str] = field(default_factory=set)   # FMP full symbols, ISINs, CUSIPs of the tickers FMP calls a fund / ETF
 
 
 @dataclass
@@ -89,17 +90,31 @@ def our_listings() -> Listings:
     members: dict[int, list[Ticker]] = defaultdict(list)
     for t in valid:
         members[company_of[t.id]].append(t)
-    return Listings(by_id=by_id, by_sym=by_sym, by_isin=by_isin, by_cusip=by_cusip, company_of=company_of, members=members)
+    funds = {k for t in all_t if t.invalid in FUND_REASONS for k in (resolver.get_full_symbol(t), t.isin, t.cusip) if k}
+    return Listings(by_id=by_id, by_sym=by_sym, by_isin=by_isin, by_cusip=by_cusip, company_of=company_of, members=members,
+                    funds=funds)
 
 
 def matched_listings(line: dict, ls: Listings) -> set[int]:
-    """Our listings an FMP holding line (asset, isin, securityCusip) is."""
+    """Our listings an FMP holding line (asset, isin, securityCusip) is - none for a note, option,
+    right or warrant line (company.is_instrument_line), whatever symbol it carries."""
+    if company.is_instrument_line(line.get('name')):
+        return set()
     return (ls.by_sym.get(line.get('asset') or '') or ls.by_isin.get(line.get('isin') or '')
             or ls.by_cusip.get(line.get('securityCusip') or '') or set())
 
 
+def is_fund_line(line: dict, ls: Listings) -> bool:
+    """Whether an FMP holding line is a fund or ETF FMP knows - one of our tickers marked invalid
+    as one (MAGS, XLV, QQQ, the GVMXX money-market fund), by symbol, ISIN or CUSIP."""
+    return any(k and k in ls.funds for k in (line.get('asset'), line.get('isin'), line.get('securityCusip')))
+
+
 def matched_ticker_id(line: dict, ls: Listings) -> int | None:
-    """The ticker a holding line is: the listing its symbol is, else its company (by ISIN / CUSIP)."""
+    """The ticker a holding line is: the listing its symbol is, else its company (by ISIN / CUSIP);
+    none for a note, option, right or warrant line (company.is_instrument_line)."""
+    if company.is_instrument_line(line.get('name')):
+        return None
     by_symbol = ls.by_sym.get(line.get('asset') or '')
     if by_symbol:
         return min(by_symbol)

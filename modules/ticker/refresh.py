@@ -6,13 +6,13 @@ from modules.object import ticker, ticker_value
 from modules.object.ticker import Ticker
 from modules.ticker import company, pricing
 from modules.ticker import util as tu
-from modules.ticker.resolver import TickerResolver
+from modules.ticker.resolver import TickerResolver, profile_invalid_reason
 
 WORKERS = 5   # tickers refreshed in parallel — FMP's rate limit (200/min, api_stocks' shared throttle) is the bound
 UPDATED, INVALID = 'updated', 'invalid'
 
 
-def refresh_ticker_profiles(include_invalid: bool = False) -> tuple[int, int, int]:
+def refresh_ticker_profiles(include_invalid: bool = False, recheck_reasons: list[str] | None = None) -> tuple[int, int, int]:
     """
     Refreshes full ticker profile data (isin/cusip/cik/name/industry/sector/country/currency/
     is_actively_trading) from FMP for every ticker whose profile hasn't been checked within
@@ -22,11 +22,14 @@ def refresh_ticker_profiles(include_invalid: bool = False) -> tuple[int, int, in
     narrower variant (e.g. the old cik-only backfill).
 
     A ticker is flagged invalid if its profile turns out to be crypto, a fund/ETF, or no
-    longer actively trading — same detection as the original data_fill_ticker_profile.py.
-    A ticker whose profile lookup itself returns an invalid/error response is also marked
-    invalid (rather than merely logged and retried forever), since fetch_stale_tickers()
+    longer actively trading (resolver.profile_invalid_reason — the resolver's rule at
+    registration). A ticker whose profile lookup itself returns an invalid/error response is also
+    marked invalid (rather than merely logged and retried forever), since fetch_stale_tickers()
     already excludes already-invalid tickers by default — pass include_invalid=True to retry
-    them too (a ticker that checks out fine on retry has its invalid flag cleared).
+    them too (a ticker that checks out fine on retry has its invalid flag cleared). With
+    recheck_reasons only the tickers marked invalid for one of those reasons are checked, however
+    recently (after a rule change: the old name rule's 'Fund or ETF' — include_invalid would also
+    clear the price-mismatch flags without repairing those histories).
 
     WORKERS tickers at a time: each one's profile call, share-count checks and database writes are
     round trips, so one at a time runs far below FMP's rate limit (a full refresh of ~7,000
@@ -35,7 +38,10 @@ def refresh_ticker_profiles(include_invalid: bool = False) -> tuple[int, int, in
     Returns (total_checked, updated, marked_invalid).
     """
     resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
-    tickers = ticker.fetch_stale_tickers(include_invalid=include_invalid)
+    if recheck_reasons:
+        tickers = ticker.fetch_invalid_for(recheck_reasons)
+    else:
+        tickers = ticker.fetch_stale_tickers(include_invalid=include_invalid)
 
     today = date.today()
     stored_values = ticker_value.fetch_price_and_cap_series_between([t.id for t in tickers], pricing.VALUE_HISTORY_START, today)
@@ -65,17 +71,9 @@ def _refresh_one(t: Ticker, full_symbol: str, stored: tuple[dict[date, float], d
         ticker.update_invalid(t.id, "Profile lookup failed")
         return INVALID, False
 
-    exchange = profile.get('exchange')
     name = profile.get('companyName')
     is_active = profile.get('isActivelyTrading')
-
-    invalid_reason = None
-    if exchange == 'CRYPTO':
-        invalid_reason = 'Crypto'
-    elif not name or tu.is_unwanted_names(name):
-        invalid_reason = 'Fund or ETF'
-    elif is_active is not None and not is_active:
-        invalid_reason = 'Not actively trading'
+    invalid_reason = profile_invalid_reason(profile, full_symbol)
 
     updated_ticker = Ticker(
         id=t.id,

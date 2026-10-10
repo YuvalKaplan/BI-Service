@@ -88,15 +88,42 @@ def get_stock_profile(symbol: str) -> dict[str,str] | str:
         log.record_error(message)
         return message
     
+def _cusip_check_digit(body: str) -> int:
+    """The check digit of a CUSIP's first eight characters (the standard modulus-10 double-add-double)."""
+    total = 0
+    for i, ch in enumerate(body):
+        v = int(ch) if ch.isdigit() else ord(ch) - ord('A') + 10 if ch.isalpha() else {'*': 36, '@': 37, '#': 38}.get(ch, 0)
+        if i % 2:
+            v *= 2
+        total += v // 10 + v % 10
+    return (10 - total % 10) % 10
+
+
+def fix_cusip(cusip: str | None) -> str | None:
+    """The CUSIP with the leading zero some funds' FMP lines lose (Applied Materials 38222105 for
+    038222105 - stored as a number somewhere upstream): an 8-digit value gets it back when its
+    check digit then validates. Anything else is returned as is (8-character option codes)."""
+    if cusip and len(cusip) == 8 and cusip.isdigit():
+        padded = '0' + cusip
+        if _cusip_check_digit(padded[:8]) == int(padded[8]):
+            return padded
+    return cusip
+
+
 def get_etf_holdings(symbol: str) -> list[dict]:
     """A fund's full holdings (asset = FMP symbol, isin, securityCusip, marketValue,
-    weightPercentage, sharesNumber) — [] on failure. Used for the index funds whose weights are
-    float-adjusted caps (modules/ticker/free_float.py)."""
+    weightPercentage, sharesNumber) — [] on failure, the CUSIPs fixed (fix_cusip). Used for the
+    provider ETFs, the index funds and the style reference ETFs."""
     try:
         throttle_api_calls()
         url = f"{FMP_API_URL}/etf/holdings?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         rows = get_jsonparsed_data(url)
-        return rows if isinstance(rows, list) else []
+        if not isinstance(rows, list):
+            return []
+        for r in rows:
+            if r.get('securityCusip'):
+                r['securityCusip'] = fix_cusip(r['securityCusip'])
+        return rows
     except Exception as e:
         log.record_notice(f"Failed to get ETF holdings for {symbol}: {e}")
         return []
@@ -463,7 +490,9 @@ def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = SC
     explicit exchange=XETRA call returns the full ~300-company German large-cap list) —
     callers that want broad international coverage need to loop this over a list of exchanges.
     Returns the list of company dicts ([] past the last page).
-    Expected fields per item: symbol, marketCap, country, exchangeShortName, companyName.
+    Expected fields per item: symbol, marketCap, country, exchangeShortName, companyName,
+    isActivelyTrading. Listings FMP marks not actively trading are included - its flag is wrong
+    for some (Energy Transfer, Dillard's) - and left to the caller (modules/cron/screener.py).
 
     Raises when the call still fails after get_jsonparsed_data's API_RETRIES attempts, or when
     FMP answers with something other than a list (e.g. an error message). Returning [] instead
@@ -475,7 +504,7 @@ def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = SC
     url = (
         f"{FMP_API_URL}/company-screener"
         f"?marketCapMoreThan={market_cap_more_than}&limit={limit}&page={page}"
-        f"&isEtf=false&isFund=false&isActivelyTrading=true"
+        f"&isEtf=false&isFund=false"
     )
     if exchange:
         url += f"&exchange={exchange}"

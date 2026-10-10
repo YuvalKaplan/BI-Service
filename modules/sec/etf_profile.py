@@ -52,7 +52,7 @@ from modules.ticker import company, index_funds
 PROFILE_REFRESH_DAYS = 28   # a fund's profile is checked again after this long (or after a newer filing)
 PROFILE_REFRESH_DAYS_ACTIVE = 6  # ... an active fund's: every weekly run
 FETCH_WORKERS = 4           # funds fetched in parallel, all under api_stocks' 200-calls-a-minute throttle
-EQUITY_MIN_WEIGHT = 0.8     # share of the fund in stock lines an equity fund needs
+EQUITY_MIN_WEIGHT = 0.75    # share of the fund in stock lines an equity fund needs
 MIN_COVERAGE = 0.5          # share of the fund placed (company or index fund) needed for region, size and emerging
 US_MIN = 0.8                # US share of the placed stocks for 'US'; at most 1 - US_MIN for 'International'
 LARGE_COVERAGE = 0.70       # a stock is large at or above its market's breakpoint at this coverage...
@@ -80,17 +80,30 @@ _BUFFER_NAME = re.compile(r'buffer|defined outcome|\bfloor\b|structured (alt )?p
 _OPTION_INCOME_NAME = re.compile(r'covered call|options? income|premium income|buy-?write|\b0dte\b|autocallable'
                                  r'|high income|income target|option strateg|weeklypay|yieldmax|enhanced options',
                                  re.IGNORECASE)
-# A holding line that isn't a stock, by its name: cash and currencies, money-market funds,
-# derivatives (options - also coded like "NDX_1", "SPX_23" - futures, swaps, forwards), bills and
-# notes, coupons ("4.93%") and maturity dates. Stocks FMP lists by name only (JADE's Samsung, SK
-# Hynix, Bajaj Finance: no symbol, ISIN or CUSIP) are everything else.
+# A holding line that isn't a stock, by words that also occur in company names (Forward Air,
+# Treasury Wine Estates, SHO-BOND, Prosegur Cash) - so only for the lines no ticker of ours
+# matches, after a fund or ETF FMP knows (index_funds.is_fund_line): cash and currencies (also FX
+# forward legs like "GBP261015"), money-market funds and sweeps, futures, swaps, forwards and
+# options by word, bills, notes and bonds. Notes, options, rights, warrants and private holdings
+# described as such ("ELN", "6.25%", "C @ 390") are company.is_instrument_line, checked first.
+# Never "fund" or "trust": Nippon Building Fund and Northern Trust are stocks. Stocks FMP lists by
+# name only (JADE's Samsung, SK Hynix, Bajaj Finance: no symbol, ISIN or CUSIP) are everything else.
 _NON_STOCK_NAME = re.compile(
-    r'\bcash\b|money market|\bmmf\b|\bliquidity fund\b|treasury|\bt-?bills?\b|\bbills?\b|\bnotes?\b|\bbonds?\b'
-    r'|\bfutures?\b|\boptions?\b|\bcall\b|\bput\b|\bswaps?\b|\bforwards?\b|\bfx\b|\brepo\b|receivable|payable'
-    r'|\bmargin\b|collateral|\bdeposits?\b|net other assets|other assets|\bliabilities\b'
-    r'|\b(us|u\.s\.|canadian|australian|hong kong|singapore|new zealand|taiwan) dollar\b|\beuro\b|pound sterling'
-    r'|\bjapanese yen\b|\byen\b|\bkron[ae]\b|swiss franc|\bwon\b|\brupees?\b|\byuan\b|renminbi|\bpesos?\b'
-    r'|%|\b\d{1,2}/\d{1,2}/\d{2,4}\b|^[a-z]{2,5}_\d+$', re.IGNORECASE)
+    r'\bcash\b|^cash[a-z]{3}$|^[a-z]{3}_cash$|\bcsh\b|money market|\bmmf\b|\bmmkt\b|\bliquidity fund\b|\bsweep\b|\bstif\b'
+    r'|\b(?:prime|government|govt|treasury) money\b|\bmoney portfolio\b|\bgovt\b|\b(?:u\.?s\.?|preferred) government\b'
+    r'|\bgovernment (?:mm|portfolio)\b|\binstl\b|\binstitutional funds?\b|securities lending'
+    r'|treasury|\btrsr?y\b|\bt-?bills?\b|\bbills?\b|\bnotes?\b|\bbonds?\b'
+    r'|\bfutures?\b|\bfut\b|\bfut(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\d{2}\b|\bemini?\b'
+    r'|\boptions?\b|\bcall\b|\bput\b|\bswaps?\b|\bforwards?\b|\bfx\b|\brepo\b'
+    r'|receivable|payable|pending dividends?|\bmargin\b|collateral|\bdeposits?\b|\bbalance with\b'
+    r'|net (?:other|current) assets|other assets|\bliabilities\b'
+    r'|\b(us|u\.s\.|canadian|australian|hong kong|singapore|new zealand|taiwan) dollars?\b|\beuro\b|pound sterling'
+    r'|\bbritish pounds?\b|\bjapanese yen\b|\byen\b|\bkron[ae]\b|swiss franc|\bwon\b|\brupees?\b|\byuan\b|renminbi'
+    r'|\bpesos?\b|\bbrazilian real\b|\bshekel\b|\bsheqel\b|\bdirham\b|\bbaht\b'
+    r'|^(?:usd|eur|gbp|jpy|chf|cad|aud|nzd|hkd|sgd|cny|cnh|inr|krw|twd|sek|nok|dkk|brl|ils|aed|thb|zar|mxn)$'
+    r'|^[a-z]{3}\d{6}$|^[a-z]{3}/[a-z]{3}$', re.IGNORECASE)
+# A US mutual fund's symbol (a money-market fund: GVMXX, PGLXX) - five letters, the fifth X
+_MUTUAL_FUND_SYMBOL = re.compile(r'^[A-Z]{4}X$')
 
 
 @dataclass
@@ -178,7 +191,7 @@ def build_reference(as_of: date | None = None) -> Reference:
     listings = index_funds.our_listings()
     for fund, (market, rows) in sorted(snapshot.items(), key=lambda kv: kv[1][0] != index_funds.US):  # US first
         for r in rows:
-            if r.get('float_cap'):
+            if r.get('float_cap') and not company.is_instrument_line(r.get('name')):
                 stock = IndexStock(fund=fund, market=market, float_cap=r['float_cap'])
                 for key in _keys(r):
                     index.setdefault(key, stock)
@@ -223,13 +236,21 @@ def classify(etf: SecActiveEtf, asset_class: str | None, equity_weight: float | 
     return 'other'
 
 
-def is_stock_line(line: dict, stock: IndexStock | None) -> bool:
+def is_stock_line(line: dict, stock: IndexStock | None, listings: index_funds.Listings | None = None) -> bool:
+    """Whether an FMP holding line is a stock: never a note, option, right or warrant described as
+    one (company.is_instrument_line - first, as it may carry its issuer's symbol: "JPMORGAN CHASE
+    ELN 08/27" as JPM matches VTI's JPM); one the index funds hold is; a fund or ETF FMP knows
+    (index_funds.is_fund_line, with our listings) isn't; else by its symbol and name (_NON_STOCK_NAME)."""
+    name = (line.get('name') or '').strip()
+    if company.is_instrument_line(name):
+        return False
     if stock is not None:
         return True
-    name = (line.get('name') or '').strip()
+    if listings is not None and index_funds.is_fund_line(line, listings):
+        return False
     if not name and not line.get('asset'):
         return False
-    return not _NON_STOCK_NAME.search(name)
+    return not _MUTUAL_FUND_SYMBOL.match(line.get('asset') or '') and not _NON_STOCK_NAME.search(name)
 
 
 def profile_fund(etf: SecActiveEtf, info: dict | None, holdings: list[dict], ref: Reference) -> Profile:
@@ -244,7 +265,7 @@ def profile_fund(etf: SecActiveEtf, info: dict | None, holdings: list[dict], ref
     if total > 0:
         matched = [(r['weightPercentage'] / total, ref.index.get(next((k for k in _keys(r) if k in ref.index), ''))) for r in lines]
         stock = [(w, s) for w, s in matched if s is not None]
-        p.equity_weight = sum(w for (w, s), r in zip(matched, lines) if is_stock_line(r, s))
+        p.equity_weight = sum(w for (w, s), r in zip(matched, lines) if is_stock_line(r, s, ref.listings))
         p.stock_weight = sum(w for w, _ in stock)
         p.stock_holdings = len(stock)
         p.top10_weight = sum(sorted((r['weightPercentage'] / total for r in lines), reverse=True)[:10])

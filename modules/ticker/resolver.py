@@ -1,5 +1,6 @@
 import re
 import log
+from datetime import date, timedelta
 from typing import Any
 
 from modules.core import api_stocks
@@ -7,6 +8,40 @@ from modules.ticker import esg
 from modules.ticker import util as tu
 from modules.object.ticker import Ticker, upsert_by_symbol, update_invalid
 from modules.object import categorize_ticker as _cat_ticker
+
+# Why a ticker is invalid, from its FMP profile (profile_invalid_reason)
+CRYPTO, MISSING_DETAILS, ETF, FUND, NOT_TRADING = 'Crypto', 'Missing details', 'ETF', 'Fund', 'Not actively trading'
+FUND_REASONS = (ETF, FUND)   # a holding line on one of these tickers isn't a stock (index_funds.is_fund_line)
+TRADING_LOOKBACK_DAYS = 10   # a day with volume within this many days keeps a ticker FMP calls inactive valid
+
+
+def trades_recently(full_symbol: str, today: date | None = None) -> bool:
+    """Whether FMP's daily prices show the symbol traded (volume > 0) within TRADING_LOOKBACK_DAYS -
+    a second opinion on FMP's isActivelyTrading flag, which is wrong for some (Energy Transfer,
+    Dillard's: flagged inactive while trading millions of shares a day). A frozen quote FMP keeps
+    serving after a delisting has no volume."""
+    today = today or date.today()
+    rows = api_stocks.get_symbol_historic_prices(full_symbol, today - timedelta(days=TRADING_LOOKBACK_DAYS), today)
+    return isinstance(rows, list) and any((r.get('volume') or 0) > 0 for r in rows)
+
+
+def profile_invalid_reason(profile: dict, full_symbol: str) -> str | None:
+    """Why the listing an FMP profile describes isn't a company's stock we use, or None. A fund or
+    ETF by FMP's own flags (isEtf / isFund) - never by its name: Northern Trust, Digital Realty
+    Trust and Nippon Building Fund are companies. Not actively trading only when FMP's daily
+    prices agree (trades_recently - one more call, only for the listings FMP calls inactive)."""
+    if profile.get('exchange') == 'CRYPTO':
+        return CRYPTO
+    if not profile.get('companyName'):
+        return MISSING_DETAILS
+    if profile.get('isEtf'):
+        return ETF
+    if profile.get('isFund'):
+        return FUND
+    is_active = profile.get('isActivelyTrading')
+    if is_active is not None and not is_active and not trades_recently(full_symbol):
+        return NOT_TRADING
+    return None
 
 
 class TickerResolver:
@@ -230,22 +265,12 @@ class TickerResolver:
         )
         ticker_id, is_new = upsert_by_symbol(ticker)
 
-        if profile.get('exchange') == 'CRYPTO':
-            update_invalid(ticker_id, 'Crypto')
-            return None
-
-        name = profile.get('companyName')
-        if not name:
-            update_invalid(ticker_id, 'Missing details')
-            return None
-        if tu.is_unwanted_names(name):
-            update_invalid(ticker_id, 'Fund or ETF')
-            return None
-        if is_active is not None and not is_active:
-            # Same rule as the profile refresh, applied at once: a symbol FMP stopped trading
-            # (NZYM-B after its change to NSIS-B) otherwise stays valid for up to a week, and
-            # FMP may keep serving it a frozen quote meanwhile.
-            update_invalid(ticker_id, 'Not actively trading')
+        # Same rule as the profile refresh, applied at once: a symbol FMP stopped trading (NZYM-B
+        # after its change to NSIS-B) otherwise stays valid for up to a week, and FMP may keep
+        # serving it a frozen quote meanwhile.
+        reason = profile_invalid_reason(profile, full_symbol)
+        if reason:
+            update_invalid(ticker_id, reason)
             return None
 
         market_cap = profile.get('marketCap')

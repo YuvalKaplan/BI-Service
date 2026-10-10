@@ -193,6 +193,8 @@ def refresh() -> FloatRunStats:
         lines: dict[int, list[tuple[int, float, float]]] = defaultdict(list)
         matched = 0
         for r in rows:
+            if company.is_instrument_line(r.get('name')):
+                continue  # a warrant / right the fund holds isn't its company's shares
             by_symbol = by_sym.get(r.get('asset') or '')
             listings = (by_symbol or by_isin.get(r.get('isin') or '')
                         or by_cusip.get(r.get('securityCusip') or '') or set())

@@ -16,7 +16,11 @@ NAME_NOISE: set[str] = {
 # security names ("... COMMON STOCK KRW5000.0") and that never appear in FMP company names.
 _NAME_NOISE_PATTERN = re.compile(r'^(?:\d+|[a-z]{3}\d+)$')
 
-UNWANTED_NAMES = re.compile(r'\b(?:etfs?|funds?|trusts?|indexes?|indices|cryptos?)\b', re.IGNORECASE)
+# FMP search results (symbol / name search) that are obviously not a company, skipped as
+# candidates so a search doesn't settle on one. Only a pre-filter: FMP's search answers carry no
+# fund flags, the profile decides (resolver.profile_invalid_reason). Never "trust" or "fund" -
+# Northern Trust, CapitaLand Integrated Commercial Trust and Nippon Building Fund are companies.
+UNWANTED_NAMES = re.compile(r'\b(?:etfs?|indexes?|indices|cryptos?)\b', re.IGNORECASE)
 
 
 def is_unwanted_names(name: str | None) -> bool:
@@ -226,7 +230,7 @@ def names_match(holding_name: str, api_name: str) -> bool:
 
 def filter_symbol_candidates(results: list[dict], query: str) -> list[dict]:
     """Keep FMP search results where the symbol exactly matches query or is query.<exchange-suffix>,
-    and whose name is not an ETF, fund, trust, or index. Exact matches returned first."""
+    and whose name is not an ETF or index (is_unwanted_names). Exact matches returned first."""
     exact = []
     suffixed = []
     for r in results:
