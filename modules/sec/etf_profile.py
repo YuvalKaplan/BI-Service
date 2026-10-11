@@ -30,7 +30,9 @@ The index fallback matters for a new fund: its small caps aren't our tickers unt
 are downloaded. A provider ETF no longer equity keeps its row with its
 new strategy, and the selection makes it inactive. Every checked fund's strategy is kept in
 sec_etf_classification, so it's checked again only after PROFILE_REFRESH_DAYS (an active fund:
-PROFILE_REFRESH_DAYS_ACTIVE, so the rules read a profile at most a week old) or a newer filing.
+PROFILE_REFRESH_DAYS_ACTIVE) or a newer filing. It runs right after the N-CEN update
+(scripts/current_sec_active_etfs.py, by hand once a month - the SEC blocks the hosted cron's IP),
+so every fund is due each time.
 """
 import log
 import re
@@ -50,7 +52,7 @@ from modules.sec.etf_selection import SelectionStats
 from modules.ticker import company, index_funds
 
 PROFILE_REFRESH_DAYS = 28   # a fund's profile is checked again after this long (or after a newer filing)
-PROFILE_REFRESH_DAYS_ACTIVE = 6  # ... an active fund's: every weekly run
+PROFILE_REFRESH_DAYS_ACTIVE = 6  # ... an active fund's: every run
 FETCH_WORKERS = 4           # funds fetched in parallel, all under api_stocks' 200-calls-a-minute throttle
 EQUITY_MIN_WEIGHT = 0.75    # share of the fund in stock lines an equity fund needs
 MIN_COVERAGE = 0.5          # share of the fund placed (company or index fund) needed for region, size and emerging
@@ -467,8 +469,8 @@ def run(refresh_all: bool = False, as_of: date | None = None) -> ProfileRunStats
     in provider_etf (new ones pending). Then the selection rules set every provider ETF's status -
     funds no longer equity, or no longer on the SEC list, become inactive there.
 
-    Raises - so the cron emails the failure - when the index funds' snapshot can't be read or
-    more than MAX_FAILED_SHARE of the funds fail.
+    Raises when the index funds' snapshot can't be read or more than MAX_FAILED_SHARE of the
+    funds fail.
     """
     today = as_of or date.today()
     batch_run_id = batch_run.insert(BatchRun(process='sec_etf_profiles', activation='auto'))

@@ -7,7 +7,7 @@ from modules.core import sender, text_format
 from modules.calc.model_fund import results_to_string
 from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, benchmark_generator, screener, company_builder, schedule
 from modules.ticker import esg, free_float, index_funds, master, refresh, style, valuation
-from modules.sec import etf_profile, etf_selection, ncen
+from modules.sec import etf_selection, ncen
 
 atexit.register(cleanup)
 
@@ -40,6 +40,13 @@ if __name__ == '__main__':
         generation_note = schedule.generation_note(run_day)
         if not (generation_note and (generation or weekday == schedule.GENERATION_WEEKDAY)):
             generation_note = None
+
+        # The SEC blocks the hosted cron's IP, so the SEC active ETF list (N-CEN filings on EDGAR) and
+        # its funds' FMP profiles are updated by hand (scripts/current_sec_active_etfs.py): an email of
+        # its own on the reminder day, first so a failed step can't skip it.
+        if run_day.day == schedule.SEC_LIST_REMINDER_DAY:
+            reminder = ncen.reminder(run_day)
+            sender.send_admin(subject="Reminder: update the SEC active ETF list", message=reminder, html=text_format.to_html(reminder))
 
         if weekday in schedule.DAILY_RUN_DAYS:
             # Listings in first — the provider ETFs' FMP holdings (stage 2, then the selection rules on
@@ -108,7 +115,7 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on style assignment with error:\n{e}\n\n")
                 raise e
 
-        if weekday == schedule.WEEKLY_WEEKDAY:  # The weekly day — ticker maintenance, weekly part: style reference data, then ESG; then the SEC active ETF list
+        if weekday == schedule.WEEKLY_WEEKDAY:  # The weekly day — ticker maintenance, weekly part: style reference data, then ESG
             try:
                 total_etfs = categorize_downloader.run()
             except Exception as e:
@@ -126,29 +133,6 @@ if __name__ == '__main__':
                 f"- {total_etfs:,} categorization ETFs processed",
                 f"- {total_esg:,} ESG tickers refreshed",
             ]))
-
-            # The week's new Form N-CEN filings on EDGAR -> the list of actively managed ETFs.
-            # Nothing else reads it, so it runs last.
-            try:
-                ncen_stats = ncen.run()
-            except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the SEC active ETF list (N-CEN) with error:\n{e}\n\n")
-                raise e
-
-            sections.append(ncen.summary(ncen_stats))
-
-            # Then the listed funds' FMP profiles: the actively managed equity ones go to the provider
-            # tables, sized against the index funds' snapshot, and the selection rules set which of
-            # them are active (their holdings are downloaded from the next daily run).
-            try:
-                profile_stats = etf_profile.run()
-            except Exception as e:
-                sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on the SEC ETF profiles (FMP) with error:\n{e}\n\n")
-                raise e
-
-            sections.append(etf_profile.summary(profile_stats))
-            if profile_stats.selection is not None:
-                sections.append(etf_selection.summary(profile_stats.selection))
 
         if generation:
             # The generators, after the daily steps above (which stored and valued the screen): the

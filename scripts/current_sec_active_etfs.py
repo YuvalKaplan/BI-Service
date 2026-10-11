@@ -1,5 +1,6 @@
 """
-The SEC active ETF list, as the cron runs it on the weekly day:
+The SEC active ETF list, updated by hand once a month (the cron emails a reminder on the first -
+the SEC blocks the hosted cron's IP, so it can't read EDGAR itself):
   1. Reads the Form N-CEN filings on EDGAR not read yet (the last five quarters) into the list of
      actively managed ETFs (sec_active_etf - modules/sec/ncen.py). The first run reads about
      4,000 filings (15-25 minutes); later runs only the new ones. --reload reads every filing in
@@ -18,6 +19,7 @@ enabled funds and what became of them (to compare the rules with the hand-picked
 Needs SECRET_SEC_USER_AGENT (e.g. "BI-Service admin@example.com") in the environment.
 
 Usage:
+    python scripts/current_sec_active_etfs.py --prod
     python scripts/current_sec_active_etfs.py --dev
     python scripts/current_sec_active_etfs.py --dev --reload --refresh-all
 """

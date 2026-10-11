@@ -6,9 +6,11 @@ every run works on the previous trading day's close (pricing.latest_value_date):
 
   the daily run days  DAILY_RUN_DAYS, each after a US trading day's close: holdings, the screener,
                       ticker maintenance
-  the weekly day      WEEKLY_WEEKDAY: style reference ETFs, ESG, the SEC active ETF list
+  the weekly day      WEEKLY_WEEKDAY: style reference ETFs, ESG
   the generation day  GENERATION_WEEKDAY, after that day's daily steps: index funds -> free float ->
                       companies -> benchmarks -> best ideas -> funds
+  the reminder day    SEC_LIST_REMINDER_DAY of each month: an email to update the SEC active ETF
+                      list by hand (the SEC blocks the hosted cron's IP)
 
 The generation day moves when the close it would work on is an NYSE holiday (Tuesday 2028-07-04
 for a Wednesday): to a day later, else a day earlier (GENERATION_SHIFTS) - always within its
@@ -23,8 +25,9 @@ from modules.ticker import pricing
 
 MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY = range(7)
 DAILY_RUN_DAYS = (TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY)   # the daily run days: each follows a US trading day's close
-WEEKLY_WEEKDAY = SUNDAY          # the weekly day: style reference ETFs, ESG, the SEC active ETF list
+WEEKLY_WEEKDAY = SUNDAY          # the weekly day: style reference ETFs, ESG
 GENERATION_WEEKDAY = WEDNESDAY    # the generators' preferred run day (on Tuesday's close)
+SEC_LIST_REMINDER_DAY = 1         # day of the month: the reminder to update the SEC active ETF list by hand
 GENERATION_SHIFTS = (1, -1)       # tried in order when its close is a holiday: a day later, else a day earlier
 HOLIDAY_EXCHANGE = 'NYSE'
 

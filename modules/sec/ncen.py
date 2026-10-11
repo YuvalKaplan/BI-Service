@@ -21,7 +21,7 @@ import os
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from modules.object import batch_run, sec_active_etf, sec_ncen_filing
 from modules.object.batch_run import BatchRun
 from modules.object.sec_active_etf import SecActiveEtf
@@ -30,6 +30,8 @@ from modules.sec import edgar
 from modules.sec.edgar import IndexEntry
 
 NCEN_FORMS = ('N-CEN', 'N-CEN/A')
+BATCH_PROCESS = 'ncen_active_etfs'  # batch_run.process
+UPDATE_COMMAND = 'python scripts/current_sec_active_etfs.py --prod'
 WINDOW_QUARTERS = 5         # a filing year plus slack for late filers, so the first run builds the whole list
 CURRENT_WINDOW_DAYS = 455   # no filing in ~15 months (liquidated, no termination listed yet): off the current list
 MAX_FAILED_SHARE = 0.1      # more failed filings than this in a run fails the run
@@ -279,6 +281,29 @@ def filed_since(as_of: date | None = None) -> date:
     return (as_of or date.today()) - timedelta(days=CURRENT_WINDOW_DAYS)
 
 
+def last_completed() -> datetime | None:
+    """When the last run completed (UTC) - None when none has."""
+    return max((r.completed_at for r in batch_run.fetch_by_type(BATCH_PROCESS, 'auto') if r.completed_at), default=None)
+
+
+def reminder(as_of: date | None = None) -> str:
+    """The monthly reminder email (service_cron.py on schedule.SEC_LIST_REMINDER_DAY): the SEC
+    blocks the hosted cron's IP, so the list is updated by hand from a machine EDGAR accepts."""
+    today = as_of or date.today()
+    try:
+        last = last_completed()
+        last_line = f"- Last completed: {last:%Y-%m-%d} ({(today - last.date()).days} days ago)" if last else "- Never completed"
+    except Exception as e:
+        last_line = f"- Last completed: unknown ({e})"
+    return "\n".join([
+        "Update the SEC active ETF list",
+        "- The SEC blocks the Render hosted cron's IP, so for now we manually activate this from our local desktop.",
+        f"- From the project root on your machine: {UPDATE_COMMAND}",
+        "- It reads the filings not read yet, profiles the funds due on FMP and applies the selection rules",
+        last_line,
+    ])
+
+
 def summary(stats: NcenRunStats) -> str:
     """The cron email's section: a title, then one short bullet per fact."""
     lines = [
@@ -307,12 +332,11 @@ def run(reload: bool = False, as_of: date | None = None) -> NcenRunStats:
     them with reload) into sec_active_etf, oldest first. Filings that fail to download or parse
     are stored with their error and read again next run.
 
-    Raises - so the cron emails the failure - when EDGAR's form index can't be read or more than
-    MAX_FAILED_SHARE of the filings fail.
+    Raises when EDGAR's form index can't be read or more than MAX_FAILED_SHARE of the filings fail.
     """
     today = as_of or date.today()
     quarters = _window(today)
-    batch_run_id = batch_run.insert(BatchRun(process='ncen_active_etfs', activation='auto'))
+    batch_run_id = batch_run.insert(BatchRun(process=BATCH_PROCESS, activation='auto'))
     stats = NcenRunStats(window=f"{quarters[0][0]}q{quarters[0][1]}-{quarters[-1][0]}q{quarters[-1][1]}")
     log.record_status(f"Starting SEC N-CEN active ETFs batch job ID {batch_run_id} for {stats.window}{' (reload)' if reload else ''}")
     try:
