@@ -20,7 +20,7 @@ REVISION_TOLERANCE    = 0.05       # every mismatch within this: FMP revised its
 BASIS_SPREAD          = 1.06       # only prices or only caps off, this steadily, on every mismatching day: our
 BASIS_MIN_POINTS      = 5          # history is on another basis (currency, split) - rewritten; at least this many
                                    # days (an exchange rate moves a few % over the days compared: NZD 3.1% in Sep 2026)
-REVISION, BASIS = 'revision', 'basis'
+REVISION, BASIS, SHARES = 'revision', 'basis', 'shares'
 MISMATCH_REASON = "Price/market cap mismatch vs FMP history"   # how ticker.invalid starts for a mismatch
 VALUE_DATE_CUT_OFF_HOUR = 17       # New York time: before it, the latest completed trading day is the previous one
 
@@ -444,14 +444,25 @@ def mismatch_kind(mismatches: list[Mismatch]) -> str | None:
       (Helsinki, Brussels, Dublin, Lisbon and New Zealand listings before those exchanges'
       currencies were known; the days stored after agree), or prices from before a split FMP
       adjusted for;
+    - SHARES: only market caps off - every price agrees - by a steady factor under
+      SHARE_COUNT_TOLERANCE, on any number of days: FMP changed the share count behind its caps
+      (each quarter's filings: Citigroup 1.70B -> 1.84B, Visa 1.91B -> 1.72B in Oct 2026, on the
+      last days compared). The security is the right one; our history is rewritten from FMP's;
     - None: anything else (FMP's data may be what's wrong, or the symbol another security's -
       then both would be off)."""
     if all(m.pct_diff <= REVISION_TOLERANCE for m in mismatches):
         return REVISION
-    if len(mismatches) < BASIS_MIN_POINTS or len({m.field for m in mismatches}) != 1:
+    fields = {m.field for m in mismatches}
+    if len(fields) != 1:
         return None
     ratios = [m.stored_value / m.fetched_value for m in mismatches if m.stored_value and m.fetched_value]
-    return BASIS if ratios and max(ratios) / min(ratios) <= BASIS_SPREAD else None
+    if not ratios or max(ratios) / min(ratios) > BASIS_SPREAD:
+        return None
+    if len(mismatches) >= BASIS_MIN_POINTS:
+        return BASIS
+    if fields == {'market_cap'} and all(_ratio(r, 1.0) < SHARE_COUNT_TOLERANCE for r in ratios):
+        return SHARES
+    return None
 
 
 def build_mismatch_reason(mismatches: list[Mismatch]) -> str:
@@ -507,7 +518,7 @@ def store_validated_ticker_value(
 
     A mismatch withholds the value (and flags the ticker invalid after GRACE_PERIOD_DAYS) unless
     it's ours that's off (mismatch_kind): FMP's revised values replace the stored ones, or a
-    history stored on another basis is rewritten from FMP - then the value is stored."""
+    history stored on another basis or share count is rewritten from FMP - then the value is stored."""
     try:
         currency = tu.listing_currency(exchange, currency)
         # Not logging repaired/dropped glitches here: the same old glitch would be reported daily for months.
@@ -537,10 +548,11 @@ def store_validated_ticker_value(
                 _upsert_tv(TickerValue(ticker_id=ticker_id, value_date=d, stock_price=fetched[d][0], market_cap=fetched[d][1]))
             log.record_notice(f"FMP revised ticker_id={ticker_id} ({symbol}): {build_mismatch_reason(mismatches)} - "
                               f"its values replace ours")
-        elif kind == BASIS:
+        elif kind in (BASIS, SHARES):
             written = resync_value_history(ticker_id, symbol, currency, reference_shares=reference_shares,
                                            verified_shares=verified_shares)
-            log.record_notice(f"Stored history of ticker_id={ticker_id} ({symbol}) on another basis than FMP's "
+            what = "on another basis than FMP's" if kind == BASIS else "on another share count than FMP's"
+            log.record_notice(f"Stored history of ticker_id={ticker_id} ({symbol}) {what} "
                               f"({build_mismatch_reason(mismatches)}): rewritten from FMP ({written})")
             if isinstance(written, str):
                 kind = None    # not rewritten: withheld as any other mismatch

@@ -5,8 +5,9 @@ registered lines of the screen stored for that date (after scripts/current_scree
 
 --revalidate first clears the invalid flag of every ticker flagged on a price / market-cap
 mismatch with FMP's history (pricing.MISMATCH_REASON), so the pass checks them again: a
-revision by FMP or a stored history on another basis is now taken (pricing.mismatch_kind), any
-other mismatch flags the ticker again at once.
+revision by FMP, or a stored history on another basis or share count, is now taken
+(pricing.mismatch_kind), any other mismatch flags the ticker again at once. The cron does the
+same on the generation day.
 
 Usage:
     python scripts/current_ticker_values.py --dev
@@ -14,15 +15,11 @@ Usage:
 """
 import atexit
 import sys
-from modules.object import ticker
 from modules.object.exit import cleanup
-from modules.ticker import pricing, valuation
+from modules.ticker import valuation
 
 atexit.register(cleanup)
 
 if __name__ == '__main__':
-    if '--revalidate' in sys.argv:
-        cleared = ticker.clear_invalid_with_prefix(pricing.MISMATCH_REASON)
-        print(f"{cleared} ticker(s) flagged on a mismatch with FMP's history cleared, to be checked again.")
-    stats = valuation.run()
+    stats = valuation.run(revalidate='--revalidate' in sys.argv)
     print(valuation.summary(stats))

@@ -89,7 +89,7 @@ if __name__ == '__main__':
             ]))
 
             try:
-                values = valuation.run()
+                values = valuation.run(revalidate=generation)
             except Exception as e:
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on ticker values with error:\n{e}\n\n")
                 raise e
