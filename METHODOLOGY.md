@@ -223,7 +223,7 @@ active weight (Δ) = ETF weight − reference weight
 | **Value / growth split** | US companies: the company's weight in the benchmark **of its own style** (value companies against US Large Cap Value, growth against US Large Cap Growth). International: as full universe. | Overweight versus the company's own style peers. A value manager holding a growth mega-cap at below its growth-index weight isn't credited with a conviction it doesn't have, without needing to classify the manager itself. |
 | **Self** | The company's market cap ÷ the total market cap of the ETF's own holdings – the ETF re-weighted by market cap | Tilt within the manager's own chosen set: which of its stocks it holds more of than size alone would suggest. Independent of any benchmark, and of how the manager chose the names. |
 
-**Selection.** Companies with a positive active weight are ranked from the largest overweight down. An active weight above **20%** is treated as abnormal (a data problem or an extreme concentrated bet) and dropped. The **top 10** per ETF are that manager's best ideas, with their rank (1 = the largest overweight).
+**Selection.** Companies with a positive active weight are ranked from the largest overweight down. An active weight above **20%** is treated as abnormal (a data problem or an extreme concentrated bet) and dropped. A company of **another region than the ETF's** – a US fund's holding in TSMC, Shell or Brookfield – keeps its place in the weights but is never one of that ETF's best ideas: a fund only takes companies of its own region from ETFs of that region ([§10](#10-building-a-fund)), so such an idea could never be bought and would only push a usable one out of the ETF's top 10. Without this rule a US fund's foreign holding, which has no weight in the US benchmark, often ranked #1. The **top 10** per ETF are that manager's best ideas, with their rank (1 = the largest overweight).
 
 **What the full-universe measure implies.** A stock outside the benchmark (below the large-cap line) has a reference weight of zero, so its whole ETF weight is active weight. Large-cap funds therefore apply the size test themselves ([§10](#10-building-a-fund)) so these never enter as new buys.
 
@@ -302,7 +302,7 @@ A company with no ESG data is not qualified. The screen applies only to funds co
 
 ## 13. Audit trail
 
-Every fund rebalance stores its full calculation: for every ETF the fund could draw on, every company held, its market cap, ETF weight, reference weight (and which benchmark it came from, on which date), active weight, rank, and why it did or didn't become a best idea (selected; not overweight; above the 20% limit; beyond the top 10; no validated market cap; quarantined). This is recomputed independently and cross-checked against the stored best ideas.
+Every fund rebalance stores its full calculation: for every ETF the fund could draw on, every company held, its market cap, ETF weight, reference weight (and which benchmark it came from, on which date), active weight, rank, and why it did or didn't become a best idea (selected; another region than the ETF's; not overweight; above the 20% limit; beyond the top 10; no validated market cap; quarantined). This is recomputed independently and cross-checked against the stored best ideas.
 
 For any fund and date, a **methodology export** produces a set of spreadsheets tracing the fund from the ground up: each ETF's holdings and active weights, the benchmark, the combined best ideas, and the fund's holdings, buys and sells.
 
