@@ -382,6 +382,17 @@ def update_invalid(ticker_id: int, reason: str | None) -> None:
         raise Exception(f"Error updating the Ticker invalid reason into the DB: {e}")
 
 
+def fetch_invalid_with_prefix(prefix: str) -> list['Ticker']:
+    """Every ticker whose invalid reason starts with `prefix` (e.g. pricing.MISMATCH_REASON)."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Ticker)) as cur:
+                cur.execute("SELECT * FROM ticker WHERE invalid LIKE %s ORDER BY id;", (prefix.replace('%', r'\%') + '%',))
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching the tickers invalid with '{prefix}': {e}")
+
+
 def clear_invalid_with_prefix(prefix: str) -> int:
     """Clears the invalid flag of every ticker whose reason starts with `prefix`. Returns how many."""
     try:

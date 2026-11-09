@@ -128,7 +128,9 @@ def _refresh_one(t: Ticker, full_symbol: str, stored: tuple[dict[date, float], d
 
 SHARES_CHECK_POINTS = 10   # the latest stored values stored_shares_off_profile looks at
 FINANCIALS_TOLERANCE = 0.05  # FMP's quarterly weighted shares within this of the profile's count confirm it
-INDEX_TOLERANCE = 0.15  # the index funds' float cap within this of the quote's cap x free float confirms the quote
+INDEX_TOLERANCE = 0.15  # the index funds' float shares may exceed the quote's share count by at most this
+INDEX_OVER_HISTORY = 1.15  # index float shares this many times FMP's history count refute the history (free_float.CAP_CHECK_FACTOR)
+HISTORY_COUNT_DAYS = 10    # the days of FMP's market-cap history index_backs_quote reads the history's share count from
 
 
 def _latest_usd_rate(currency: str | None, today: date) -> float | None:
@@ -162,26 +164,55 @@ def stored_shares_off_profile(
             or all(pricing.SHARE_COUNT_TOLERANCE <= 1 / r < pricing.REFERENCE_FACTOR for r in ratios))
 
 
+def _history_share_count(t: Ticker, full_symbol: str, currency: str | None, rate: float, today: date) -> float | None:
+    """The share count FMP's own market-cap history implies over its last HISTORY_COUNT_DAYS
+    (median of cap / price) — not our stored history, which a verified count has rewritten."""
+    if t.verified_shares is None:
+        return None   # nothing rewritten: the stored history is FMP's (the caller uses it)
+    history = pricing.fetch_price_and_market_cap_history(
+        full_symbol, today - timedelta(days=HISTORY_COUNT_DAYS), today, currency, log_outliers=False)
+    if isinstance(history, str):
+        return None
+    counts = sorted(cap / (price * rate) for price, cap in history.values() if price and cap and price > 0 and cap > 0)
+    return counts[len(counts) // 2] if counts else None
+
+
 def index_backs_quote(
-    t: Ticker, profile: dict, stored: tuple[dict[date, float], dict[date, float]] | None,
+    t: Ticker, full_symbol: str, profile: dict, stored: tuple[dict[date, float], dict[date, float]] | None,
     currency: str | None, today: date,
 ) -> bool:
-    """Whether the index funds' holding backs the quote's market cap: their float cap
-    (ticker.float_factor — the index's float cap over our company cap, modules/ticker/free_float.py
-    — times our latest stored cap) within INDEX_TOLERANCE of the quote's cap x its free float. A
-    third source when FMP's financials still show an old share count (Omnicom and Devon Energy
-    after their mergers: history and financials on the old count, the quote and the index on the
-    new one). Only for a company's own row (a master or standalone ticker), the cap the factor was
-    measured against."""
-    if t.master_ticker_id is not None or not t.float_factor or not t.free_float or not stored or not stored[0]:
+    """Whether the index funds refute FMP's history in favour of the quote's (higher) share count.
+
+    An index can't hold more of a company than the whole company (free_float's cap check), so the
+    index funds' float shares — ticker.float_factor (their float cap over our company cap,
+    modules/ticker/free_float.py) times our latest stored share count — at INDEX_OVER_HISTORY x
+    FMP's history count or more mean the history is on too few shares; they back the quote when
+    they also fit within its count (INDEX_TOLERANCE). Omnicom and Devon Energy after their mergers:
+    history and financials on the old count, the quote and the index on the new one. The history
+    count is read from FMP (_history_share_count) once a verified count has rewritten our stored
+    history, so the answer doesn't flip with that rewrite.
+
+    Holding float, not the whole company, the index can refute a count as too low but never as too
+    high. Comparing its float cap with the quote's cap x FMP's free float, as this used to, proved
+    nothing: FMP's free float is its float shares over the same quote count, so the
+    count cancels out, and Tesla's quote at 3.95B shares (its financials and history: 3.24B) was
+    verified on it and invalidated against FMP's correct history. Only for a company's own row (a
+    master or standalone ticker), the cap the factor was measured against."""
+    if t.master_ticker_id is not None or not t.float_factor or not stored or not stored[0]:
         return False
-    cap, rate = profile.get('marketCap'), _latest_usd_rate(currency, today)
-    if not cap or cap <= 0 or not rate:
+    cap, price, rate = profile.get('marketCap'), profile.get('price'), _latest_usd_rate(currency, today)
+    if not cap or not price or cap <= 0 or price <= 0 or not rate:
         return False
-    caps = stored[0]
-    index_float_cap = t.float_factor * caps[max(caps)]
-    quote_float_cap = cap * rate * t.free_float / 100
-    return abs(index_float_cap / quote_float_cap - 1) <= INDEX_TOLERANCE
+    caps, prices = stored
+    dated = [d for d in sorted(caps) if caps[d] and caps[d] > 0 and prices.get(d)]
+    if not dated:
+        return False
+    stored_count = caps[dated[-1]] / (prices[dated[-1]] * rate)
+    index_float_shares = t.float_factor * stored_count
+    quote_count = cap / price
+    history_count = _history_share_count(t, full_symbol, currency, rate, today) or stored_count
+    return (index_float_shares >= INDEX_OVER_HISTORY * history_count
+            and index_float_shares <= quote_count * (1 + INDEX_TOLERANCE))
 
 
 def verify_share_count(
@@ -213,7 +244,7 @@ def verify_share_count(
     unit = tu.minor_unit_factor(profile.get('currency'))
     if financial and abs(financial / (shares * unit) - 1) <= FINANCIALS_TOLERANCE:
         witness = 'financials'
-    elif index_backs_quote(t, profile, stored, currency, today):
+    elif index_backs_quote(t, full_symbol, profile, stored, currency, today):
         witness = 'index funds'
     else:
         witness = None

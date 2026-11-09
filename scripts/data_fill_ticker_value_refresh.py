@@ -33,7 +33,11 @@ Usage:
                                                                          # stored history 1.15-2.5x off the profile's count,
                                                                          # confirmed by FMP's quarterly financials, e.g.
                                                                          # Rocket Companies) - rewritten against it; one
-                                                                         # profile call each, one more for those flagged
+                                                                         # profile call each, one more for those flagged.
+                                                                         # Also the tickers flagged invalid on a mismatch
+                                                                         # with FMP's history that carry a verified count
+                                                                         # (a wrong one causes the mismatch: Tesla, Oct
+                                                                         # 2026) - their flag is cleared once rewritten
 
 Every rewrite applies the ticker's verified share count (ticker.verified_shares), as the live
 valuation does, so the rewritten history and the next day's value agree.
@@ -157,7 +161,8 @@ def main() -> None:
     parser.add_argument('--profile-check', action='store_true',
                         help="Only valid tickers with a stored market cap 2.5x+ off what their FMP profile's share count gives.")
     parser.add_argument('--shares-check', action='store_true',
-                        help="Only valid tickers whose verified share count is set, changed or cleared (quote and financials against FMP's history).")
+                        help="Only tickers whose verified share count is set, changed or cleared (quote and financials against FMP's history): "
+                             "valid ones, and those flagged on a mismatch with FMP's history that carry a verified count.")
     args, _unknown = parser.parse_known_args()  # --prod/--dev are read directly from sys.argv by modules/core/db.py
 
     if args.symbol:
@@ -180,8 +185,12 @@ def main() -> None:
         references = tickers_off_their_profile(candidates, TickerResolver(TickerResolver.POPULATE_TICKER))
         tickers = [t for t in candidates if t.id in references]
     elif args.shares_check:
-        candidates = ticker.fetch_all_valid()
-        print(f"Checking {len(candidates)} ticker(s)' stored share counts against their FMP quote and financials...")
+        # Plus the tickers flagged on a mismatch with FMP's history that carry a verified count: a
+        # wrong one is what makes our rewritten history mismatch FMP's (Tesla, Oct 2026).
+        mismatched = [t for t in ticker.fetch_invalid_with_prefix(pricing.MISMATCH_REASON) if t.verified_shares is not None]
+        candidates = ticker.fetch_all_valid() + mismatched
+        print(f"Checking {len(candidates)} ticker(s)' stored share counts against their FMP quote and financials "
+              f"({len(mismatched)} flagged on a mismatch)...")
         verified = tickers_with_share_count_change(candidates, TickerResolver(TickerResolver.POPULATE_TICKER))
         tickers = [t for t in candidates if t.id in verified]
     else:
@@ -233,6 +242,9 @@ def main() -> None:
 
             processed += 1
             total_rows += rows
+            if args.shares_check and not args.dry_run and t.invalid and t.invalid.startswith(pricing.MISMATCH_REASON):
+                ticker.update_invalid(t.id, None)   # its history is FMP's now (on the corrected count): nothing mismatches
+                print(f"[{i}/{len(tickers)}] {symbol}: mismatch flag cleared")
             if mismatches:
                 tickers_with_diffs += 1
                 worst = max(mismatches, key=lambda m: m.pct_diff)
