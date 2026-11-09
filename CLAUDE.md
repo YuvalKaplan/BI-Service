@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. `README.md` has the human-readable, step-by-step description of every pipeline stage, all scripts, environment variables, hosting and MCP setup — keep it in sync when behaviour described there changes.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. `README.md` has the human-readable, step-by-step description of every pipeline stage, all scripts, environment variables, hosting and MCP setup — keep it in sync when behaviour described there changes. `METHODOLOGY.md` describes the same process for investment professionals (sources, techniques, reasoning, parameter values in its Appendix A) — keep it in sync too whenever a change affects methodology: ETF selection rules, data sources, size / benchmark rules, style, best-ideas measurement, fund construction, rebalancing, weighting, ESG, or any parameter it quotes. Write it in finance terms, without code identifiers.
 
 ## Commands
 
