@@ -393,23 +393,59 @@ def clear_invalid_with_prefix(prefix: str) -> int:
         raise Exception(f"Error clearing the invalid flags starting with '{prefix}': {e}")
 
 
-def update_style_from_categorization_etfs() -> None:
+def refresh_style_from_reference_etfs() -> list[tuple[int, str | None, str]]:
+    """
+    Re-sets each company's style from the style reference ETFs' current holdings (categorize_etf,
+    usage 'style': each one's latest categorize_etf_holding snapshot — categorize_ticker alone keeps
+    stocks that have left them, and only the last ETF's style per symbol), so a style isn't set once
+    and left to go stale: the value / growth benchmarks split on it. A listing held is matched by
+    symbol + exchange and counted for its company (master). Each reference ETF holding the company
+    is one vote for its style; the families overlap (CRSP's VUG/VTV, Morningstar's ILCG/ILCV hold
+    many stocks on both sides), so the majority wins and a tie keeps the current style. cap_type is
+    set too when the ETFs holding it agree on one. Companies held by none are left as they are.
+    Returns (company id, old style, new style) for each company whose style changed.
+    """
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
+                    WITH latest AS (
+                        SELECT ce.id AS etf_id, ce.style_type, ce.cap_type, MAX(h.holding_date) AS holding_date
+                        FROM public.categorize_etf ce
+                        JOIN public.categorize_etf_holding h ON h.categorize_etf_id = ce.id
+                        WHERE ce.usage = 'style' AND ce.style_type IN ('value', 'growth')
+                        GROUP BY ce.id, ce.style_type, ce.cap_type
+                    ), held AS (
+                        SELECT DISTINCT COALESCE(t.master_ticker_id, t.id) AS company_id, l.etf_id, l.style_type, l.cap_type
+                        FROM latest l
+                        JOIN public.categorize_etf_holding h ON h.categorize_etf_id = l.etf_id AND h.holding_date = l.holding_date
+                        JOIN public.categorize_ticker ct ON ct.id = h.categorize_ticker_id
+                        JOIN public.ticker t ON t.symbol = ct.symbol AND t.exchange = ct.exchange
+                    ), ref AS (
+                        SELECT company_id,
+                               SUM(CASE WHEN style_type = 'value' THEN 1 ELSE -1 END) AS net,
+                               MIN(cap_type) AS cap_type, COUNT(DISTINCT cap_type) AS caps
+                        FROM held GROUP BY company_id
+                    )
                     UPDATE public.ticker t
-                    SET style_type = ct.style_type,
-                        cap_type   = ct.cap_type,
-                        type_from  = 'CAT_ETF'
-                    FROM public.categorize_ticker ct
-                    WHERE t.symbol        = ct.symbol
-                      AND ct.style_type IS NOT NULL
-                      AND t.invalid     IS NULL
-                      AND t.master_ticker_id IS NULL;
+                    SET style_type = CASE WHEN r.net > 0 THEN 'value' ELSE 'growth' END,
+                        cap_type   = CASE WHEN r.caps = 1 THEN r.cap_type ELSE t.cap_type END,
+                        type_from  = 'CAT_ETF',
+                        updated_at = (now() AT TIME ZONE 'utc')
+                    FROM ref r
+                    JOIN public.ticker old ON old.id = r.company_id
+                    WHERE t.id = r.company_id
+                      AND r.net <> 0
+                      AND t.invalid IS NULL
+                      AND t.master_ticker_id IS NULL
+                      AND (t.style_type IS DISTINCT FROM CASE WHEN r.net > 0 THEN 'value' ELSE 'growth' END
+                           OR t.type_from IS DISTINCT FROM 'CAT_ETF'
+                           OR (r.caps = 1 AND t.cap_type IS DISTINCT FROM r.cap_type))
+                    RETURNING t.id, old.style_type, t.style_type;
                 """)
+                return [(tid, old, new) for tid, old, new in cur.fetchall() if old != new]
     except Error as e:
-        raise Exception(f"Error updating ticker style from categorization ETFs: {e}")
+        raise Exception(f"Error refreshing ticker styles from the style reference ETFs: {e}")
 
 def update_style_for_unclassified() -> None:
     """Set style/cap for tickers that have never been classified, using existing categorize ETF data."""

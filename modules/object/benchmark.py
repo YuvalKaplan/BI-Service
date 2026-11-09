@@ -64,6 +64,32 @@ def fetch_by_region_and_style(region: str, style_type: str) -> Benchmark | None:
         raise Exception(f"Error fetching benchmark by region/style: {e}")
 
 
+SPLIT_STYLES = ('value', 'growth')
+
+
+def fetch_style_split(benchmark_id: int) -> List[Benchmark]:
+    """The enabled value / growth benchmarks that split this (blend / core) benchmark: same region,
+    cap_type and market_coverage. Empty when the region has no split (International)."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor(row_factory=class_row(Benchmark)) as cur:
+                cur.execute(
+                    """
+                    SELECT s.*
+                    FROM public.benchmark b
+                    JOIN public.benchmark s
+                      ON s.region = b.region AND s.cap_type = b.cap_type AND s.market_coverage = b.market_coverage
+                     AND s.style_type = ANY(%s) AND s.disabled = false AND s.id <> b.id
+                    WHERE b.id = %s
+                    ORDER BY s.id
+                    """,
+                    (list(SPLIT_STYLES), benchmark_id)
+                )
+                return cur.fetchall()
+    except Error as e:
+        raise Exception(f"Error fetching the style split of benchmark {benchmark_id}: {e}")
+
+
 def fetch_latest_holdings(benchmark_id: int, look_back_days: int, up_to_date: date | None = None) -> List[BenchmarkHolding]:
     try:
         with db_pool_instance.get_connection() as conn:

@@ -209,20 +209,25 @@ def _write_etf_files(ctx: _Context, out_dir: str) -> list[str]:
             'Market value': per_company['market_value'].get(ctx.sym(a.ticker_id)) if not per_company.empty else None,
             'Market cap used': a.market_cap,
             'ETF weight': a.etf_weight,
+            'Benchmark': ctx.benchmarks[a.benchmark_id].name if a.benchmark_id in ctx.benchmarks else ('self' if a.benchmark_weight is not None else ''),
             'Benchmark weight': a.benchmark_weight,
             'Delta': a.delta,
             'Note': a.note,
         } for a in rows])
         company = company.sort_values(['Rank', 'Delta'], ascending=[True, False], na_position='last')
 
-        bm = ctx.benchmarks.get(rows[0].benchmark_id) if rows[0].benchmark_id else None
+        # With a style split each company row names its own benchmark (value / growth, else the blend).
+        used = sorted({a.benchmark_id for a in rows if a.benchmark_id in ctx.benchmarks})
+        bm_text = (", ".join(f"{ctx.benchmarks[b].name} ({b})" for b in used) + f" as of {rows[0].benchmark_date}"
+                   + (" — each company against its own style's benchmark (column Benchmark)" if len(used) > 1 else "")
+                   if used else "self (ETF's own holdings, market-cap weighted)")
         p = ctx.providers.get(pe.provider_id)
         header = [
             ('ETF', f"{pe.name} ({pe.id})"),
             ('Provider', p.name if p else pe.provider_id),
             ('Region', pe.region),
             ('Holdings date', ctx.etf_dates[etf_id]),
-            ('Benchmark', f"{bm.name} ({bm.id}) as of {rows[0].benchmark_date}" if bm else "self (ETF's own holdings, market-cap weighted)"),
+            ('Benchmark', bm_text),
             ('Best ideas', f"top {big.MAX_BEST_IDEAS_PER_FUND} by delta = ETF weight - benchmark weight, delta > 0 and <= {big.HOLDING_DELTA_LIMIT_DROP_OFF:.0%}"),
         ]
         path = os.path.join(etf_dir, f"{_safe(pe.name or 'ETF')}_{pe.id}.xlsx")
@@ -250,7 +255,7 @@ def _write_benchmark_file(ctx: _Context, out_dir: str) -> str:
     used: set[str] = set()
     held = {a.ticker_id for a in ctx.analysis}
     with pd.ExcelWriter(path, engine='openpyxl') as w:
-        if ctx.mode == 'full_universe':
+        if ctx.mode in best_idea.EXTERNAL_MODES:
             snapshots = sorted({(a.benchmark_id, a.benchmark_date) for a in ctx.analysis if a.benchmark_id and a.benchmark_date})
             for bm_id, bm_date in snapshots:
                 bm = ctx.benchmarks[bm_id]
@@ -437,12 +442,14 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
 
 def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
     s = ctx.strategy
-    bm_text = (
-        "each ETF's configured external benchmark (see `benchmark.xlsx`): a synthetic large-cap, market-cap-weighted "
-        "benchmark built from the companies screened on FMP"
-        if ctx.mode == 'full_universe' else
-        "each ETF's own holdings, weighted by market cap (see `benchmark.xlsx`)"
-    )
+    external = ("each ETF's configured external benchmark (see `benchmark.xlsx`): a synthetic large-cap, market-cap-weighted "
+                "benchmark built from the companies screened on FMP")
+    bm_text = {
+        best_idea.MODE_FULL_UNIVERSE: external,
+        best_idea.MODE_SPLIT: external + "; where the region is split into value and growth benchmarks (US), each company "
+                              "is compared with the benchmark of its own style (a company of neither style with the blend), "
+                              "and all the ETF's deltas are ranked together",
+    }.get(ctx.mode, "each ETF's own holdings, weighted by market cap (see `benchmark.xlsx`)")
     lines = [
         f"# {ctx.fund.name} — holdings methodology",
         "",

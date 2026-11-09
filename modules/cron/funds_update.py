@@ -146,16 +146,17 @@ def _record_fund_analysis(
                 continue
 
             benchmark_id = benchmark_date = None
-            bm_weights = None
-            if strategy.benchmark == 'full_universe':
+            universe = None
+            if strategy.benchmark in best_idea.EXTERNAL_MODES:
                 if not pe.benchmark_id:
                     continue
-                bm_weights, benchmark_date = best_ideas_generator.get_benchmark_weights(pe.benchmark_id, as_of_date, bm_cache)
-                if not bm_weights:
+                universe = best_ideas_generator.get_full_universe_weights(
+                    pe.benchmark_id, as_of_date, bm_cache, style_split=strategy.benchmark == best_idea.MODE_SPLIT)
+                if not universe.weights:
                     continue
-                benchmark_id = pe.benchmark_id
+                benchmark_id, benchmark_date = pe.benchmark_id, universe.holding_date
 
-            weights = best_ideas_generator.compute_active_weights(inputs, bm_weights)
+            weights = best_ideas_generator.compute_active_weights(inputs, universe)
             selected = best_ideas_generator.select_best_ideas(weights, best_ideas_generator.MAX_BEST_IDEAS_PER_FUND)
 
             stored = best_idea.fetch_for_etf_date(etf_id, value_date, strategy.benchmark)

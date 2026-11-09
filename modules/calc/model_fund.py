@@ -1,7 +1,7 @@
 import log
 import pandas as pd
 from datetime import date, timedelta
-from typing import Any, List, Optional, cast
+from typing import Any, List, Literal, Optional, cast
 from dataclasses import dataclass
 from pydantic import BaseModel
 from modules.core.text_format import table
@@ -44,7 +44,10 @@ class Strategy(BaseModel):
     esg_only: bool = False
     ranking_from: int = 1
     ranking_to: int = 1
-    benchmark: str = 'full_universe'  # 'full_universe' | 'self'
+    # Which best ideas the fund draws on (best_idea.benchmark_mode): 'full_universe' (its region's blend
+    # benchmark), 'full_value_growth_split' (each company against its own style's benchmark — US value /
+    # growth — else the blend) or 'self' (the ETF's own holdings, market-cap weighted).
+    benchmark: Literal['full_universe', 'full_value_growth_split', 'self'] = 'full_universe'
     recalc_frequency_days: int = 7
 
 def getStrategyFromJson(data: dict) -> Strategy:

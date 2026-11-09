@@ -186,7 +186,11 @@ Forms every enabled benchmark of the `benchmark` table from the latest stored sc
 | Benchmark | `region` | `cap_type` | `style_type` | `market_coverage` | Cutoff (Sep 2026) |
 |-----------|----------|------------|--------------|-------------------|-------------------|
 | US Large Cap Blend | `US` | `large` | `blend` | 0.93 – the Russell 1000's share of the market | ~$10.1B (~720 companies) |
+| US Large Cap Value | `US` | `large` | `value` | 0.93 | the same cutoff: the blend's value companies |
+| US Large Cap Growth | `US` | `large` | `growth` | 0.93 | the same cutoff: the blend's growth companies |
 | Intl Large Cap Blend | `International` | `large` | `blend` | 0.80 | ~$7.4B |
+
+**The US value / growth split.** US Large Cap Value and Growth have the blend's region, cap type and `market_coverage`, so they hold exactly the blend's companies of each style (a company of neither style – `blend` or unknown, ~0.1% of the weight – is in the blend only), each re-weighted to 100%. Each company goes wholly to one side, by its `ticker.style_type` ([Style](#style-value--growth)). They don't change which benchmark an ETF links to (its region's blend); they're used by its `full_value_growth_split` best ideas ([Best ideas](#7-best-ideas)). International has no split: none of the style reference ETFs is international, and a third of its benchmark has no style.
 
 The large-cap line is **relative to the market**, not a fixed amount: a benchmark's cutoff is its market's breakpoint at its `market_coverage` – the float cap at which the market's largest companies make up that share of its total float cap, per the index funds' latest snapshot ([Index funds and size breakpoints](#index-funds-and-size-breakpoints)). A benchmark holds the screened companies of its `region` whose **whole company cap** reaches the cutoff with at least **10% floating** (`ticker.float_factor`; no factor known passes) – the S&P / Russell way: membership on the whole cap, a minimum float – and of its `style_type` (`blend`/`core`: any style; `value`/`growth`: the company's `ticker.style_type`). Each is weighted by the **whole company's** market cap (`weight = market cap / total`) – the size managers look at. The snapshot is stored in `benchmark_holding`, dated at the companies' screen date – Tuesday's close for a Wednesday generation (a re-run replaces it); the cron email shows each benchmark's cutoff. An empty benchmark fails the run.
 
@@ -207,12 +211,15 @@ A manager's best ideas are the stocks they hold at a **higher weight than the ma
    delta            = etf_weight − benchmark_weight
    ```
 
-   Two reference benchmarks are used, and both results are stored in `best_idea` with a `benchmark_mode`:
+   Three reference benchmarks are used, and all three results are stored in `best_idea` with a `benchmark_mode` (a fund picks one – its strategy's `benchmark`):
 
    | Mode | benchmark_weight | When |
    |------|------------------|------|
    | `self` | the company's market cap ÷ total market cap of the ETF's own holdings (what the ETF would look like if it were market-cap weighted) | always |
-   | `full_universe` | the company's weight in the ETF's linked benchmark (step 6); 0 if not in it | only when the ETF has a `benchmark_id` |
+   | `full_universe` | the company's weight in the ETF's linked benchmark – its region's blend (step 6); 0 if not in it | only when the ETF has a `benchmark_id` |
+   | `full_value_growth_split` | the company's weight in **the benchmark of its own style** where the region is split into value and growth (US): a value company against US Large Cap Value, a growth company against US Large Cap Growth (a company of neither style against the blend), all the ETF's deltas then ranked together. Without a split (International) the same as `full_universe` | only when the ETF has a `benchmark_id` |
+
+   `full_value_growth_split` needs no style for the ETF itself – a value fund's growth holdings are simply measured against the growth benchmark, where a large company weighs more than in the blend, so a value fund's out-of-style megacap (PVAL's Microsoft) no longer tops its best ideas. Funds that hold a mix are measured against both benchmarks at full strength, which ranks their largest holdings a little lower than against the blend (value ones more, ×2.3 vs ×1.75 the blend weight) – accepted by decision. The split is used when both style snapshots are dated as the blend's (they're formed together); otherwise the blend alone, with a notice.
 
 5. **Selection** – companies with a positive delta, ranked from highest delta down. A delta above **20%** is treated as abnormal and dropped. The top **10** per ETF are stored, with their rank.
 
@@ -244,7 +251,7 @@ Each fund is defined by a JSON **strategy**, for example:
 |-------|---------|
 | `holdings` | number of stocks in the fund |
 | `allocation` | `market_cap` or equal weighting (any other value) |
-| `benchmark` | which best ideas to use: `full_universe` (default) or `self` |
+| `benchmark` | which best ideas to use: `full_universe` (default – each ETF's region's blend benchmark), `full_value_growth_split` (US companies against the value or growth benchmark of their own style, International against the blend) or `self` (each ETF's own holdings, market-cap weighted) |
 | `cap.name` | `large` (the company passes its region's full-universe benchmark cutoff – step 6), `mid_small` (it doesn't), or anything else for no filter |
 | `style` | `value`, `growth`, or `blend`/`core` for no filter. A `blend` with `value`/`growth` percentages fills those shares of the fund from each style separately. |
 | `region` | `US`, `International`, or a `split` with `US`/`International` percentages (exactly these keys — any other key is rejected); omitted = no filter |
@@ -387,6 +394,8 @@ Funds can be restricted to value or growth stocks, so each company needs a `styl
 **Reference data (the weekly day)** – `modules/cron/categorize_downloader.py`
 
 A list of index-style ETFs with a known style and cap size is kept in `categorize_etf` by ticker: Vanguard's VUG / VTV (large growth / value) and VBK / VBR (small), and iShares' Morningstar ILCG / ILCV, IMCG / IMCV and ISCG / ISCV (large, mid and small growth / value). Their holdings are read from FMP (`etf/holdings`), and every stock constituent is resolved like a provider ETF's ([Registration](#registration)) into `categorize_ticker` with that ETF's style and cap type, plus a set of fundamental factors from FMP (growth rates, margins, valuation ratios, yields).
+
+**Refreshing styles from the reference ETFs (the daily run days, first)** – `ticker.refresh_style_from_reference_etfs()`. A style isn't set once and left: the US value / growth benchmarks split on it. Every company the reference ETFs currently hold – each ETF's latest stored holdings, a listing matched by symbol and exchange and counted for its company (master) – gets its style re-set: each reference ETF holding it is one vote for its style, and the majority wins. The two families overlap (many stocks are in both ILCG and ILCV, or VBK and VBR), so **a tie keeps the current style**. `cap_type` is set too when the ETFs holding it agree on one, and `type_from` becomes `CAT_ETF`. Companies no reference ETF holds (every International one) keep their style. The log counts the changes by direction.
 
 **Assigning style to tickers (the daily run days, after the master sync)** – `modules/ticker/style.py`, in order of preference, only for tickers with no style yet (the `type_from` column records the source):
 
