@@ -221,7 +221,7 @@ A manager's best ideas are the stocks they hold at a **higher weight than the ma
 
    `full_value_growth_split` needs no style for the ETF itself – a value fund's growth holdings are simply measured against the growth benchmark, where a large company weighs more than in the blend, so a value fund's out-of-style megacap (PVAL's Microsoft) no longer tops its best ideas. Funds that hold a mix are measured against both benchmarks at full strength, which ranks their largest holdings a little lower than against the blend (value ones more, ×2.3 vs ×1.75 the blend weight) – accepted by decision. The split is used when both style snapshots are dated as the blend's (they're formed together); otherwise the blend alone, with a notice.
 
-5. **Selection** – companies with a positive delta, ranked from highest delta down. A delta above **20%** is treated as abnormal and dropped. The top **10** per ETF are stored, with their rank.
+5. **Selection** – companies with a positive delta, ranked from highest delta down. A delta above **20%** is treated as abnormal and dropped. A company of **another region than the ETF's** (a US fund's TSMC, Shell or Brookfield – `ticker.region`, [Company market cap and region](#ticker-utilities)) keeps its weights but is never a best idea, in every mode: a fund only takes companies of its region from ETFs of its region ([Fund holdings formation](#8-fund-holdings-formation)), so such an idea could never be bought and would only push a usable one out of the ETF's top 10 (a fund with no region – none today – would lose these ideas). A Global ETF keeps them all. The top **10** per ETF are stored, with their rank.
 
 Problems (no recent download, stale holdings, quarantined duplicates, insufficient coverage, errors) are recorded in `batch_run_log`. The admin email has a table of the ETFs: holdings date, holdings priced out of all, best ideas stored in each mode, and their problems in short.
 
@@ -286,7 +286,7 @@ The result is stored in `fund_holding` (the holdings, with rank, source ETF, max
 
 ### 9. Fund analysis snapshot
 
-Every time a fund is recalculated, `fund_analysis` stores the full calculation behind it: for every ETF the fund could draw on, every company's market cap, whether a master was used, ETF weight, benchmark weight, delta, rank, and why it did or didn't become a best idea (`best_idea`, `delta<=0`, `delta>limit`, `beyond_top_N`, `no_market_cap`, `quarantined`). It is recomputed with the same functions as step 7 and cross-checked against the stored best ideas.
+Every time a fund is recalculated, `fund_analysis` stores the full calculation behind it: for every ETF the fund could draw on, every company's market cap, whether a master was used, ETF weight, benchmark weight, delta, rank, and why it did or didn't become a best idea (`best_idea`, `other_region`, `delta<=0`, `delta>limit`, `beyond_top_N`, `no_market_cap`, `quarantined`). It is recomputed with the same functions as step 7 and cross-checked against the stored best ideas.
 
 `scripts/report_fund_methodology.py` turns this into a readable export (see [Scripts](#scripts)).
 

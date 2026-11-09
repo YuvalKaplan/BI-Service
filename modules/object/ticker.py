@@ -817,3 +817,16 @@ def fetch_master_info_by_ids(ticker_ids: list[int]) -> dict[int, tuple[int | Non
                 return {row[0]: (row[1], row[2]) for row in cur.fetchall()}
     except Error as e:
         raise Exception(f"Error fetching master info by ids: {e}")
+
+
+def fetch_regions_by_ids(ticker_ids: list[int]) -> dict[int, str | None]:
+    """Returns {ticker_id: region} ('US' | 'International', the primary listing's - company.py)."""
+    if not ticker_ids:
+        return {}
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, region FROM ticker WHERE id = ANY(%s);", (ticker_ids,))
+                return {row[0]: row[1] for row in cur.fetchall()}
+    except Error as e:
+        raise Exception(f"Error fetching regions by ids: {e}")

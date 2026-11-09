@@ -29,6 +29,7 @@ class EtfInputs:
     holdings: list[ProviderEtfHolding]            # one per ticker (duplicate lines summed), priced only
     market_cap_values: list
     master_info: dict[int, tuple[int | None, float | None]]
+    regions: dict[int, str | None] = field(default_factory=dict)   # company (master) id -> ticker.region
     unpriced_ticker_ids: list[int] = field(default_factory=list)
     quarantined: list[QuarantinedHolding] = field(default_factory=list)
     total_holdings: int = 0                        # after aggregation, excluding quarantined
@@ -82,12 +83,14 @@ def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = N
         master_info[mid] = (None, cap)
 
     priced_ids = {v.ticker_id for v in market_cap_values}
+    company_ids = {(master_info.get(t, (None, None))[0] or t) for t in ticker_ids}
     return EtfInputs(
         etf=pe,
         holding_date=holding_date,
         holdings=[h for h in holdings if h.ticker_id in priced_ids],
         market_cap_values=market_cap_values,
         master_info=master_info,
+        regions=ticker.fetch_regions_by_ids(list(company_ids)),
         unpriced_ticker_ids=[h.ticker_id for h in holdings if h.ticker_id and h.ticker_id not in priced_ids],
         quarantined=quarantined,
         total_holdings=len(holdings),
@@ -193,12 +196,27 @@ def compute_active_weights(inputs: EtfInputs, universe: UniverseWeights | None =
         grouped["benchmark_weight"] = grouped["market_cap"] / total_market_cap
 
     grouped["delta"] = grouped["etf_weight"] - grouped["benchmark_weight"]
+
+    # A company of another region than the ETF's (a US fund's TSMC, Shell, Brookfield) keeps its
+    # weights (and its place in the self-mode cap weights) but is never one of the ETF's best
+    # ideas: every regional fund requires the company's region to be the ETF's
+    # (model_fund._eligibility_masks), so it could never be bought and would only push a usable
+    # idea out of the ETF's top MAX_BEST_IDEAS_PER_FUND. A fund with no region (none today)
+    # would lose these ideas. A Global ETF (no fund region) or a company with no region is kept.
+    etf_region = inputs.etf.region
+    grouped["region"] = grouped["ticker_id"].map(lambda t: inputs.regions.get(int(t)))
+    if etf_region in (company.US, company.INTERNATIONAL):
+        grouped["other_region"] = grouped["region"].notna() & (grouped["region"] != etf_region)
+    else:
+        grouped["other_region"] = False
     return grouped
 
 
 def select_best_ideas(weights: pd.DataFrame, limit: int | None = None) -> pd.DataFrame:
-    """Picks the best ideas from compute_active_weights' output, ranked by delta (row order = rank)."""
-    best_ideas = weights[weights["delta"] > 0].sort_values("delta", ascending=False)
+    """Picks the best ideas from compute_active_weights' output, ranked by delta (row order = rank),
+    leaving out companies of another region than the ETF's (compute_active_weights' other_region)."""
+    eligible = weights[~weights["other_region"].astype(bool)] if "other_region" in weights else weights
+    best_ideas = eligible[eligible["delta"] > 0].sort_values("delta", ascending=False)
 
     dropped = best_ideas[best_ideas["delta"] > HOLDING_DELTA_LIMIT_DROP_OFF]
     if not dropped.empty:
@@ -303,6 +321,8 @@ def build_analysis_rows(
         ranking = rank_by_ticker.get(ticker_id)
         if ranking is not None:
             note = 'best_idea'
+        elif r.get("other_region"):
+            note = 'other_region'
         elif r["delta"] <= 0:
             note = 'delta<=0'
         elif r["delta"] > HOLDING_DELTA_LIMIT_DROP_OFF:
