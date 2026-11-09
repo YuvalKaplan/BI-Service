@@ -32,6 +32,7 @@ class ValuationStats:
     already_valued: int = 0  # a value already stored for value_date
     validated: int = 0       # validated and stored now
     withheld: int = 0        # no data for the date, a mismatch in its grace period, or flagged invalid
+    rechecked: int = 0       # mismatch flags cleared to be checked again (revalidate)
 
 
 def summary(stats: ValuationStats) -> str:
@@ -44,7 +45,7 @@ def summary(stats: ValuationStats) -> str:
         f"- {stats.validated:,} validated",
         f"- {stats.already_valued:,} already valued",
         f"- {stats.withheld:,} withheld",
-    ])
+    ] + ([f"- {stats.rechecked:,} flagged on a mismatch checked again"] if stats.rechecked else []))
 
 
 def targets_for_tickers(tickers: list[Ticker]) -> list[ValueTarget]:
@@ -102,17 +103,26 @@ def store_values(targets: list[ValueTarget], value_date: date, stats: ValuationS
     return stats
 
 
-def run(value_date: date | None = None) -> ValuationStats:
+def run(value_date: date | None = None, revalidate: bool = False) -> ValuationStats:
     """
     The daily valuation pass: every ticker in use (targets_in_use) gets its validated value for
     value_date — by default the latest completed trading day (pricing.latest_value_date), the
     date the whole pipeline stores and reads values under.
+
+    revalidate (the generation day) first clears every flag set on a mismatch with FMP's history
+    (pricing.MISMATCH_REASON), so those in use are checked again in this pass: a flag isn't
+    permanent once FMP corrects its data or our rule takes the change (a share-count update set
+    Citigroup's NYSE line invalid in Oct 2026, and its XETRA line became the company's primary
+    listing, International). A ticker still mismatching is flagged again at once - its grace
+    period is long over; one no longer in use stays cleared, unused, until it's in use again.
     """
     value_date = value_date or pricing.latest_value_date()
     batch_run_id = batch_run.insert(batch_run.BatchRun(process='ticker_values', activation='auto'))
     log.record_status(f"Starting Ticker Values batch job ID {batch_run_id} for {value_date}")
     try:
         stats = ValuationStats(value_date=value_date)
+        if revalidate:
+            stats.rechecked = ticker.clear_invalid_with_prefix(pricing.MISMATCH_REASON)
         store_values(targets_in_use(value_date, stats), value_date, stats)
         batch_run.update_completed_at(batch_run_id)
         log.record_status(summary(stats) + "\n")
