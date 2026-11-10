@@ -376,16 +376,27 @@ def _fetch_and_select_by_style(
     return ideal, fetched
 
 
-def _fetch_and_select_by_region(
+@dataclass
+class RegionBucket:
+    """One region's share of a fund: its ideal holdings (in order, at most `target`), the ids of
+    every idea fetched for it (ideal and tolerated ranks), and its number of holdings."""
+    ideal: list
+    fetched_ids: set[int]
+    target: int
+
+
+def _select_region_buckets(
     strategy: Strategy,
     all_best_ideas_df: pd.DataFrame,
     held_ticker_ids: set[int] | None = None,
-) -> tuple[list, list]:
+) -> tuple[list[RegionBucket], list]:
     """
-    Returns (ideal, fetched).
-    - Split region (US + International both set): filters each region independently then combines by percentages.
-    - Name-only region ("US" or "International"): filters all holdings to that region.
-    - No region or unrecognised name: no region filter applied.
+    Returns (buckets, fetched).
+    - Split region (US + International both set): one bucket per region, each filtered
+      independently, with its percentage of the holdings as its target.
+    - Name-only region ("US" or "International"): one bucket, filtered to that region.
+    - No region or unrecognised name: one bucket, no region filter.
+    A region's buckets are disjoint: the US one excludes every company fetched for International.
     """
     region_split = strategy.region.split if strategy.region is not None else None
 
@@ -400,13 +411,26 @@ def _fetch_and_select_by_region(
 
         us_n_target   = round(strategy.holdings * region_split.US / 100)
         intl_n_target = strategy.holdings - us_n_target
-        us_n   = min(len(us_ideal),   us_n_target)
-        intl_n = min(len(intl_ideal), intl_n_target)
 
-        return us_ideal[:us_n] + intl_ideal[:intl_n], us_fetched + intl_fetched
+        return [
+            RegionBucket(us_ideal[:us_n_target], {i.ticker_id for i in us_fetched}, us_n_target),
+            RegionBucket(intl_ideal[:intl_n_target], intl_ticker_ids, intl_n_target),
+        ], us_fetched + intl_fetched
 
     country_type = strategy_country_types(strategy)[0]
-    return _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type=country_type, held_ticker_ids=held_ticker_ids)
+    ideal, fetched = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type=country_type, held_ticker_ids=held_ticker_ids)
+    return [RegionBucket(ideal, {i.ticker_id for i in fetched}, strategy.holdings)], fetched
+
+
+def _fetch_and_select_by_region(
+    strategy: Strategy,
+    all_best_ideas_df: pd.DataFrame,
+    held_ticker_ids: set[int] | None = None,
+) -> tuple[list, list]:
+    """Returns (ideal, fetched): every region's ideal holdings (US first with a split), and all
+    the ideas fetched. See _select_region_buckets."""
+    buckets, fetched = _select_region_buckets(strategy, all_best_ideas_df, held_ticker_ids)
+    return [i for b in buckets for i in b.ideal], fetched
 
 
 def strategy_country_types(strategy: Strategy) -> list[str]:
@@ -460,7 +484,8 @@ def generate(
     # _filter_and_aggregate) so one dropping below the large-cap threshold isn't force-sold
     # for that reason alone — it's still evaluated on ranking like any other candidate.
     held_ticker_ids = {ph.ticker_id for ph in previous_holdings}
-    ideal_holdings, fetched = _fetch_and_select_by_region(strategy, all_best_ideas_df, held_ticker_ids)
+    buckets, fetched = _select_region_buckets(strategy, all_best_ideas_df, held_ticker_ids)
+    ideal_holdings = [i for b in buckets for i in b.ideal]
 
     holdings_changed: List[FundHoldingChange] = []
     todays_holdings: List[FundHolding] = []
@@ -494,10 +519,19 @@ def generate(
             ph.holding_date = today
             todays_holdings.append(ph)
 
+        # Free places are filled region by region: each region's from its own ideal holdings, up
+        # to its target less the holdings it kept (in its ideal or tolerated - every kept holding
+        # is among its region's fetched ideas). A sold International holding is replaced by an
+        # International idea, not by the next US one; a region short of ideas isn't made up from
+        # the other. Kept holdings are never sold to restore the split: a region kept above its
+        # target (tolerated holdings) just leaves no room for buys until they're sold.
         missing = strategy.holdings - len(todays_holdings)
-        if missing > 0:
-            existing_ids = {th.ticker_id for th in todays_holdings}
-            for fi in ideal_holdings:
+        existing_ids = {th.ticker_id for th in todays_holdings}
+        for bucket in buckets:
+            room = min(missing, bucket.target - sum(1 for t in existing_ids if t in bucket.fetched_ids))
+            for fi in bucket.ideal:
+                if room <= 0:
+                    break
                 if fi.ticker_id in existing_ids:
                     continue
                 todays_holdings.append(FundHolding(
@@ -510,9 +544,8 @@ def generate(
                     top_delta_provider_etf_id=fi.source_etf_id, all_provider_etf_ids=fi.all_provider_ids,
                 ))
                 existing_ids.add(fi.ticker_id)
+                room -= 1
                 missing -= 1
-                if missing == 0:
-                    break
 
     if strategy.allocation == 'market_cap':
         apply_market_cap_weights(todays_holdings, mc_map)

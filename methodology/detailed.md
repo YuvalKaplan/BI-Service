@@ -278,7 +278,7 @@ Funds are re-evaluated on the weekly generation day, when their rebalancing peri
 | Still a best idea, but its rank has worsened by 5 or more (market-cap funds) / 2 or more (equal-weight) since it was bought | **Sell** – "dropped in ranking" |
 | Still a best idea, worsened by less | **Keep** – tolerated to limit turnover |
 
-Free positions are then filled from the ideal portfolio in order (**buys**). A held stock is not replaced merely because a better-ranked idea has appeared: positions are only freed by sells. Weights are then recalculated for the whole portfolio.
+Free positions are then filled from the ideal portfolio in order (**buys**); with a region split, region by region – each region's free positions from its own ideas, up to its share, so a sold international holding is replaced by an international idea. Holdings are never sold just to restore the split, and a region short of ideas isn't made up from the other. A held stock is not replaced merely because a better-ranked idea has appeared: positions are only freed by sells. Weights are then recalculated for the whole portfolio.
 
 Other maintenance rules:
 
