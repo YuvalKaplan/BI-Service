@@ -106,7 +106,7 @@ Each equity fund is profiled from its holdings against our company data and the 
 | Measure | How |
 |---------|-----|
 | **Region** | Share of the fund in US companies (by each company's primary listing – [§6](#6-company-data-and-data-quality)). ≥ 80% US → a US fund; ≤ 20% → an international fund; in between, neither. |
-| **Size** | Each stock large above its market's 70% breakpoint, small below the 90% one, mid between (Morningstar's approach, [§7](#7-large-cap-and-the-reference-benchmarks)). The fund is *large* with ≥ 70% large stocks, *small* with ≥ 50% small, *mid* with ≥ 50% mid, *smid* with ≥ 70% mid + small, otherwise *all-cap*. |
+| **Size** | Each stock large above its market's 70% breakpoint, small below the 90% one, mid between (Morningstar's approach). The fund is *large* with ≥ 70% large stocks, *small* with ≥ 50% small, *mid* with ≥ 50% mid, *smid* with ≥ 70% mid + small, otherwise *all-cap*. |
 | **Stock count** | Lines matching a stock the total-market index funds hold. |
 | **Sector concentration** | FMP's sector weights (else our companies' sectors): the largest sector. |
 | **Country concentration** | Our companies' country of domicile: the largest country. |
@@ -191,8 +191,6 @@ The lines therefore move with the market: when markets rise, so do the lines, an
 **Why 93% for the US.** The Russell 1000 – the large-cap index US large-cap managers are most often measured against, alongside the S&P 500, which covers much the same companies – makes up about 93% of the investable US market. Cutting the US benchmark at 93% coverage therefore gives the universe US large-cap managers compare themselves with, and measures their overweights against it.
 
 **Why 80% for International.** The international index providers draw two main lines: MSCI and FTSE call the top 70% of each market *large cap*, and the top 85% *large + mid cap* (MSCI's Standard indexes, such as MSCI EAFE and MSCI ACWI ex US, the benchmarks international large-cap managers usually report against). 80% is the mid point between those two options: in September 2026, 70% is about $15B, 80% about $7.4B and 85% about $5B. It also puts International large cap reasonably close in size to the US line (about $10.1B at 93%). The same 93% coverage would not: the international market is spread over many more companies in many smaller markets, so 93% of it reaches down to about $2B.
-
-The 70% and 90% lines of each market are used only to size the managers ([§4](#4-the-managers-actively-managed-us-and-international-equity-etfs)).
 
 **Applying the line to a company.** A company is **large cap** when its **whole market cap** – every share class, listed or not, not only the floating part – is at or above its region's breakpoint, and at least **10% of it floats**. This is the S&P / Russell convention: the line is drawn on the investable market, a company is measured on its whole size, and a minimum float keeps out companies investors can barely buy. To be sure no company that could pass is missed, the weekly screen of listed companies goes down to 80% of the lower of the two lines.
 
