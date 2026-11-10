@@ -276,7 +276,7 @@ The candidates are then combined per company: its best (lowest) rank across the 
 - A current holding that is still in the ideal list is kept.
 - A current holding that is no longer among the best ideas at all is **sold** ("Not in best ideas top levels").
 - A current holding that is still a best idea but whose rank has worsened by 5 or more (market-cap funds) or 2 or more (equal-weight funds) is **sold** ("Dropped below min ranking"). A smaller slip is tolerated – it keeps turnover down.
-- Free slots are filled from the ideal list in order (**buys**).
+- Free slots are filled from the ideal list in order (**buys**). With a region split, region by region (`model_fund._select_region_buckets`): each region's free slots – its target less the holdings it kept, ideal or tolerated – from its own ideal list, so a sold International holding is replaced by an International idea. Kept holdings are never sold to restore the split (a region kept above its target gets no buys until they go), and a region short of ideas isn't made up from the other.
 - If no ideal holdings can be found, the previous holdings are carried over unchanged.
 
 **Weighting.**
