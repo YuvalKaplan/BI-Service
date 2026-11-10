@@ -181,16 +181,21 @@ FMP's free float and the total-market index funds' holdings give each company a 
 3. **Line the companies up from largest to smallest and keep a running total** of their float-adjusted value, as a share of the whole market's.
 4. **The breakpoint at a coverage *c* is the size of the company at which the running total reaches *c*.** Every company at least that large is in the market's top *c*.
 
-The lines therefore move with the market: when markets rise, so do the lines, and "large cap" keeps meaning the same slice of each market:
+The lines therefore move with the market: when markets rise, so do the lines, and "large cap" keeps meaning the same slice of each market. As of September 2026:
 
-| | Coverage | Breakpoint (September 2026) | Convention |
-|---|---|---|---|
-| **US large cap** | 93% | about $10.1B | the share of the US market the Russell 1000 represents |
-| **International large cap** | 80% | about $7.4B | the mid point between MSCI / FTSE large cap (70%) and large + mid cap (85%) |
+| Coverage | US | International |
+|----------|----|---------------|
+| 70% | $94B | $15B |
+| 80% | $50B | **$7.4B – International benchmark** |
+| 90% | $16B | $3.1B |
+| 93% | **$10.1B – US benchmark** | $2.2B |
+
+- **US large cap**: 93% coverage.
+- **International large cap**: 80% coverage.
 
 **Why 93% for the US.** The Russell 1000 – the large-cap index US large-cap managers are most often measured against, alongside the S&P 500, which covers much the same companies – makes up about 93% of the investable US market. Cutting the US benchmark at 93% coverage therefore gives the universe US large-cap managers compare themselves with, and measures their overweights against it.
 
-**Why 80% for International.** The international index providers draw two main lines: MSCI and FTSE call the top 70% of each market *large cap*, and the top 85% *large + mid cap* (MSCI's Standard indexes, such as MSCI EAFE and MSCI ACWI ex US, the benchmarks international large-cap managers usually report against). 80% is the mid point between those two options: in September 2026, 70% is about $15B, 80% about $7.4B and 85% about $5B. It also puts International large cap reasonably close in size to the US line (about $10.1B at 93%). The same 93% coverage would not: the international market is spread over many more companies in many smaller markets, so 93% of it reaches down to about $2B.
+**Why 80% for International.** The international index providers draw two main lines: MSCI and FTSE call the top 70% of each market *large cap*, and the top 85% *large + mid cap* (MSCI's Standard indexes, such as MSCI EAFE and MSCI ACWI ex US, the benchmarks international large-cap managers usually report against). 80% is the mid point between those two options (85% is about $5B in September 2026; the others are in the table above). It also puts International large cap reasonably close in size to the US line (about $10.1B at 93%). The same 93% coverage would not: the international market is spread over many more companies in many smaller markets, so 93% of it reaches down to about $2B.
 
 **Applying the line to a company.** A company is **large cap** when its **whole market cap** – every share class, listed or not, not only the floating part – is at or above its region's breakpoint, and at least **10% of it floats**. This is the S&P / Russell convention: the line is drawn on the investable market, a company is measured on its whole size, and a minimum float keeps out companies investors can barely buy. To be sure no company that could pass is missed, the weekly screen of listed companies goes down to 80% of the lower of the two lines.
 
