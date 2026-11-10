@@ -1,6 +1,6 @@
 # Best Ideas – Investment Methodology
 
-How the model funds are populated and maintained: which managers we listen to, where the data comes from, how a manager's "best ideas" are measured, and how those ideas become a portfolio. It is written for investment professionals; the software side of the same process is in [README.md](README.md).
+How the model funds are populated and maintained: which managers we listen to, where the data comes from, how a manager's "best ideas" are measured, and how those ideas become a portfolio. It is written for investment professionals; the software side of the same process is in [README.md](../README.md).
 
 Figures quoted "as of" a date are illustrations of the rules at that date, not parameters – the parameters are listed in [Appendix A](#appendix-a--parameter-reference).
 

@@ -2,7 +2,7 @@
 
 Services that collect the published holdings of actively managed ETFs, work out which stocks each manager is most convinced about (their "best ideas"), and turn those ideas into model fund portfolios.
 
-For the investment methodology behind it (sources, techniques and reasoning, written for finance professionals) see [METHODOLOGY.md](METHODOLOGY.md).
+For the investment methodology behind it (sources, techniques and reasoning, written for finance professionals) see [methodology/detailed.md](methodology/detailed.md); strategy-specific versions, generated from it, are alongside it in [methodology/](methodology/).
 
 The same codebase runs in three ways:
 
