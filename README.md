@@ -112,9 +112,9 @@ The ETFs come from the [SEC active ETF list](#sec-active-etf-list), not from con
 | Region | US or International (a Global fund has no benchmark and no fund to feed) |
 | Cap size | `large` or `all` |
 | Stock holdings | 20 to 200 (lines matching an index fund's stock) |
-| Top sector | at most 40% of the fund (FMP's sector weights; when FMP has none, our tickers' sectors) |
+| Top sector | at most 50% of the fund (FMP's sector weights; when FMP has none, our tickers' sectors) |
 | Top country | at most 50% of the fund in one country – or a US fund whose top country is the US (a single-country fund otherwise: Japan, China, India funds) |
-| Emerging markets | an International fund at most 40% in emerging markets – stocks VWO holds, FTSE's view (Korea developed) – so International means developed international |
+| Emerging markets | an International fund at most 50% in emerging markets – stocks VWO holds, FTSE's view (Korea developed) – so International means developed international |
 | Holdings date | its latest holdings in `provider_etf_holding` at most 14 days old (FMP refreshes most funds weekly; two weeks covers the longest fund look-back) |
 
 A value we don't know fails its rule. A fund that moved to another trust is on the SEC list twice under one ticker until its old series drops off (BRIF and TGLR in September 2026) – only the one with the latest filing can be active; the other fails as a **duplicate** (it would download the same holdings and count twice in the funds). Otherwise the ETF is **inactive** – except one that passes everything but has no holdings downloaded yet, which stays **pending** (every new ETF's status) until its first download. The rules run after every profile run (the monthly SEC list update) and every holdings download (step 2), so a new ETF on the SEC list that passes is downloaded from the next daily run. The selection also sets each ETF's `benchmark_id` – its region's large-cap blend benchmark (step 6). There's no reason column: the admin email counts the ETFs by status and lists those that changed status, and [`scripts/current_sec_active_etfs.py`](#sec-data) writes each ETF's failed rules.
@@ -542,6 +542,16 @@ python scripts/sim_fund.py --dev         # 3. run the fund simulation (edit fund
 
 After a simulation, `scripts/report_fund_methodology.py` can explain any of the simulated dates.
 
+### Replaying the live funds
+
+`scripts/funds_replay.py` rebuilds the live funds' history with the current code and data – after a methodology fix or a data correction, or to give a new fund a history – so the cron carries on from it. Unlike the simulation it works from what the live pipeline stored each week, replays every active fund together, and runs on production (after typing a confirmation). Edit `INCEPTION_DATE` at the top; the replay covers every generation day from it to the day before it's run, so run it on a day the cron doesn't generate, or before that day's run.
+
+1. **Companies and benchmarks** (`REBUILD_BENCHMARKS`, on by default) – every stored weekly screen a generation day uses (the latest on or before the day before it, as live) is rebuilt: the screened companies (step 5 – today's companies, regions and validated values) and every enabled benchmark (step 6 – that date's breakpoints, today's float factors and styles). So each week gets every benchmark enabled since – the US value / growth split.
+2. **Erase** – the active funds' `fund_holding`, `fund_holding_change` and `fund_analysis`, and every best idea from the first generation day's look-back (14 days) on.
+3. **Replay** – on every generation day, best ideas for all active ETFs (step 7) and every active fund (steps 8–9), recalculated when its `recalc_frequency_days` have passed – the cron's own steps.
+
+Report: `.output/funds_replay_<first day>_to_<last day>.txt` – each fund's buys, sells and holdings at every recalculation. The ETFs are today's active ones throughout (no history of the selection is kept).
+
 ---
 
 ## Backtesting
@@ -608,6 +618,7 @@ All scripts are run from the project root with the virtual environment active. C
 | `scripts/sim_prep_data.py` | Simulation step 1 – screen, ticker profiles, values, master sync and company builder; see [Simulation](#simulation). |
 | `scripts/sim_benchmark.py` | Simulation step 2 – historical weekly benchmarks. |
 | `scripts/sim_fund.py` | Simulation step 3 – replays one fund. Development only. |
+| `scripts/funds_replay.py` | Replays **every active fund** from scratch since `INCEPTION_DATE`, development or production – see [Replaying the live funds](#replaying-the-live-funds). |
 | `scripts/report_fund_methodology.py` | Read-only. For a `fund_id` and date (default: the fund's inception), writes to `.output/methodology/<fund>_<id>_<date>/`: `README.md` (strategy, constants, methodology), `etfs/<etf>_<id>.xlsx` (each ETF's holdings and active-weight calculation), `benchmark.xlsx`, `best_ideas.xlsx` (every idea and which fund filter it passed or failed) and `fund.xlsx` (holdings with their justification, and the candidates not selected). |
 
 ### SEC data

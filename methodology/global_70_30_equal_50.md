@@ -28,7 +28,7 @@ Figures quoted "as of" a date illustrate the rules at that date; they are not pa
 
 ## 1. The idea
 
-An active manager's portfolio mixes two things: positions held because the manager has a view, and positions held to stay close to a benchmark, control risk or stay diversified. The positions the manager holds **well above their market weight** are the ones they are most willing to be wrong about – their highest-conviction calls, their *best ideas*. Academic work on mutual funds (Cohen, Polk and Silli, *Best Ideas*, 2010) found that managers' largest overweights outperformed, while the rest of the portfolio largely did not.
+An active manager's portfolio mixes two things: positions held because the manager has a view, and positions held to stay close to a benchmark, control risk or stay diversified. The positions the manager holds **well above their market weight** are the ones they are most willing to be wrong about – their highest-conviction calls, their *best ideas*. Academic work on mutual funds (Cohen, Polk and Silli, *Best Ideas*, updated 2021) found that managers' largest overweights outperformed, while the rest of the portfolio largely did not.
 
 The fund applies this across the population of US-listed, actively managed, diversified equity ETFs – those investing in US companies and those investing internationally:
 
@@ -121,9 +121,9 @@ A profiled equity fund is one of the fund's managers (**active**) when it passes
 | Region | A US fund (≥ 80% US) or an international fund (≤ 20% US) | Each manager's overweights are measured against one market. |
 | Size | Large or all-cap | Small- and mid-cap managers' overweights are measured against a different opportunity set. |
 | Number of stocks | 20 to 200 | Fewer than 20 is a concentrated fund where every holding is an overweight; above 200 the fund is close to an index and its tilts are small. |
-| Top sector | ≤ 40% of the fund | A sector fund's overweights reflect its mandate, not stock selection. |
+| Top sector | ≤ 50% of the fund | A sector fund's overweights reflect its mandate, not stock selection. |
 | Top country | ≤ 50% of an international fund | Single-country funds (Japan, India, China) – same reason. |
-| Emerging markets | ≤ 40% of an international fund | International managers are diversified, mostly developed-market managers. |
+| Emerging markets | ≤ 50% of an international fund | International managers are diversified, mostly developed-market managers. |
 | Holdings freshness | Latest holdings ≤ 14 days old | Ideas must be current. |
 | Duplicate | Only one row per fund | A fund moved to a new trust is briefly listed twice under one ticker; it must count once. |
 
@@ -174,7 +174,14 @@ FMP's free float and the total-market index funds' holdings give each company a 
 
 "Large cap" is defined the way the index providers define it – as the **largest companies making up a given share of the market** – rather than at a fixed dollar line, which drifts with markets and means different things in different markets.
 
-The market is what the Vanguard total-market funds hold, each company at its float-adjusted size: VTI for the US; VEA + VWO for international. Each week, the **breakpoint** at coverage *c* is the company size at which the market's largest companies reach *c* of its total float-adjusted value:
+**How the line is drawn.** Each week, for each market:
+
+1. **Take the whole market** – what the Vanguard total-market index funds hold: VTI (CRSP US Total Market) for the US; VEA + VWO (FTSE Developed ex US and FTSE Emerging, China A shares included) for international. Between them they hold nearly every listed company.
+2. **Measure each company's investable size.** A company's float-adjusted market value – the value of its shares actually available to investors – is read from the index fund's position in it: the fund holds every company in proportion to its float, so its position, scaled up to the whole market, gives the company's float-adjusted value. Several listings or share classes of one company are added together, and a company held by both markets counts as US. China A shares, which the index holds at only a quarter of their weight, are scaled up to their full size first.
+3. **Line the companies up from largest to smallest and keep a running total** of their float-adjusted value, as a share of the whole market's.
+4. **The breakpoint at a coverage *c* is the size of the company at which the running total reaches *c*.** Every company at least that large is in the market's top *c*.
+
+The lines therefore move with the market: when markets rise, so do the lines, and "large cap" keeps meaning the same slice of each market:
 
 | | Coverage | Breakpoint (September 2026) | Convention |
 |---|---|---|---|
@@ -183,7 +190,7 @@ The market is what the Vanguard total-market funds hold, each company at its flo
 
 The 70% and 90% lines of each market are used only to size the managers ([§4](#4-the-managers-actively-managed-us-and-international-equity-etfs)).
 
-A company is **large cap** when its **whole market cap** is at or above its region's breakpoint and at least **10% of it floats** – the S&P / Russell convention: size measured on the whole company, with a minimum float.
+**Applying the line to a company.** A company is **large cap** when its **whole market cap** – every share class, listed or not, not only the floating part – is at or above its region's breakpoint, and at least **10% of it floats**. This is the S&P / Russell convention: the line is drawn on the investable market, a company is measured on its whole size, and a minimum float keeps out companies investors can barely buy. To be sure no company that could pass is missed, the weekly screen of listed companies goes down to 80% of the lower of the two lines.
 
 ### The reference benchmarks
 
@@ -333,8 +340,8 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Manager: region | ≥ 80% US (US) / ≤ 20% US (international) |
 | Manager: size | Large or all-cap |
 | Manager: number of stocks | 20–200 |
-| Manager: top sector | ≤ 40% |
-| International manager: top country / emerging markets | ≤ 50% / ≤ 40% |
+| Manager: top sector | ≤ 50% |
+| International manager: top country / emerging markets | ≤ 50% / ≤ 50% |
 | Manager style (for US company style, step 2) | ≥ 60% of style-classified holdings |
 | Holdings: maximum age | 14 days |
 | Market cap: validation window | 21 days; excluded after 5 days without a good value |
