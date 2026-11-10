@@ -190,7 +190,7 @@ Forms every enabled benchmark of the `benchmark` table from the latest stored sc
 | US Large Cap Blend | `US` | `large` | `blend` | 0.93 – the Russell 1000's share of the market | ~$10.1B (~720 companies) |
 | US Large Cap Value | `US` | `large` | `value` | 0.93 | the same cutoff: the blend's value companies |
 | US Large Cap Growth | `US` | `large` | `growth` | 0.93 | the same cutoff: the blend's growth companies |
-| Intl Large Cap Blend | `International` | `large` | `blend` | 0.80 | ~$7.4B |
+| Intl Large Cap Blend | `International` | `large` | `blend` | 0.80 – the mid point of MSCI / FTSE's large (70%) and large + mid (85%) | ~$7.4B |
 
 **The US value / growth split.** US Large Cap Value and Growth have the blend's region, cap type and `market_coverage`, so they hold exactly the blend's companies of each style (a company of neither style – `blend` or unknown, ~0.1% of the weight – is in the blend only), each re-weighted to 100%. Each company goes wholly to one side, by its `ticker.style_type` ([Style](#style-value--growth)). They don't change which benchmark an ETF links to (its region's blend); they're used by its `full_value_growth_split` best ideas ([Best ideas](#7-best-ideas)). International has no split: none of the style reference ETFs is international, and a third of its benchmark has no style.
 

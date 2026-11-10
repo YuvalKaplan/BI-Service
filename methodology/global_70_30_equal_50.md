@@ -186,7 +186,20 @@ The lines therefore move with the market: when markets rise, so do the lines, an
 | | Coverage | Breakpoint (September 2026) | Convention |
 |---|---|---|---|
 | **US large cap** | 93% | about $10.1B | the share of the US market the Russell 1000 represents |
-| **International large cap** | 80% | about $7.4B | the developed + emerging large-cap segment in the MSCI / FTSE tradition |
+| **International large cap** | 80% | about $7.4B | the mid point between MSCI / FTSE large cap (70%) and large + mid cap (85%) |
+
+**Why 93% for the US.** The Russell 1000 – the large-cap index US large-cap managers are most often measured against, alongside the S&P 500, which covers much the same companies – makes up about 93% of the investable US market. Cutting the US benchmark at 93% coverage therefore gives the universe US large-cap managers compare themselves with, and measures their overweights against it.
+
+**Why 80% for International.** The international index providers draw two main lines: MSCI and FTSE call the top 70% of each market *large cap*, and the top 85% *large + mid cap* (MSCI's Standard indexes, such as MSCI EAFE and MSCI ACWI ex US, the benchmarks international large-cap managers usually report against). 80% is the mid point between those two options:
+
+| International coverage | Breakpoint (Sep 2026) | What it is |
+|---|---|---|
+| 70% | about $15B | MSCI / FTSE large cap only – stricter than the US line |
+| **80%** | **about $7.4B** | **the mid point between the two – used here** |
+| 85% | about $5B | MSCI / FTSE large + mid cap (MSCI EAFE, ACWI ex US) |
+| 93% | about $2.2B | the US coverage applied abroad – deep into mid and small caps |
+
+It also puts International large cap reasonably close in size to the US line (about $10.1B at 93%). The same 93% coverage would not: the international market is spread over many more companies in many smaller markets, so 93% of it reaches down to about $2B.
 
 The 70% and 90% lines of each market are used only to size the managers ([§4](#4-the-managers-actively-managed-us-and-international-equity-etfs)).
 

@@ -90,7 +90,7 @@ Synthetic benchmarks are defined by the rows of the `benchmark` table (`region`,
 |-----------|--------|-------------------|-------------------|
 | US Large Cap Blend | US | 0.93 (Russell 1000 level) | ~$10.1B |
 | US Large Cap Value / Growth | US | 0.93 | the blend's (style split) |
-| Intl Large Cap Blend | International | 0.80 | ~$7.4B |
+| Intl Large Cap Blend | International | 0.80 (mid point of MSCI/FTSE large 70% and large + mid 85%) | ~$7.4B |
 
 **US value / growth split** (migration 18, by decision Nov 2026): `US Large Cap Value` / `US Large Cap Growth` are `benchmark` rows with the blend's region, cap_type and market_coverage, so `select_holdings` gives each exactly the blend's companies of that `ticker.style_type` (a company of neither style is in the blend only), re-weighted. `benchmark.fetch_style_split(blend_id)` finds them. `provider_etf.benchmark_id` still points at the blend; in the `full_value_growth_split` mode (`full_universe` stays the blend alone), `best_ideas_generator.get_full_universe_weights(..., style_split=True)` (best ideas and `funds_update._record_fund_analysis`) gives each company the weight of **its own style's benchmark** (`UniverseWeights.benchmark_of`; else the blend's), and all the ETF's deltas are ranked together — no ETF style needed. Used only when both style snapshots share the blend's date (else the blend alone, with a notice). Accepted trade-off: mixed funds' large holdings rank lower than against the blend (value ×2.33, growth ×1.75 the blend weight). International has no split (no international style reference ETFs; ~31% of its benchmark has no style). `fund_analysis.benchmark_id` is per company row (the benchmark its weight came from); the methodology export shows it per company.
 

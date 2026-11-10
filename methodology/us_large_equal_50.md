@@ -174,7 +174,9 @@ FMP's free float and the total-market index fund's holdings give each company a 
 1. **Take the whole market** – what the Vanguard Total Stock Market ETF (VTI, CRSP US Total Market) holds: nearly every listed US company.
 2. **Measure each company's investable size.** A company's float-adjusted market value – the value of its shares actually available to investors – is read from VTI's position in it: the fund holds every company in proportion to its float, so its position, scaled up to the whole market, gives the company's float-adjusted value. Several listings or share classes of one company are added together.
 3. **Line the companies up from largest to smallest and keep a running total** of their float-adjusted value, as a share of the whole market's.
-4. **The breakpoint is the size of the company at which the running total reaches 93%** – the share of the US market the Russell 1000 represents. Every company at least that large is in the top 93% of the market: about $10.1B in September 2026.
+4. **The breakpoint is the size of the company at which the running total reaches 93%.** Every company at least that large is in the top 93% of the market: about $10.1B in September 2026.
+
+**Why 93% for the US.** The Russell 1000 – the large-cap index US large-cap managers are most often measured against, alongside the S&P 500, which covers much the same companies – makes up about 93% of the investable US market. Cutting the US benchmark at 93% coverage therefore gives the universe US large-cap managers compare themselves with, and measures their overweights against it.
 
 The line therefore moves with the market: when markets rise, so does the line, and "large cap" keeps meaning the same slice of the market. The same running total gives the 70% and 90% lines ($94B and $16B), used only to size the managers ([§4](#4-the-managers-actively-managed-us-equity-etfs)).
 
