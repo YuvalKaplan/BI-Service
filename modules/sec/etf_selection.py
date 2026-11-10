@@ -46,9 +46,9 @@ REGIONS = ('US', 'International')
 CAP_TYPES = ('large', 'all')
 MIN_STOCK_HOLDINGS = 20
 MAX_STOCK_HOLDINGS = 200
-MAX_TOP_SECTOR_WEIGHT = 0.40
+MAX_TOP_SECTOR_WEIGHT = 0.50
 MAX_TOP_COUNTRY_WEIGHT = 0.50
-MAX_EMERGING_WEIGHT = 0.40
+MAX_EMERGING_WEIGHT = 0.50
 MAX_HOLDINGS_AGE_DAYS = 14
 
 EQUITY = 'equity'   # the profile's strategy for an actively managed equity fund (etf_profile.classify)

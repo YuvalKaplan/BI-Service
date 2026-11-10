@@ -65,6 +65,18 @@ def insert_bulk(provider_etf_id: int, value_date: date, benchmark_mode: str, row
         raise Exception(f"Error inserting Best Ideas in bulk: {e}")
 
 
+def delete_from(value_date: date) -> int:
+    """Deletes every best idea dated on or after value_date (scripts/funds_replay.py regenerates
+    them); returns the number of rows deleted."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute('DELETE FROM best_idea WHERE value_date >= %s', (value_date,))
+                return cur.rowcount
+    except Error as e:
+        raise Exception(f"Error deleting Best Ideas from {value_date}: {e}")
+
+
 def fetch_for_etf_date(provider_etf_id: int, value_date: date, benchmark_mode: str) -> List[BestIdea]:
     try:
         with db_pool_instance.get_connection() as conn:

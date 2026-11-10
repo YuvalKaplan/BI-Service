@@ -28,7 +28,7 @@ Figures quoted "as of" a date illustrate the rules at that date; they are not pa
 
 ## 1. The idea
 
-An active manager's portfolio mixes two things: positions held because the manager has a view, and positions held to stay close to a benchmark, control risk or stay diversified. The positions the manager holds **well above their market weight** are the ones they are most willing to be wrong about – their highest-conviction calls, their *best ideas*. Academic work on mutual funds (Cohen, Polk and Silli, *Best Ideas*, 2010) found that managers' largest overweights outperformed, while the rest of the portfolio largely did not.
+An active manager's portfolio mixes two things: positions held because the manager has a view, and positions held to stay close to a benchmark, control risk or stay diversified. The positions the manager holds **well above their market weight** are the ones they are most willing to be wrong about – their highest-conviction calls, their *best ideas*. Academic work on mutual funds (Cohen, Polk and Silli, *Best Ideas*, updated 2021) found that managers' largest overweights outperformed, while the rest of the portfolio largely did not.
 
 The fund applies this across the population of US-listed, actively managed, diversified US equity ETFs:
 
@@ -118,7 +118,7 @@ A profiled equity fund is one of the fund's managers (**active**) when it passes
 | US | At least 80% of the fund in US companies | The managers' overweights are measured against the US market. |
 | Size | Large or all-cap | Small- and mid-cap managers' overweights are measured against a different opportunity set. |
 | Number of stocks | 20 to 200 | Fewer than 20 is a concentrated fund where every holding is an overweight; above 200 the fund is close to an index and its tilts are small. |
-| Top sector | ≤ 40% of the fund | A sector fund's overweights reflect its mandate, not stock selection. |
+| Top sector | ≤ 50% of the fund | A sector fund's overweights reflect its mandate, not stock selection. |
 | Holdings freshness | Latest holdings ≤ 14 days old | Ideas must be current. |
 | Duplicate | Only one row per fund | A fund moved to a new trust is briefly listed twice under one ticker; it must count once. |
 
@@ -169,9 +169,16 @@ FMP's free float and the total-market index fund's holdings give each company a 
 
 "Large cap" is defined the way the index providers define it – as the **largest companies making up a given share of the market** – rather than at a fixed dollar line, which drifts with markets (a fixed $10B line would today call many mid-cap funds large).
 
-The market is what the Vanguard Total Stock Market ETF (VTI) holds, each company at its float-adjusted size. Each week, the **breakpoint** at coverage *c* is the company size at which the largest companies reach *c* of the market's total float-adjusted value. **US large cap is 93% coverage – the share of the US market the Russell 1000 represents**: about $10.1B in September 2026. The 70% and 90% lines ($94B and $16B) are used only to size the managers ([§4](#4-the-managers-actively-managed-us-equity-etfs)).
+**How the line is drawn.** Each week:
 
-A company is **large cap** when its **whole market cap** is at or above the breakpoint and at least **10% of it floats** – the S&P / Russell convention: size measured on the whole company, with a minimum float.
+1. **Take the whole market** – what the Vanguard Total Stock Market ETF (VTI, CRSP US Total Market) holds: nearly every listed US company.
+2. **Measure each company's investable size.** A company's float-adjusted market value – the value of its shares actually available to investors – is read from VTI's position in it: the fund holds every company in proportion to its float, so its position, scaled up to the whole market, gives the company's float-adjusted value. Several listings or share classes of one company are added together.
+3. **Line the companies up from largest to smallest and keep a running total** of their float-adjusted value, as a share of the whole market's.
+4. **The breakpoint is the size of the company at which the running total reaches 93%** – the share of the US market the Russell 1000 represents. Every company at least that large is in the top 93% of the market: about $10.1B in September 2026.
+
+The line therefore moves with the market: when markets rise, so does the line, and "large cap" keeps meaning the same slice of the market. The same running total gives the 70% and 90% lines ($94B and $16B), used only to size the managers ([§4](#4-the-managers-actively-managed-us-equity-etfs)).
+
+**Applying the line to a company.** A company is **large cap** when its **whole market cap** – every share class, listed or not, not only the floating part – is at or above the breakpoint, and at least **10% of it floats**. This is the S&P / Russell convention: the line is drawn on the investable market, a company is measured on its whole size, and a minimum float keeps out companies investors can barely buy. To be sure no company that could pass is missed, the weekly screen of listed companies goes down to 80% of the line.
 
 ### The value and growth benchmarks
 
@@ -308,7 +315,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Manager: minimum US share | 80% |
 | Manager: size | Large or all-cap |
 | Manager: number of stocks | 20–200 |
-| Manager: top sector | ≤ 40% |
+| Manager: top sector | ≤ 50% |
 | Manager style (for company style, step 2) | ≥ 60% of style-classified holdings |
 | Holdings: maximum age | 14 days |
 | Market cap: validation window | 21 days; excluded after 5 days without a good value |
