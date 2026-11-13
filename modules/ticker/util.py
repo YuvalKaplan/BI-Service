@@ -80,8 +80,25 @@ EXCHANGE_COUNTRY: dict[str, str] = {
 }
 
 # Exchanges whose listings make a company "US-listed" for region purposes (OTC excluded:
-# it mostly carries foreign companies' unsponsored ADRs).
-US_LISTING_EXCHANGES: set[str] = {'NYSE', 'NASDAQ', 'AMEX'}
+# it mostly carries foreign companies' unsponsored ADRs). Cboe Global Markets is listed on its
+# own exchange (FMP: CBOE) - left out, it was the one US company called International.
+US_LISTING_EXCHANGES: set[str] = {'NYSE', 'NASDAQ', 'AMEX', 'CBOE'}
+
+# Countries companies are incorporated in for legal / tax reasons rather than run from (Bermuda,
+# Cayman, BVI, the Channel Islands, Isle of Man, the ship registries Liberia and the Marshall
+# Islands, the Bahamas, Curaçao, Gibraltar): neither FMP's country nor an ISIN from one tells
+# where a company belongs (Viking, XP, Nu, Credicorp, Amer Sports, Birkenstock).
+TAX_HAVEN_COUNTRIES: set[str] = {'BM', 'KY', 'VG', 'JE', 'GG', 'IM', 'LR', 'MH', 'BS', 'CW', 'GI'}
+# ISIN prefixes that aren't a country (Euroclear / Clearstream international securities, EU).
+_NON_COUNTRY_ISIN_PREFIXES: set[str] = {'XS', 'EU'}
+
+
+def isin_country(isin: str | None) -> str | None:
+    """The country of an ISIN's issuer (its first two letters) - the country of incorporation for
+    ordinary shares; a depositary receipt carries the depositary's (US for an ADR)."""
+    if not isin or len(isin) < 2 or not isin[:2].isalpha() or isin[:2].upper() in _NON_COUNTRY_ISIN_PREFIXES:
+        return None
+    return isin[:2].upper()
 
 # Extra countries counted as a company's home market beyond its own (HK-listed Chinese companies).
 HOME_COUNTRY_ALIASES: dict[str, set[str]] = {'CN': {'HK'}}

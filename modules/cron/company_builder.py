@@ -23,6 +23,7 @@ class CompanyBuildStats:
     non_equity: list[str] = field(default_factory=list)          # left out: a note / preferred line (company.is_non_equity_line)
     foreign_duplicates: list[str] = field(default_factory=list)  # skipped: foreign line of a company already in
     foreign_currency: list[str] = field(default_factory=list)    # skipped: foreign line quoted in another currency
+    foreign_us_issued: list[str] = field(default_factory=list)   # skipped: foreign line with a US ISIN (a US security's mirror)
     foreign_admitted: list[str] = field(default_factory=list)    # foreign line admitted (company not found elsewhere)
     duplicate_companies: list[str] = field(default_factory=list) # dropped by the company-level duplicate guard
     us_companies: int = 0
@@ -40,6 +41,7 @@ def summary(stats: CompanyBuildStats) -> str:
         f"- {len(stats.foreign_admitted):,} foreign lines admitted",
         f"- {len(stats.foreign_duplicates):,} foreign duplicate lines skipped",
         f"- {len(stats.foreign_currency):,} other-currency lines skipped",
+        f"- {len(stats.foreign_us_issued):,} US-issued foreign lines skipped",
         f"- {len(stats.duplicate_companies):,} duplicate companies dropped",
     ])
 
@@ -105,8 +107,11 @@ def _screen_foreign_lines(
     not a listing of an admitted company (after the master sync), no ISIN shared with
     one, no company name (depositary descriptors cut) matching one of the same domicile — and
     whose FMP currency is their exchange's (a line quoted in another currency is a mirror of
-    another market's data: Toyota on LSE in JPY). What's left is a company listed only outside
-    its domicile: dsm-firmenich (CH) in Amsterdam, Prada (IT) in Hong Kong.
+    another market's data: Toyota on LSE in JPY), and whose ISIN isn't a US one (a US-issued
+    security traded abroad is a mirror of one traded in the US - PCG6 in Frankfurt is Pacific Gas
+    & Electric's preferred PCG-PA, under PG&E's whole cap; a company's own US line comes in as a
+    home line). What's left is a company listed only outside its domicile: dsm-firmenich (CH) in
+    Amsterdam, Prada (IT) in Hong Kong.
     """
     all_t = ticker.fetch_all()
     by_id, company_of = _company_index(all_t)
@@ -142,9 +147,15 @@ def _screen_foreign_lines(
             stats.foreign_duplicates.append(f"{describe(l)} — name matches {match}")
             continue
         currency = known.currency if known and known.currency else None
-        if currency is None:
+        isin = known.isin if known and known.isin else None
+        if currency is None or isin is None:
             profile = api_stocks.get_stock_profile(l.symbol)
-            currency = profile.get('currency') if isinstance(profile, dict) else None
+            if isinstance(profile, dict):
+                currency = currency or profile.get('currency')
+                isin = isin or profile.get('isin')
+        if tu.isin_country(isin) == company.US:
+            stats.foreign_us_issued.append(f"{describe(l)} — ISIN {isin}")
+            continue
         if tu.normalize_currency(currency) != tu.currency_for_exchange(exchange):
             stats.foreign_currency.append(f"{describe(l)} — quoted in {currency}")
             continue

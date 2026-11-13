@@ -95,7 +95,7 @@ Each equity fund is profiled from its holdings against our company data and the 
 
 | Measure | How |
 |---------|-----|
-| **Region** | Share of the fund in US companies (by each company's primary listing – [§6](#6-company-data-and-data-quality)). ≥ 80% US → US; ≤ 20% → International; otherwise Global. |
+| **Region** | Share of the fund in US companies (by each company's region – [§6](#6-company-data-and-data-quality)). ≥ 80% US → US; ≤ 20% → International; otherwise Global. |
 | **Size** | Each stock large above its market's 70% breakpoint, small below the 90% one, mid between (Morningstar's approach). The fund is *large* with ≥ 70% large stocks, *small* with ≥ 50% small, *mid* with ≥ 50% mid, *smid* with ≥ 70% mid + small, otherwise *all-cap*. |
 | **Style** (large funds) | Share of value vs growth companies: ≥ 60% one way, else blend. |
 | **Stock count** | Lines matching a stock the total-market index funds hold. |
@@ -144,7 +144,14 @@ A company can trade as several listings – share classes (Alphabet GOOGL / GOOG
 
 **Primary listing** – the listing that represents the company: an active, ordinary-share line (not preferred, note, unit, depositary or thinly traded line), on its home exchange, then a US listing, then other markets; in its exchange's own currency.
 
-**Region** – a company is **US** when its primary listing is on NYSE / NASDAQ / AMEX, **International** otherwise. So TSMC, ASML, SAP and Shopify are International (home listings abroad) while Eaton, Medtronic, Linde and Arm are US. The same rule is used everywhere: fund profiles, benchmarks and fund region filters.
+**Region** – a company is **US** or **International** by the first of these that decides:
+
+1. **The index providers' own country assignment** – a company held by the US total-market index fund (CRSP) is US; one held by the developed or emerging ex-US index funds (FTSE) is International. Held by both, the market holding it at least twice the other's float-adjusted value decides (the data vendor occasionally files a foreign stock under a US company's identifiers); a genuine dual holding (Waste Connections, James Hardie) goes to the next rule.
+2. **The company's head-office country**, unless it is a tax haven (Bermuda, Cayman Islands, British Virgin Islands, the Channel Islands and similar). This settles the companies the indexes leave out: foreign companies listed only in the US (Arm, Spotify, MercadoLibre, NXP, Nu, Sea are International) and some US ones (partnerships, business development companies, very low-float companies, new listings – US).
+3. **The country of incorporation** of an ordinary listing, unless a tax haven.
+4. **The listing exchange** – US when the company's main listing is on a US exchange.
+
+So TSMC, ASML, Shopify, PDD, Trip.com and Spotify are International, while Accenture, Medtronic, Linde and Chubb – incorporated abroad, run from the US and held by the US index – are US. Listing on a US exchange alone no longer makes a company US: that rule called PDD, Arm, Spotify and MercadoLibre US. The same rule is used everywhere: fund profiles, benchmarks and fund region filters.
 
 ### Validated prices and market caps
 
@@ -364,6 +371,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Active ETF: SEC list window | Last filing within 15 months |
 | Equity fund: minimum stock share | 75% |
 | Fund region: US / International | ≥ 80% / ≤ 20% US |
+| Company region: held by both index markets | One market's float-adjusted holding ≥ 2× the other's decides |
 | Fund style: value / growth | ≥ 60% of style-classified weight |
 | Selection: stocks | 20–200 |
 | Selection: top sector / top country | ≤ 50% / ≤ 50% |

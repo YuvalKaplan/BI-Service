@@ -105,7 +105,7 @@ Each equity fund is profiled from its holdings against our company data and the 
 
 | Measure | How |
 |---------|-----|
-| **Region** | Share of the fund in US companies (by each company's primary listing – [§6](#6-company-data-and-data-quality)). ≥ 80% US → a US fund; ≤ 20% → an international fund; in between, neither. |
+| **Region** | Share of the fund in US companies (by each company's region – [§6](#6-company-data-and-data-quality)). ≥ 80% US → a US fund; ≤ 20% → an international fund; in between, neither. |
 | **Size** | Each stock large above its market's 70% breakpoint, small below the 90% one, mid between (Morningstar's approach). The fund is *large* with ≥ 70% large stocks, *small* with ≥ 50% small, *mid* with ≥ 50% mid, *smid* with ≥ 70% mid + small, otherwise *all-cap*. |
 | **Stock count** | Lines matching a stock the total-market index funds hold. |
 | **Sector concentration** | FMP's sector weights (else our companies' sectors): the largest sector. |
@@ -153,7 +153,14 @@ A company can trade as several listings – share classes (Alphabet GOOGL / GOOG
 
 **Primary listing** – the listing that represents the company: an active, ordinary-share line (not preferred, note, unit, depositary or thinly traded line), on its home exchange, then a US listing, then other markets; in its exchange's own currency.
 
-**Region** – a company is **US** when its primary listing is on NYSE / NASDAQ / AMEX, **International** otherwise. So TSMC, ASML, SAP, Shell and Shopify are international (home listings abroad, whatever their US listings) while Eaton, Medtronic, Linde and Arm are US. The same rule is used everywhere: manager profiles, the benchmarks and both parts of the fund.
+**Region** – a company is **US** or **international** by the first of these that decides:
+
+1. **The index providers' own country assignment** – a company held by the US total-market index fund (CRSP) is US; one held by the developed or emerging ex-US index funds (FTSE) is international. Held by both, the market holding it at least twice the other's float-adjusted value decides (the data vendor occasionally files a foreign stock under a US company's identifiers); a genuine dual holding (Waste Connections, James Hardie) goes to the next rule.
+2. **The company's head-office country**, unless it is a tax haven (Bermuda, Cayman Islands, British Virgin Islands, the Channel Islands and similar). This settles the companies the indexes leave out: foreign companies listed only in the US (Arm, Spotify, MercadoLibre, NXP, Nu, Sea are international) and some US ones (partnerships, business development companies, very low-float companies, new listings – US).
+3. **The country of incorporation** of an ordinary listing, unless a tax haven.
+4. **The listing exchange** – US when the company's main listing is on a US exchange.
+
+So TSMC, ASML, Shell, Shopify, PDD, Trip.com and Spotify are international (whatever their US listings), while Accenture, Medtronic, Linde and Chubb – incorporated abroad, run from the US and held by the US index – are US. The same rule is used everywhere: manager profiles, the benchmarks and both parts of the fund.
 
 ### Validated prices and market caps
 
@@ -333,7 +340,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 | **Float factor** | The investable share of a company's equity, from the index funds' holdings or free float. |
 | **Primary listing** | The listing that represents a company: its home-market ordinary shares. |
 | **Rank** | A company's position in a manager's best-ideas list (1 = largest overweight). |
-| **Region** | US when a company's primary listing is on a US exchange, else international. |
+| **Region** | US or international: the index providers' country assignment, else the head-office country, else the country of incorporation, else the listing exchange. |
 | **Source ETF** | The ETF with the largest active weight in a fund holding. |
 
 ---
@@ -345,6 +352,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Active ETF: SEC list window | Last filing within 15 months |
 | Equity fund: minimum stock share | 75% |
 | Manager: region | ≥ 80% US (US) / ≤ 20% US (international) |
+| Company region: held by both index markets | One market's float-adjusted holding ≥ 2× the other's decides |
 | Manager: size | Large or all-cap |
 | Manager: number of stocks | 20–200 |
 | Manager: top sector | ≤ 50% |

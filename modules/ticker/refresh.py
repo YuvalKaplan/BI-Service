@@ -80,7 +80,10 @@ def _refresh_one(t: Ticker, full_symbol: str, stored: tuple[dict[date, float], d
         symbol=t.symbol,
         isin=profile.get('isin') or t.isin,
         cusip=profile.get('cusip') or t.cusip,
-        cik=profile.get('cik') or t.cik,
+        # A profile that identifies the security (an ISIN) but carries no CIK means it has none:
+        # a stored CIK is FMP's old data (Mahindra's LSE GDR kept Macy's, which grouped Macy's
+        # under Mahindra). Kept only when FMP's answer is too thin to tell.
+        cik=profile.get('cik') or (None if profile.get('isin') else t.cik),
         name=name or t.name,
         exchange=t.exchange,
         industry=profile.get('industry') or t.industry,
