@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from dataclasses import dataclass
 from psycopg import sql
 from psycopg.errors import Error
@@ -63,9 +63,13 @@ class ProviderEtf:
     top_country: str | None = None
     top_country_weight: float | None = None
     emerging_weight: float | None = None      # share in stocks the emerging index fund (VWO) holds
+    contracts_found: date | None = None       # first holdings date showing an option / equity-linked note: out for good
+    sector_excess: float | None = None        # the selection's: its sector most above that sector's benchmark reference
+    excess_sector: str | None = None
+    benchmark_coverage: float | None = None   # the selection's: stock weight in its region's blend benchmark companies
 
 
-# Written by each profile; status, last_downloaded and benchmark_id are not.
+# Written by each profile; status, last_downloaded, benchmark_id and the selection's measures are not.
 PROFILE_COLUMNS = (
     'provider_id', 'sec_series_id', 'region', 'name', 'description', 'isin', 'ticker', 'cap_type', 'style_type',
     'trading_since', 'website', 'asset_class', 'strategy', 'aum', 'nav', 'nav_currency', 'expense_ratio',
@@ -154,20 +158,52 @@ def set_strategy_by_series(series_id: str, strategy: str | None) -> None:
         raise Exception(f"Error saving the strategy of provider ETF {series_id}: {e}")
 
 
-def update_selection(changes: list[tuple[int, str, int | None]]) -> None:
-    """Writes the selection's (id, status, benchmark_id) for the ETFs whose values changed."""
+@dataclass
+class SelectionUpdate:
+    """What the selection (modules/sec/etf_selection.py) writes for one ETF."""
+    id: int
+    status: str
+    benchmark_id: int | None
+    sector_excess: float | None
+    excess_sector: str | None
+    benchmark_coverage: float | None
+
+
+def update_selection(changes: list[SelectionUpdate]) -> None:
+    """Writes the selection's status, benchmark and holdings measures for the ETFs whose values changed."""
     if not changes:
         return
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.executemany(
-                    "UPDATE provider_etf SET status = %s, benchmark_id = %s, updated_at = (now() AT TIME ZONE 'utc') WHERE id = %s;",
-                    [(status, benchmark_id, id) for id, status, benchmark_id in changes],
+                    "UPDATE provider_etf SET status = %s, benchmark_id = %s, sector_excess = %s, excess_sector = %s, "
+                    "benchmark_coverage = %s, updated_at = (now() AT TIME ZONE 'utc') WHERE id = %s;",
+                    [(c.status, c.benchmark_id, c.sector_excess, c.excess_sector, c.benchmark_coverage, c.id)
+                     for c in changes],
                 )
             conn.commit()
     except Error as e:
         raise Exception(f"Error saving the provider ETF selection: {e}")
+
+
+def mark_contracts(found: dict[int, date]) -> None:
+    """Records {id: holdings date} where an ETF's holdings show an option or equity-linked note -
+    the earliest date seen is kept, never cleared (the selection's contracts rule)."""
+    if not found:
+        return
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "UPDATE provider_etf SET contracts_found = LEAST(COALESCE(contracts_found, %s), %s), "
+                    "updated_at = (now() AT TIME ZONE 'utc') WHERE id = %s AND contracts_found IS DISTINCT FROM "
+                    "LEAST(COALESCE(contracts_found, %s), %s);",
+                    [(d, d, id, d, d) for id, d in found.items()],
+                )
+            conn.commit()
+    except Error as e:
+        raise Exception(f"Error saving the provider ETFs' contracts: {e}")
 
 
 def set_last_downloaded(id: int, when: datetime) -> None:

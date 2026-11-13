@@ -1,8 +1,9 @@
 """
 Downloads the provider ETFs' holdings from FMP and applies the selection rules, as the Tuesday to
 Saturday cron does (modules/cron/etf_downloader.py): every active and pending ETF, and those
-failing only the freshness rule; each line resolved to a ticker (new ones registered) and stored
-under FMP's holdings date.
+failing only the rules their holdings decide (freshness, sector, coverage); each line resolved to
+a ticker (new ones registered) and stored under FMP's holdings date. ETFs whose holdings show an
+option or an equity-linked note are marked out for good.
 
 --retry-unresolved tries again the lines left unresolved before (the cron does on the generation day) -
 use it after the first run on a new database.

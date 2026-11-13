@@ -101,23 +101,25 @@ When the run finishes (or fails), an email summary goes to the admins (step 10).
 The ETFs come from the [SEC active ETF list](#sec-active-etf-list), not from configuration: every actively managed US ETF whose own N-CEN filing and FMP profile show it to be an equity fund is a row of
 
 - **`provider`** – the fund's company (FMP's `etfCompany`, e.g. JPMorgan, Capital Group);
-- **`provider_etf`** – the ETF, keyed by its SEC series id, with [its profile](#5-equity-funds-and-their-profile-fmp): `region` (US / International / Global), `cap_type` (large / mid / small / smid / all), `style_type` (value / growth / blend, large-cap funds), stock holdings, sector and country weights, emerging-market share and more – plus its `status` and `benchmark_id`.
+- **`provider_etf`** – the ETF, keyed by its SEC series id, with [its profile](#5-equity-funds-and-their-profile-fmp): `region` (US / International / Global), `cap_type` (large / mid / small / smid / all), `style_type` (value / growth / blend, large-cap funds), stock holdings, sector and country weights, emerging-market share and more – plus its `status`, `benchmark_id`, the date its holdings first showed an option or equity-linked note (`contracts_found`) and the selection's holdings measures (`sector_excess` / `excess_sector`, `benchmark_coverage`).
 
 **`fund`** is a model fund we build, with its `strategy` stored as JSON (step 8).
 
-**Selection rules.** Which ETFs feed best ideas is decided by rules, not by hand. An ETF is **active** when it's still on the SEC list, its profile still finds it an equity fund, and:
+**Selection rules** (`modules/sec/etf_selection.py`). Which ETFs feed best ideas is decided by rules, not by hand – they keep out derivative strategies, sector / thematic, single-country and emerging-market funds and funds mostly outside the benchmarks' large caps, by what the funds hold, never by name ([methodology](methodology/detailed.md#selection-rules) for the reasoning). An ETF is **active** when it's still on the SEC list, its profile still finds it an equity fund, and:
 
 | Rule | Passes when |
 |------|-------------|
+| Contracts | its holdings have never shown an option or an equity-linked note (`provider_etf.contracts_found` is empty) – covered-call and option-income funds, out for good once seen. A line is one by `etf_selection.is_contract_line`: an option's date with a strike and call / put marker in FMP's formats ("AAPL US 10/16/26 C340", "SPY 11/17/2026 762.29 C", "SPY CALL USD 12/04/2026", "… NOV26 355 CALL", "NOV26 AVGO C @ 390", OCC codes "USAR  261016C00020000"), "ELN", or a level of 20% or more before a date ("Wells Fargo & Co 147.40% 12/15/2026") – T-bills, sweeps, FX forwards and rights don't match. Marked by the holdings download and by the monthly profile (its FMP holdings) |
 | Region | US or International (a Global fund has no benchmark and no fund to feed) |
 | Cap size | `large` or `all` |
-| Stock holdings | 20 to 200 (lines matching an index fund's stock) |
-| Top sector | at most 50% of the fund (FMP's sector weights; when FMP has none, our tickers' sectors) |
-| Top country | at most 50% of the fund in one country – or a US fund whose top country is the US (a single-country fund otherwise: Japan, China, India funds) |
-| Emerging markets | an International fund at most 50% in emerging markets – stocks VWO holds, FTSE's view (Korea developed) – so International means developed international |
+| Stock holdings | 20 to 200 for a US fund, 20 to 250 for an International one (lines matching an index fund's stock) |
+| Sector | no sector more than 20 points above its reference weight – the highest weight it has in our most specific benchmarks: each region's blend, or its value and growth benchmarks where it's split (today International blend, US value, US growth). On the latest stored holdings: resolved lines with a positive weight, by our tickers' sector (the master's), as shares of those lines |
+| Top country | at most 35% of the fund in one country – or a US fund whose top country is the US (a single-country fund otherwise: Japan, China, India funds) |
+| Emerging markets | an International fund at most 35% in emerging markets – stocks VWO holds, FTSE's view (Korea developed) – so International means developed international |
+| Coverage | at least 70% of the fund's resolved stock weight (latest stored holdings, each company through its current master) in companies of its region's blend benchmark's latest snapshot; an active ETF whose coverage was stored while active stays down to 65% – so on the first run after the rule came in, every ETF faced 70% |
 | Holdings date | its latest holdings in `provider_etf_holding` at most 14 days old (FMP refreshes most funds weekly; two weeks covers the longest fund look-back) |
 
-A value we don't know fails its rule. A fund that moved to another trust is on the SEC list twice under one ticker until its old series drops off (BRIF and TGLR in September 2026) – only the one with the latest filing can be active; the other fails as a **duplicate** (it would download the same holdings and count twice in the funds). Otherwise the ETF is **inactive** – except one that passes everything but has no holdings downloaded yet, which stays **pending** (every new ETF's status) until its first download. The rules run after every profile run (the monthly SEC list update) and every holdings download (step 2), so a new ETF on the SEC list that passes is downloaded from the next daily run. The selection also sets each ETF's `benchmark_id` – its region's large-cap blend benchmark (step 6). There's no reason column: the admin email counts the ETFs by status and lists those that changed status, and [`scripts/current_sec_active_etfs.py`](#sec-data) writes each ETF's failed rules.
+A value we don't know fails its rule – except that the sector and coverage rules, measured on the stored holdings, wait for an ETF's first download. A fund that moved to another trust is on the SEC list twice under one ticker until its old series drops off (BRIF and TGLR in September 2026) – only the one with the latest filing can be active; the other fails as a **duplicate** (it would download the same holdings and count twice in the funds). Otherwise the ETF is **inactive** – except one that passes everything but has no holdings downloaded yet, which stays **pending** (every new ETF's status) until its first download. The rules run after every profile run (the monthly SEC list update) and every holdings download (step 2), so a new ETF on the SEC list that passes is downloaded from the next daily run. The selection also sets each ETF's `benchmark_id` – its region's large-cap blend benchmark (step 6) – and stores its sector and coverage measures. There's no reason column: the admin email counts the ETFs by status and lists those that changed status, and [`scripts/current_sec_active_etfs.py`](#sec-data) writes each ETF's failed rules and measures.
 
 Every fund draws on all the active ETFs (a fund's `provider_etfs` can still limit it to some, step 8). The providers and ETFs that used to be configured and approved by hand, with holdings scraped from the managers' websites, are kept as `old_provider`, `old_provider_etf` and `old_provider_etf_holding`.
 
@@ -125,7 +127,7 @@ Every fund draws on all the active ETFs (a fund's `provider_etfs` can still limi
 
 `modules/cron/etf_downloader.py` – the daily run days, first
 
-1. The active and pending ETFs are downloaded, and those failing only the holdings-date rule (so they come back as soon as FMP refreshes them): FMP's `etf/holdings` for each, 4 at a time.
+1. The active and pending ETFs are downloaded, and those failing only the rules their holdings decide – holdings date, sector, coverage (so they come back as soon as FMP refreshes them or their holdings change): FMP's `etf/holdings` for each, 4 at a time. An ETF whose lines include an option or an equity-linked note gets `contracts_found` (the holdings date; the earliest is kept, never cleared), and the email lists the ETFs seen with them for the first time.
 2. The holdings are dated by FMP (the latest `updatedAt` of the fund's lines; a fund without one is skipped) and stored in `provider_etf_holding` under that date, replacing any stored for it – every line, with FMP's symbol, name, ISIN and CUSIP, shares, market value and weight.
 3. Each line is resolved to a ticker, the first that applies:
    - one of our tickers with its FMP symbol, ISIN or CUSIP (no FMP call) – never for a note, option, right or warrant described as one (an equity-linked note, a coupon or maturity date, an option code, an SPV), which often carries its issuer's symbol: "JPMORGAN CHASE ELN 08/27" as JPM, "Alphabet Inc 6.25% 05/15/2029" as GOOGL;
@@ -134,7 +136,7 @@ Every fund draws on all the active ETFs (a fund's `provider_etfs` can still limi
    - [Registration](#registration) from FMP.
 
    A line without a ticker is kept (with FMP's identifiers) but takes no part in best ideas. Prices and market caps are stored afterwards, once per ticker, by the ticker maintenance (step 4).
-4. The selection rules (step 1) run again on the new holdings dates.
+4. The selection rules (step 1) run again on the new holdings.
 
 Some funds' FMP lines lose a CUSIP's leading zero (Applied Materials `38222105`); an 8-digit CUSIP gets it back when its check digit then validates (`api_stocks.fix_cusip`, on every FMP holdings answer).
 
@@ -631,6 +633,7 @@ All scripts are run from the project root with the virtual environment active. C
 | Script | What it does |
 |--------|--------------|
 | `scripts/data_fill_ticker_profile.py` | Refreshes every ticker profile not checked in a week ([Profile refresh](#profile-refresh)). Asks whether to retry invalid tickers too. `--recheck-invalid` checks again only the tickers marked invalid by the old rules (`Fund or ETF`, `Not actively trading`), however recently; status changes to `.output/ticker_recheck.csv`. |
+| `scripts/data_fill_etf_contracts.py` | Marks `provider_etf.contracts_found` from every stored holdings date (the [contracts rule](#1-providers-and-etfs)), then runs the selection. Run once when the column was added (migration 22); safe to re-run – an earlier date replaces a later one, nothing is cleared. `--dry-run` lists the ETFs without writing. |
 | `scripts/data_fill_ticker_turnover.py` | Stores `ticker.average_turnover` now (instead of within a week, from the profile refresh) for every valid listing that shares its company and exchange with another, and lists the thin lines found. Run `data_fill_master_tickers.py` afterwards to move masters off thin lines. |
 | `scripts/data_fill_master_tickers.py` | Runs the master-ticker sync and the company market cap / region refresh ([Share-class consolidation](#share-class-consolidation-master-tickers)). Report listing every group (name-matched groups in detail, worth reviewing): `.output/master_tickers_report.md`. Run `data_fill_ticker_profile.py` first – CIKs come from the profiles. |
 | `scripts/data_fill_categorization_esg.py` | Fills missing style and ESG for valid companies (not share-class siblings): the style chain (CAT_ETF → PROVIDER_ETF → MODEL) for tickers with no style, then ESG for companies never fetched. Asks whether to re-read the style reference ETFs from FMP first, retry tickers whose factor fetch failed (ignoring the 30-day back-off), and refresh ESG for all companies. Run after `data_fill_master_tickers.py`. Report with before/after coverage: `.output/data_fill_categorization_esg_report.md`. |

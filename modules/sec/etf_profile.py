@@ -27,7 +27,9 @@ rule: Accenture is US), else the market of the index fund holding the stock; cou
 company's domicile (ticker.country), a US-region company counting as US; emerging is held by an
 emerging index fund (index_funds.EMERGING_FUNDS - FTSE's view), the company's else the line's.
 The index fallback matters for a new fund: its small caps aren't our tickers until its holdings
-are downloaded. A provider ETF no longer equity keeps its row with its
+are downloaded. An equity fund whose holdings show an option or an equity-linked note is marked
+(provider_etf.contracts_found, etf_selection.is_contract_line): the selection keeps it out for
+good. A provider ETF no longer equity keeps its row with its
 new strategy, and the selection makes it inactive. Every checked fund's strategy is kept in
 sec_etf_classification, so it's checked again only after PROFILE_REFRESH_DAYS (an active fund:
 PROFILE_REFRESH_DAYS_ACTIVE) or a newer filing. It runs right after the N-CEN update
@@ -171,6 +173,7 @@ class ProfileRunStats:
     no_longer_equity: int = 0                                 # provider ETFs whose profile isn't equity any more
     sectors_from_holdings: int = 0                            # equity funds FMP has no sector weights for
     no_country_weights: int = 0                               # equity funds too few of whose stocks are our companies
+    with_contracts: int = 0                                   # equity funds whose holdings show options / equity-linked notes
     selection: SelectionStats | None = None
 
 
@@ -387,10 +390,10 @@ def _fetch(etf: SecActiveEtf) -> tuple[SecActiveEtf, dict | None, list[dict], Ex
         return etf, None, [], e
 
 
-def _save_equity(etf: SecActiveEtf, info: dict, p: Profile, stats: ProfileRunStats) -> None:
+def _save_equity(etf: SecActiveEtf, info: dict, holdings: list[dict], p: Profile, stats: ProfileRunStats) -> None:
     provider_id = provider.ensure_by_name(info.get('etfCompany') or etf.adviser_name or etf.registrant_name or 'Unknown')
     inception = info.get('inceptionDate')
-    _etf_id, inserted = provider_etf.upsert_profile(ProviderEtf(
+    etf_id, inserted = provider_etf.upsert_profile(ProviderEtf(
         provider_id=provider_id, sec_series_id=etf.series_id,
         region=p.region, name=info.get('name') or etf.fund_name, description=info.get('description'),
         isin=info.get('isin') or None, ticker=etf.ticker, cap_type=p.cap_size, style_type=p.value_growth,
@@ -407,6 +410,9 @@ def _save_equity(etf: SecActiveEtf, info: dict, p: Profile, stats: ProfileRunSta
     ))
     stats.etfs_added += inserted
     stats.etfs_updated += not inserted
+    if etf_selection.has_contract_lines(holdings):     # out for good (the selection's contracts rule)
+        provider_etf.mark_contracts({etf_id: index_funds.holdings_date(holdings) or date.today()})
+        stats.with_contracts += 1
 
 
 def _apply(etf: SecActiveEtf, info: dict | None, holdings: list[dict], error: Exception | None,
@@ -432,7 +438,7 @@ def _apply(etf: SecActiveEtf, info: dict | None, holdings: list[dict], error: Ex
         stats.equity_by_cap[p.cap_size or 'unknown'] += 1
         stats.sectors_from_holdings += bool(not (info or {}).get('sectorsList') and p.sector_weights)
         stats.no_country_weights += p.country_weights is None
-        _save_equity(etf, info or {}, p, stats)
+        _save_equity(etf, info or {}, holdings, p, stats)
     elif etf.series_id in provider_series:
         provider_etf.set_strategy_by_series(etf.series_id, p.strategy)
         stats.no_longer_equity += 1
@@ -457,6 +463,7 @@ def summary(stats: ProfileRunStats) -> str:
         f"- {stats.no_longer_equity} no longer equity",
         f"- {stats.sectors_from_holdings} with sector weights from our tickers",
         f"- {stats.no_country_weights} without country weights",
+        f"- {stats.with_contracts} holding options / equity-linked notes (out for good)",
     ]
     return "\n".join(lines)
 

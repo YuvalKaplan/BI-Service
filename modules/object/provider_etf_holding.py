@@ -241,6 +241,47 @@ def fetch_latest_dates() -> dict[int, date]:
         raise Exception(f"Error fetching the provider ETFs' latest holdings dates: {e}")
 
 
+def fetch_latest_company_weights() -> list[tuple[int, str | None, int, float, str | None]]:
+    """(provider_etf_id, ETF region, company id, weight, sector) of every resolved line with a
+    positive weight in each ETF's latest stored holdings - the selection's holdings measures. The
+    company is the line's ticker through its current master, the sector the master's (else the
+    line's)."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    WITH latest AS (
+                        SELECT provider_etf_id, MAX(holding_date) AS holding_date FROM provider_etf_holding GROUP BY provider_etf_id
+                    )
+                    SELECT h.provider_etf_id, e.region, COALESCE(t.master_ticker_id, t.id), h.weight,
+                           COALESCE(m.sector, t.sector)
+                    FROM latest l
+                    JOIN provider_etf_holding h ON h.provider_etf_id = l.provider_etf_id AND h.holding_date = l.holding_date
+                    JOIN provider_etf e ON e.id = h.provider_etf_id
+                    JOIN ticker t ON t.id = h.ticker_id
+                    LEFT JOIN ticker m ON m.id = t.master_ticker_id
+                    WHERE h.weight > 0;
+                """)
+                return [(r[0], r[1], r[2], float(r[3]), r[4]) for r in cur.fetchall()]
+    except Error as e:
+        raise Exception(f"Error fetching the provider ETFs' latest company weights: {e}")
+
+
+def fetch_numbered_lines() -> list[tuple[int, date, str | None, str | None]]:
+    """(provider_etf_id, holding_date, symbol, name) of every stored line with a digit in its name
+    or symbol - the lines that can be options or equity-linked notes (scripts/data_fill_etf_contracts.py)."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT provider_etf_id, holding_date, symbol, name FROM provider_etf_holding
+                    WHERE name ~ '[0-9]' OR symbol ~ '[0-9]';
+                """)
+                return [(r[0], r[1].date() if isinstance(r[1], datetime) else r[1], r[2], r[3]) for r in cur.fetchall()]
+    except Error as e:
+        raise Exception(f"Error fetching the provider ETFs' numbered holding lines: {e}")
+
+
 def fetch_latest_lines(provider_etf_id: int) -> List[ProviderEtfHolding]:
     """Every line (resolved or not) of the ETF's latest stored holdings."""
     try:

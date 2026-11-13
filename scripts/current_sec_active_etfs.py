@@ -12,7 +12,8 @@ the SEC blocks the hosted cron's IP, so it can't read EDGAR itself):
   3. Applies the selection rules (modules/sec/etf_selection.py): each provider ETF's status.
 
 Writes .output/sec_active_etfs.csv: every current fund with its strategy and, for the equity
-funds, their profile, status, latest holdings date and the rules they fail - next to the old
+funds, their profile, status, latest holdings date, the rules they fail and the holdings measures
+behind the sector and benchmark-coverage rules - next to the old
 hand-picked old_provider_etf's cap / style / region where it had the fund - followed by the old
 enabled funds and what became of them (to compare the rules with the hand-picked list).
 
@@ -39,7 +40,9 @@ SEC_COLUMNS = ['series_id', 'ticker', 'fund_name', 'registrant_name', 'adviser_n
                'is_multiple_inverse', 'net_assets', 'report_period', 'filing_date']
 PROFILE_COLUMNS = ['region', 'cap_type', 'style_type', 'aum', 'stock_holdings', 'stock_weight', 'us_weight',
                    'avg_float_cap', 'large_weight', 'mid_weight', 'small_weight', 'value_weight', 'growth_weight',
-                   'top_sector', 'top_sector_weight', 'top_country', 'top_country_weight', 'emerging_weight', 'website']
+                   'top_sector', 'top_sector_weight', 'top_country', 'top_country_weight', 'emerging_weight',
+                   'contracts_found', 'website']
+MEASURE_COLUMNS = ['sector_excess', 'excess_sector', 'benchmark_coverage']   # the selection's, on the latest holdings
 OLD_COLUMNS = ['old_provider_etf_id', 'old_enabled', 'old_cap_type', 'old_style_type', 'old_region']
 
 if __name__ == '__main__':
@@ -60,7 +63,7 @@ if __name__ == '__main__':
     with open(OUTPUT_PATH, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(SEC_COLUMNS + ['strategy', 'asset_class', 'equity_weight', 'fmp_error', 'provider_etf_id', 'status',
-                                       'latest_holdings', 'failed_rules'] + PROFILE_COLUMNS + OLD_COLUMNS)
+                                       'latest_holdings', 'failed_rules'] + PROFILE_COLUMNS + MEASURE_COLUMNS + OLD_COLUMNS)
         for etf in current:
             c = classes.get(etf.series_id)
             e = evaluated.get(etf.series_id)
@@ -71,6 +74,7 @@ if __name__ == '__main__':
                 + [c.strategy if c else '', c.asset_class if c else '', c.equity_weight if c else '', c.fmp_error if c else '']
                 + ([pe.id, e.status, e.latest or '', ' '.join(e.failed)] if e and pe else ['', '', '', ''])
                 + [getattr(pe, col) if pe else '' for col in PROFILE_COLUMNS]
+                + [getattr(e.measures, col) if e else '' for col in MEASURE_COLUMNS]
                 + (list(o) if o else [''] * len(OLD_COLUMNS)))
 
         writer.writerow([])

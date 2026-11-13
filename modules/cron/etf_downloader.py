@@ -4,8 +4,10 @@ The provider ETFs' holdings from FMP (etf/holdings), on the daily run days.
 Downloads every ETF the selection rules make a download target (modules/sec/etf_selection.py:
 the active and pending ETFs, and those failing only the freshness rule - so a fund comes back as
 soon as FMP refreshes it), resolves each line to a ticker, and stores the lines under FMP's
-holdings date (their latest updatedAt), replacing any stored for that date. Then the selection
-runs again on the new holdings dates.
+holdings date (their latest updatedAt), replacing any stored for that date. An ETF whose lines
+include an option or an equity-linked note (etf_selection.is_contract_line) is marked
+(provider_etf.contracts_found) - the selection keeps it out for good. Then the selection runs
+again on the new holdings.
 
 A line's ticker, first match wins:
   1. one of our tickers by FMP symbol, ISIN or CUSIP (index_funds.matched_ticker_id) - no FMP call;
@@ -60,6 +62,8 @@ class DownloadStats:
     lines: int = 0
     outcomes: Counter = field(default_factory=Counter)        # MATCHED ... NOT_STOCK -> lines
     unresolved_weight: dict[str, float] = field(default_factory=dict)   # ETF ticker -> its unresolved stock weight
+    contracts: dict[int, date] = field(default_factory=dict)  # ETF id -> holdings date showing contracts
+    contracts_new: list[str] = field(default_factory=list)   # ETFs whose holdings show contracts for the first time
     selection: SelectionStats | None = None
 
 
@@ -111,6 +115,10 @@ def _store(target: Evaluated, rows: list[dict], listings: Listings, resolver: Ti
         stats.no_date.append(label)
         return
     assert etf.id is not None
+    if etf_selection.has_contract_lines(rows):
+        stats.contracts[etf.id] = day
+        if etf.contracts_found is None:
+            stats.contracts_new.append(label)
     previous = _previous(etf.id, listings)
     lines = []
     unresolved_weight = 0.0
@@ -150,6 +158,9 @@ def summary(stats: DownloadStats) -> str:
         f"  - {stats.outcomes[UNRESOLVED]:,} stock line(s) unresolved",
         f"  - {stats.outcomes[NOT_STOCK]:,} not stocks",
     ]
+    if stats.contracts_new:
+        lines.append(f"- Holdings showing options / equity-linked notes for the first time (out for good): "
+                     f"{', '.join(sorted(stats.contracts_new))}")
     worst = sorted(stats.unresolved_weight.items(), key=lambda kv: -kv[1])[:5]
     if worst:
         lines.append("- Most unresolved stock weight:")
@@ -196,6 +207,7 @@ def run(as_of: date | None = None, retry_unresolved: bool | None = None) -> Down
         if len(stats.failed) > max(MIN_FAILED_TO_RAISE, MAX_FAILED_SHARE * len(targets)):
             log.record_status(summary(stats))
             raise Exception(f"{len(stats.failed)} of {len(targets)} ETF holdings downloads failed - first: {stats.failed[0]}")
+        provider_etf.mark_contracts(stats.contracts)
         stats.selection = etf_selection.run(today)
         log.record_status(summary(stats))
         batch_run.update_completed_at(batch_run_id)
