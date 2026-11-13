@@ -83,7 +83,7 @@ Each fund on the list is profiled from its FMP data and classified, first rule t
 | Leveraged / inverse | The filing, the asset class, or the name (2x, Bull/Bear, Inverse) | No – exposure is synthetic |
 | Fund of funds | The filing says so | No – its holdings are other funds |
 | Buffer / defined outcome | Name (buffer, defined outcome, floor…) | No – option overlay, not stock selection |
-| Option income | Name (covered call, premium income, buy-write, 0DTE…) | No – returns driven by the option overlay |
+| Option income | Name (covered call, premium income, buy-write, 0DTE…) | No – returns driven by the option overlay (funds not named as such are caught by the derivatives selection rule below) |
 | Fixed income, multi-asset, alternative, commodity, currency | FMP asset class | No |
 | **Equity** | Equity asset class (or none) and **at least 75% of holdings in stocks** | **Yes** |
 
@@ -99,26 +99,40 @@ Each equity fund is profiled from its holdings against our company data and the 
 | **Size** | Each stock large above its market's 70% breakpoint, small below the 90% one, mid between (Morningstar's approach). The fund is *large* with ≥ 70% large stocks, *small* with ≥ 50% small, *mid* with ≥ 50% mid, *smid* with ≥ 70% mid + small, otherwise *all-cap*. |
 | **Style** (large funds) | Share of value vs growth companies: ≥ 60% one way, else blend. |
 | **Stock count** | Lines matching a stock the total-market index funds hold. |
-| **Sector concentration** | FMP's sector weights (else our companies' sectors): the largest sector. |
+| **Sector concentration** | FMP's sector weights (else our companies' sectors): the largest sector – for information; the selection's sector rule is measured on the stored holdings (below). |
 | **Country concentration** | Our companies' country of domicile: the largest country. |
 | **Emerging-market share** | Share held in stocks VWO holds (FTSE's classification: Taiwan, China, India, Brazil emerging; Korea developed). |
 
 ### Selection rules
 
-A profiled equity fund feeds the best ideas (**active**) when it passes every rule. These are applied daily, so a fund that drifts out of its mandate drops out on its own, and returns when it comes back:
+A profiled equity fund feeds the best ideas (**active**) when it passes every rule. The rules keep out funds whose overweights would reflect a mandate rather than stock selection within a broad large-cap market: **derivative strategies, sector and thematic funds, single-country and emerging-market funds, and funds investing mostly outside the large-cap universe the reference benchmarks measure** ([§7](#7-market-size-and-the-reference-benchmarks)). The rules are applied every time holdings are read, so a fund that drifts out of its mandate drops out on its own and returns when it comes back – except a fund that has used derivatives, which never returns.
 
 | Rule | Passes when | Why |
 |------|-------------|-----|
 | Region | US or International | A Global fund has no single reference market to measure overweights against. |
 | Size | Large or all-cap | The funds are built from large caps; small- and mid-cap managers' overweights are measured against a different opportunity set. |
-| Number of stocks | 20 to 200 | Fewer than 20 is a concentrated fund where every holding is an overweight; above 200 the fund is close to an index and its tilts are small. |
-| Top sector | ≤ 50% of the fund | A sector fund's overweights reflect its mandate, not stock selection. |
-| Top country | ≤ 50% (a US fund's top country may be the US) | Single-country international funds (Japan, India, China) – same reason. |
-| Emerging markets | International funds ≤ 50% emerging | "International" means developed international; the reference benchmark is mostly developed. |
+| Number of stocks | 20 to 200 (US), 20 to 250 (International) | Fewer than 20 is a concentrated fund where every holding is an overweight; above the maximum the fund is close to an index and its tilts are small. International managers spread over more markets and names, so their limit is higher. |
+| Derivatives | The fund's holdings have **never** shown an option contract or an equity-linked note | Covered-call, option-income and hedged funds hold an ordinary-looking stock portfolio, but their weights follow the option book, not the manager's view of the stocks. Once seen, the fund is excluded permanently: such funds write options intermittently, and a week without contracts doesn't change the strategy. |
+| Sector concentration | No sector more than **20 points** above its reference weight | A sector's reference weight is the highest weight it has in any of the most specific reference benchmarks – International large blend, US large value, US large growth. A sector or thematic fund's overweights reflect its mandate, not stock selection. |
+| Top country | ≤ 35% (a US fund's top country may be the US) | Single-country international funds (Japan, India, China) – same reason. |
+| Emerging markets | International funds ≤ 35% emerging | "International" means developed international; the reference benchmark is developed. |
+| Benchmark coverage | ≥ 70% of the fund's stock weight in companies of its region's large-cap blend benchmark to enter; ≥ 65% to stay | A fund mostly outside the benchmark – mid and small caps, frontier markets, private holdings – has overweights the benchmark cannot measure: every holding outside it is an "overweight" by default. |
 | Holdings freshness | Latest holdings ≤ 14 days old | Ideas must be current. |
 | Duplicate | Only one row per fund | A fund moved to a new trust is briefly listed twice under one ticker; it must count once. |
 
-Anything unknown fails its rule. As of November 2026, 175 ETFs are active (138 US, 37 International) from 108 sponsors, out of about 800 equity funds profiled.
+Anything unknown fails its rule – except the rules measured on the fund's stored holdings (sector concentration, benchmark coverage), which a newly listed fund passes until its first holdings are read; it does not become active before then.
+
+### How the selection rules are measured and set
+
+The rules aim to remove the fund types that don't express stock selection within a broad market, while removing as few ordinary diversified funds as possible. The principles behind them:
+
+- **Behaviour, not names.** Funds are excluded for what they hold, never for what they are called: a fund name is a marketing choice, and the same words ("innovation", "leaders", "quality") are used by thematic and diversified funds alike. The only name rules are in the equity classification above (leveraged, buffer and option-income funds), where the name states a structure rather than a theme, and they are backed by the derivatives rule, which reads the holdings.
+- **Derivatives by the holding lines.** A holding line is an option when it carries an expiry date with a strike and a call / put marker – in any of the formats the data vendor uses ("AAPL US 10/16/26 C340", "SPY 11/17/2026 762.29 C", "SPY CALL USD 12/04/2026", "JPMORGAN CHASE + CO NOV26 355 CALL", the exchanges' standard option code "USAR 261016C00020000") – and an equity-linked note when it is named as one ("WELLS FARGO ELN 10/27") or shows a participation level of 20% or more before a maturity date ("Wells Fargo & Co 147.40% 12/15/2026"). Treasury bills, money-market sweeps, currency forwards and rights also carry dates but never a strike, a call / put marker or a note level, so they don't trigger the rule. Every holding set read since a fund entered the universe counts, as does the holding set read for its monthly profile.
+- **Sector concentration against the market, by style and region.** A fixed ceiling on the top sector (the earlier rule: 50%) penalises a growth manager for holding what the growth market holds – technology is over half of the US large growth benchmark – while letting through a fund concentrated in a small sector. Measuring each sector against its own reference weight treats every sector alike: a growth manager may hold as much technology as the growth benchmark, a value manager as much finance as the value benchmark, plus the margin, whereas a defence, retail or semiconductor theme exceeds every benchmark's weight in its sector. The reference is the highest weight across the region / style benchmarks rather than the fund's own region or style, so a fund is never penalised for its style label (a "blend" fund tilted to growth is measured as generously as a growth fund). Sector weights are taken from the fund's identified stock holdings, using our companies' sectors – the same classification as the benchmarks.
+- **Benchmark coverage as the universe test.** Best ideas are overweights against the region's large-cap blend benchmark; a holding outside it has no benchmark weight, so it is an overweight by definition. The share of the fund's identified stock weight in companies of that benchmark (each company counted once, across share classes) measures how far the manager invests in the universe the benchmark describes. Thematic and concentrated funds tend to fail it as well, because their themes run into mid and small caps.
+- **A band, not a line, for a measure that moves weekly.** Coverage changes with prices, trades and the benchmark's weekly reconstitution, so a fund near a single line would drop in and out. A fund enters at 70% and stays while at 65% or more; the stay level applies only to a fund that entered under the entry level, so every fund first faces 70%.
+- **Round levels.** The levels are set in steps of 5 points rather than at the exact point that separates today's funds: a level fitted precisely to one week's pool is fitted to noise and stops working as funds enter and leave. Each level was chosen where it removes the funds of the targeted type – single-country, emerging, sector-concentrated, out-of-universe – with the fewest ordinary diversified funds removed, and was checked against the funds on either side of it.
+- **Accepted residue.** Some thematic funds are diversified enough to pass every test – their holdings look like a broad large-cap portfolio with tilts. They are accepted: by the behavioural tests they are indistinguishable from an ordinary manager with a view, and excluding them would take a name rule.
 
 ## 5. Holdings
 
@@ -338,6 +352,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 - **Whole-company cap, not float-adjusted, for benchmark weights.** Managers size positions against a company's full size; a float-adjusted benchmark would make closely held companies look like overweights for every manager. A float-weighted version was tested and reverted. Float is used only as a minimum (10%) for membership.
 - **Market-relative size lines** rather than fixed dollar thresholds, so "large cap" means the same thing in every market environment.
 - **Consensus before single conviction.** A company's score adds up every manager that ranks it, each rank worth half the one above, so agreement across managers weighs as much as the strength of one manager's view, and marginal differences between neighbouring ranks matter less. Ranking by best rank alone (the earlier rule) let one manager's #1 outrank ten managers' #2 and turned small active-weight differences into portfolio changes.
+- **Managers selected by holdings behaviour.** Funds are kept or excluded by what they hold – derivatives, sector concentration against the benchmarks, country and emerging-market exposure, benchmark coverage – never by their name, at round levels rather than levels fitted to the funds of the day ([§4](#how-the-selection-rules-are-measured-and-set)).
 - **Every manager counts equally**, regardless of assets under management or holdings date – the method aggregates opinions, not money.
 - **The market split from our own benchmarks.** Measuring the split on the benchmarks the best ideas are measured against keeps the fund consistent across region and style, and it follows the market every quarter without a manual input. It's our definition – our large-cap lines, float factors from the index funds and the data vendor – not a published index weight. The float factors are current ones: older splits can't be re-measured on the float of their day.
 - **Style split trade-off.** Under the value / growth reference, a manager holding both styles is measured against two benchmarks in which large companies weigh more than in the blend (×2.3 for value, ×1.75 for growth), so its largest holdings rank somewhat lower than under the blend. Accepted, in exchange for not crediting out-of-style mega-caps as convictions.
@@ -380,9 +395,12 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Fund region: US / International | ≥ 80% / ≤ 20% US |
 | Company region: held by both index markets | One market's float-adjusted holding ≥ 2× the other's decides |
 | Fund style: value / growth | ≥ 60% of style-classified weight |
-| Selection: stocks | 20–200 |
-| Selection: top sector / top country | ≤ 50% / ≤ 50% |
-| Selection: International emerging share | ≤ 50% |
+| Selection: stocks | 20–200 (US) / 20–250 (International) |
+| Selection: derivatives | Excluded for good once holdings show an option or an equity-linked note (note level ≥ 20%) |
+| Selection: sector concentration | No sector > 20 points above its highest weight in the International blend / US value / US growth benchmarks |
+| Selection: top country | ≤ 35% (US funds: the US exempt) |
+| Selection: International emerging share | ≤ 35% |
+| Selection: benchmark coverage | ≥ 70% to enter / ≥ 65% to stay |
 | Holdings: maximum age | 14 days |
 | Market cap: validation window | 21 days; excluded after 5 days without a good value |
 | Large cap: US / International coverage | 93% / 80% of the market |

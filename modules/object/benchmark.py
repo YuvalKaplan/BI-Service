@@ -130,6 +130,40 @@ def fetch_latest_holdings(benchmark_id: int, look_back_days: int, up_to_date: da
         raise Exception(f"Error fetching latest holdings for benchmark {benchmark_id}: {e}")
 
 
+def fetch_latest_company_weights(as_of: date) -> dict[int, dict[int, tuple[float, str | None]]]:
+    """{benchmark_id: {company id: (weight, sector)}} of every enabled benchmark's latest snapshot on
+    or before as_of - each holding through its ticker's current master, the sector the master's
+    (else the holding's). Used by the ETF selection (sector reference, benchmark coverage)."""
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH latest AS (
+                        SELECT bh.benchmark_id, MAX(bh.holding_date) AS holding_date
+                        FROM public.benchmark_holding bh
+                        JOIN public.benchmark b ON b.id = bh.benchmark_id AND NOT b.disabled
+                        WHERE bh.holding_date <= %s
+                        GROUP BY bh.benchmark_id
+                    )
+                    SELECT bh.benchmark_id, COALESCE(t.master_ticker_id, t.id), bh.weight, COALESCE(m.sector, t.sector)
+                    FROM latest l
+                    JOIN public.benchmark_holding bh ON bh.benchmark_id = l.benchmark_id AND bh.holding_date = l.holding_date
+                    JOIN public.ticker t ON t.id = bh.ticker_id
+                    LEFT JOIN public.ticker m ON m.id = t.master_ticker_id
+                    """,
+                    (as_of,)
+                )
+                out: dict[int, dict[int, tuple[float, str | None]]] = {}
+                for benchmark_id, company_id, weight, sector in cur.fetchall():
+                    held = out.setdefault(benchmark_id, {})
+                    previous = held.get(company_id, (0.0, sector))[0]
+                    held[company_id] = (previous + float(weight or 0), sector)
+                return out
+    except Error as e:
+        raise Exception(f"Error fetching the benchmarks' latest company weights: {e}")
+
+
 def fetch_latest_holdings_for_date(benchmark_id: int, holding_date: date) -> List[BenchmarkHolding]:
     try:
         with db_pool_instance.get_connection() as conn:
