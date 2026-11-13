@@ -5,24 +5,14 @@ from datetime import date, datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from zoneinfo import ZoneInfo
 
+from modules import config
 from modules.core import api_stocks
 from modules.object import ticker
 from modules.object.ticker_value import TickerValue, fetch_values_for_ticker, fetch_latest_value_date, upsert as _upsert_tv, replace_range as _replace_range
 from modules.ticker import util as tu
 
-HISTORY_LOOKBACK_DAYS = 21          # calendar days - comfortably covers 10+ trading days
-                                    # even across a holiday-heavy stretch
-PRICE_TOLERANCE       = 0.005      # 0.5% relative diff
-MARKET_CAP_TOLERANCE  = 0.01       # 1.0% relative diff (looser: also depends on shares outstanding)
-GRACE_PERIOD_DAYS     = 5          # consecutive calendar days a ticker may go unrecorded while
-                                    # mismatching before it gets flagged invalid
-REVISION_TOLERANCE    = 0.05       # every mismatch within this: FMP revised its history - its values replace ours
-BASIS_SPREAD          = 1.06       # only prices or only caps off, this steadily, on every mismatching day: our
-BASIS_MIN_POINTS      = 5          # history is on another basis (currency, split) - rewritten; at least this many
-                                   # days (an exchange rate moves a few % over the days compared: NZD 3.1% in Sep 2026)
 REVISION, BASIS, SHARES = 'revision', 'basis', 'shares'
 MISMATCH_REASON = "Price/market cap mismatch vs FMP history"   # how ticker.invalid starts for a mismatch
-VALUE_DATE_CUT_OFF_HOUR = 17       # New York time: before it, the latest completed trading day is the previous one
 
 
 def latest_value_date(now: datetime | None = None) -> date:
@@ -30,7 +20,7 @@ def latest_value_date(now: datetime | None = None) -> date:
     York from 17:00 ET, else the previous day, stepped back over a weekend. Shared by the
     holdings resolution and the screener, so a listing both see is validated once."""
     now_et = (now or datetime.now(ZoneInfo("America/New_York"))).astimezone(ZoneInfo("America/New_York"))
-    d = (now_et if now_et.hour >= VALUE_DATE_CUT_OFF_HOUR else now_et - timedelta(days=1)).date()
+    d = (now_et if now_et.hour >= config.Pricing.VALUE_DATE_CUT_OFF_HOUR else now_et - timedelta(days=1)).date()
     while d.weekday() >= 5:  # Saturday=5, Sunday=6
         d -= timedelta(days=1)
     return d
@@ -72,7 +62,7 @@ def fetch_historic_usd_rates(currency: str | None, start: date, end: date) -> di
     return rates
 
 
-def closest_value_for_date(series: dict[date, float], target: date, window_days: int = 5) -> float | None:
+def closest_value_for_date(series: dict[date, float], target: date, window_days: int = config.Pricing.CLOSEST_VALUE_WINDOW_DAYS) -> float | None:
     """Nearest available value to `target` within `series`, searching outward day-by-day up to
     window_days in either direction — a data series doesn't always share the same trading-day
     calendar as whatever it's being matched against (e.g. FX markets trade on different
@@ -84,33 +74,20 @@ def closest_value_for_date(series: dict[date, float], target: date, window_days:
     return None
 
 
-GLITCH_FACTOR = 3.0            # a day-over-day market-cap move this large, not matched by the price, is an FMP glitch
-EXTREME_GLITCH_FACTOR = 20.0   # a move this large is a glitch even when FMP scaled the price with it (pence vs pounds)
-MAX_EDGE_GLITCH_POINTS = 65    # without prices, a jump at a series' start/end lasting longer than this (~3 months) is a real level change
-OUTLIER_CONTEXT_DAYS = 365     # history fetched around a new value so market_cap_outliers can tell what's normal
-REPAIR_REFERENCE_POINTS = 5    # good values nearest a glitch whose implied share count repairs it
-REFERENCE_TRIGGER_FACTOR = 2.0 # a cap move this large the price didn't make is worth checking against the profile
-REFERENCE_FACTOR = 2.5         # an implied share count this far off the profile's is a glitch (real share counts
-                               # don't move 2.5x in a year; Alphabet's all-classes/class-A ratio is ~2.1)
-SHARE_COUNT_TOLERANCE = 1.15   # an implied share count this far off a listing's verified one (ticker.verified_shares)
-                               # is FMP's history on a wrong count (Rocket Companies: 3.79B against 2.82B)
-LATEST_RUN_TOLERANCE = 1.05    # implied share counts within this of the latest one are the same run of FMP's history
-
-
 def _ratio(a: float, b: float) -> float:
     return max(a, b) / min(a, b)
 
 
 def _is_glitch_jump(cap_a: float, cap_b: float, shares_a: float | None, shares_b: float | None) -> bool:
-    """A market-cap jump that isn't the market: GLITCH_FACTOR-fold, and — when prices are known —
+    """A market-cap jump that isn't the market: config.Pricing.GLITCH_FACTOR-fold, and — when prices are known —
     the implied share count (cap / price) jumps with it (a crash moves price and cap together:
-    EyePoint -67% on 2026-08-17 is real), unless it's EXTREME_GLITCH_FACTOR-fold."""
+    EyePoint -67% on 2026-08-17 is real), unless it's config.Pricing.EXTREME_GLITCH_FACTOR-fold."""
     cap_ratio = _ratio(cap_a, cap_b)
-    if cap_ratio < GLITCH_FACTOR:
+    if cap_ratio < config.Pricing.GLITCH_FACTOR:
         return False
-    if cap_ratio >= EXTREME_GLITCH_FACTOR or not shares_a or not shares_b:
+    if cap_ratio >= config.Pricing.EXTREME_GLITCH_FACTOR or not shares_a or not shares_b:
         return True
-    return _ratio(shares_a, shares_b) >= GLITCH_FACTOR
+    return _ratio(shares_a, shares_b) >= config.Pricing.GLITCH_FACTOR
 
 
 def market_cap_outliers(
@@ -125,7 +102,7 @@ def market_cap_outliers(
     such value is enough to push a company out of the $10B benchmark or swell its weight.
 
     With `reference_shares` (FMP's current share count for the listing, reference_shares()) and
-    prices, a value is a glitch when its implied share count (cap / price) is REFERENCE_FACTOR-fold
+    prices, a value is a glitch when its implied share count (cap / price) is config.Pricing.REFERENCE_FACTOR-fold
     off the reference — which side of a jump is wrong can't be told from the series alone
     (Glovis's recent values are wrong, Centrica's older ones — and the Japanese banks' OTC lines'
     whole history since April, off by the yen rate, against three right months). The profile
@@ -133,7 +110,7 @@ def market_cap_outliers(
     glitch — an eight-day streak in August that came back — so the reference is ignored when
     every value it agrees with is a spike or streak that comes back (the structural rules'
     strongest evidence). A reference that agrees with none of the series is trusted only for a
-    new line (fewer than MAX_EDGE_GLITCH_POINTS priced values), where FMP's history is the weak
+    new line (fewer than config.Pricing.MAX_EDGE_GLITCH_POINTS priced values), where FMP's history is the weak
     side (Uniper's new XETRA line at 8.7B shares, before its 1:20 consolidation, against 416M);
     against an established history it's more likely the profile that's off. Then, and for values
     without a price or glitches FMP scaled the price along with (pence vs pounds), the
@@ -141,9 +118,9 @@ def market_cap_outliers(
     """
     if reference_shares and prices:
         priced = [d for d, v in series.items() if v and v > 0 and prices.get(d)]
-        off = {d for d in priced if _ratio(series[d] / prices[d], reference_shares) >= REFERENCE_FACTOR}
+        off = {d for d in priced if _ratio(series[d] / prices[d], reference_shares) >= config.Pricing.REFERENCE_FACTOR}
         agree = {d for d in priced if d not in off}
-        trusted = (not agree and len(priced) < MAX_EDGE_GLITCH_POINTS) or (
+        trusted = (not agree and len(priced) < config.Pricing.MAX_EDGE_GLITCH_POINTS) or (
             agree and not agree <= _structural_outliers(series, prices, middle_only=True))
         if off and trusted:
             return off | _structural_outliers({d: v for d, v in series.items() if d not in off}, prices)
@@ -153,14 +130,14 @@ def market_cap_outliers(
 def _needs_reference(series: dict[date, float], prices: dict[date, float]) -> bool:
     """Whether a series the structural rules found clean is still worth one profile call: too
     short to judge from itself (a new listing — FMP's early share counts are often wrong), or
-    with a cap move of REFERENCE_TRIGGER_FACTOR the price didn't make (DuPont's share count went
-    410M -> 137M on a flat price: exactly 3x, just under GLITCH_FACTOR)."""
+    with a cap move of config.Pricing.REFERENCE_TRIGGER_FACTOR the price didn't make (DuPont's share count went
+    410M -> 137M on a flat price: exactly 3x, just under config.Pricing.GLITCH_FACTOR)."""
     dates = sorted(d for d, v in series.items() if v and v > 0)
-    if len(dates) < MAX_EDGE_GLITCH_POINTS:
+    if len(dates) < config.Pricing.MAX_EDGE_GLITCH_POINTS:
         return True
     for a, b in zip(dates, dates[1:]):
-        if (prices.get(a) and prices.get(b) and _ratio(series[a], series[b]) >= REFERENCE_TRIGGER_FACTOR
-                and _ratio(series[a] / prices[a], series[b] / prices[b]) >= REFERENCE_TRIGGER_FACTOR):
+        if (prices.get(a) and prices.get(b) and _ratio(series[a], series[b]) >= config.Pricing.REFERENCE_TRIGGER_FACTOR
+                and _ratio(series[a] / prices[a], series[b] / prices[b]) >= config.Pricing.REFERENCE_TRIGGER_FACTOR):
             return True
     return False
 
@@ -170,14 +147,14 @@ def _structural_outliers(
 ) -> set[date]:
     """
     Glitches judged from the series itself. A company's market cap doesn't move
-    GLITCH_FACTOR-fold from one day to the next without its price doing the same (a split
+    config.Pricing.GLITCH_FACTOR-fold from one day to the next without its price doing the same (a split
     changes neither), so the series is cut into runs at every such jump (_is_glitch_jump;
     `prices` enables the price check) and:
       - a run whose neighbours on both sides are both far higher, or both far lower — a spike or
         a streak that comes back — is a glitch, however long;
       - otherwise a run at the start or end of the series is a glitch when it's shorter than
         its neighbour and either its jump wasn't matched by the price (the implied share count
-        jumped) or, prices unknown, it's at most MAX_EDGE_GLITCH_POINTS long (a longer one is
+        jumped) or, prices unknown, it's at most config.Pricing.MAX_EDGE_GLITCH_POINTS long (a longer one is
         taken as a real change of level); a run between a lower and a higher one (a staircase)
         is left alone.
     Glitches in the middle are removed first, shortest first (a short normal stretch at the end
@@ -208,7 +185,7 @@ def _structural_outliers(
             return _is_glitch_jump(levels[i], levels[j], share_levels[i], share_levels[j])
 
         def price_unmatched(i: int, j: int) -> bool:
-            return bool(share_levels[i] and share_levels[j]) and _ratio(share_levels[i], share_levels[j]) >= GLITCH_FACTOR
+            return bool(share_levels[i] and share_levels[j]) and _ratio(share_levels[i], share_levels[j]) >= config.Pricing.GLITCH_FACTOR
 
         middle: list[int] = []
         edges: list[int] = []
@@ -220,7 +197,7 @@ def _structural_outliers(
                 if (levels[i - 1] > levels[i]) == (levels[i + 1] > levels[i]):
                     middle.append(i)
             elif len(run) < len(runs[neighbours[0]]) and (
-                    len(run) <= MAX_EDGE_GLITCH_POINTS or price_unmatched(i, neighbours[0])):
+                    len(run) <= config.Pricing.MAX_EDGE_GLITCH_POINTS or price_unmatched(i, neighbours[0])):
                 edges.append(i)
         candidates = middle or ([] if middle_only else edges)
         if not candidates:
@@ -245,7 +222,7 @@ def reference_shares(symbol: str) -> float | None:
 
 def _latest_run(series: dict[date, float], prices: dict[date, float]) -> list[date]:
     """The latest stretch of the series on one share count: walking back from the newest priced
-    value, the dates whose implied share count (cap / price) stays within LATEST_RUN_TOLERANCE of
+    value, the dates whose implied share count (cap / price) stays within config.Pricing.LATEST_RUN_TOLERANCE of
     the newest one. A verified count (ticker.verified_shares) is today's, so it only replaces this
     stretch: before a real change of share count — Devon Energy's merger, 621M shares in the first
     half of 2026, 1,100M after — FMP's history keeps its own values."""
@@ -255,7 +232,7 @@ def _latest_run(series: dict[date, float], prices: dict[date, float]) -> list[da
     latest = series[dates[-1]] / prices[dates[-1]]
     run: list[date] = []
     for d in reversed(dates):
-        if _ratio(series[d] / prices[d], latest) > LATEST_RUN_TOLERANCE:
+        if _ratio(series[d] / prices[d], latest) > config.Pricing.LATEST_RUN_TOLERANCE:
             break
         run.append(d)
     return run
@@ -272,7 +249,7 @@ def clean_market_caps(
     (_needs_reference), so market_cap_outliers can tell which values are the wrong ones. A
     glitch whose price is in line with the good values nearest it (the cap jumped, the price
     didn't — FMP's share count or currency is off, not its price) is repaired as that date's
-    price x the implied share count (cap / price) of the REPAIR_REFERENCE_POINTS nearest good
+    price x the implied share count (cap / price) of the config.Pricing.REPAIR_REFERENCE_POINTS nearest good
     values — or of the reference when the whole series was off — which keeps the listing's value
     fresh through a glitch lasting months. With no price, or a price scaled along with the cap
     (pence vs pounds), the value is dropped. Logged when `symbol` is given and log_outliers.
@@ -281,14 +258,14 @@ def clean_market_caps(
     With `verified_shares` (ticker.verified_shares: FMP's quote and a second source — its
     financials or the index funds — agree on a count its history doesn't; see
     refresh.verify_share_count), every value of the history's latest run (_latest_run) whose
-    implied share count is SHARE_COUNT_TOLERANCE-fold off it is first set to price x
+    implied share count is config.Pricing.SHARE_COUNT_TOLERANCE-fold off it is first set to price x
     verified_shares — on every fetch, so the daily validation compares like with like — and it
     serves as the reference.
     """
     prices = prices or {}
     if verified_shares and prices:
         off = sorted(d for d in _latest_run(series, prices)
-                     if _ratio(series[d] / prices[d], verified_shares) >= SHARE_COUNT_TOLERANCE)
+                     if _ratio(series[d] / prices[d], verified_shares) >= config.Pricing.SHARE_COUNT_TOLERANCE)
         if off:
             series = {**series, **{d: prices[d] * verified_shares for d in off}}
             if symbol and log_outliers:
@@ -318,8 +295,8 @@ def clean_market_caps(
                 cleaned[d] = price * reference
                 repaired.append(d)
             continue
-        nearest = sorted(good, key=lambda g: (abs((g - d).days), g))[:REPAIR_REFERENCE_POINTS]
-        if _ratio(price, statistics.median(prices[g] for g in nearest)) >= EXTREME_GLITCH_FACTOR:
+        nearest = sorted(good, key=lambda g: (abs((g - d).days), g))[:config.Pricing.REPAIR_REFERENCE_POINTS]
+        if _ratio(price, statistics.median(prices[g] for g in nearest)) >= config.Pricing.EXTREME_GLITCH_FACTOR:
             continue  # the price is in another unit too (pence vs pounds): nothing to repair from
             # (a lesser gap is the market: the nearest good values can be months away)
         cleaned[d] = price * statistics.median(series[g] / prices[g] for g in nearest)
@@ -360,7 +337,7 @@ def fetch_price_and_market_cap_history(
     within the lookup window is simply dropped rather than stored unconverted. A market cap
     that's an FMP glitch (market_cap_outliers) is repaired from the price, or dropped
     (clean_market_caps) — judged within [start, end], so callers validating a single date fetch
-    OUTLIER_CONTEXT_DAYS of context."""
+    config.Pricing.OUTLIER_CONTEXT_DAYS of context."""
     with ThreadPoolExecutor(max_workers=2) as executor:
         prices_future = executor.submit(api_stocks.get_symbol_historic_prices, symbol, start, end)
         market_caps_future = executor.submit(api_stocks.get_stock_historic_market_cap, symbol, start, end)
@@ -418,7 +395,7 @@ def compare_overlap(ticker_id: int, fetched: dict[date, tuple[float, float]], st
 
         if row.stock_price is not None:
             pct_diff = _relative_diff(row.stock_price, fetched_price)
-            if pct_diff > PRICE_TOLERANCE:
+            if pct_diff > config.Pricing.PRICE_TOLERANCE:
                 mismatches.append(Mismatch(
                     ticker_id=ticker_id, value_date=row.value_date, field="stock_price",
                     stored_value=row.stock_price, fetched_value=fetched_price, pct_diff=pct_diff,
@@ -426,7 +403,7 @@ def compare_overlap(ticker_id: int, fetched: dict[date, tuple[float, float]], st
 
         if row.market_cap is not None:
             pct_diff = _relative_diff(row.market_cap, fetched_market_cap)
-            if pct_diff > MARKET_CAP_TOLERANCE:
+            if pct_diff > config.Pricing.MARKET_CAP_TOLERANCE:
                 mismatches.append(Mismatch(
                     ticker_id=ticker_id, value_date=row.value_date, field="market_cap",
                     stored_value=row.market_cap, fetched_value=fetched_market_cap, pct_diff=pct_diff,
@@ -437,30 +414,30 @@ def compare_overlap(ticker_id: int, fetched: dict[date, tuple[float, float]], st
 
 def mismatch_kind(mismatches: list[Mismatch]) -> str | None:
     """Whether FMP's history disagrees with ours because ours is what's off:
-    - REVISION: every mismatch within REVISION_TOLERANCE - FMP revised a close (often one day);
+    - REVISION: every mismatch within config.Pricing.REVISION_TOLERANCE - FMP revised a close (often one day);
     - BASIS: only one of price and market cap is off - the other agrees - by a steady factor
-      (within BASIS_SPREAD) on every mismatching day, BASIS_MIN_POINTS or more: that stretch of
+      (within config.Pricing.BASIS_SPREAD) on every mismatching day, config.Pricing.BASIS_MIN_POINTS or more: that stretch of
       our history is on another basis - market caps stored unconverted from their currency
       (Helsinki, Brussels, Dublin, Lisbon and New Zealand listings before those exchanges'
       currencies were known; the days stored after agree), or prices from before a split FMP
       adjusted for;
     - SHARES: only market caps off - every price agrees - by a steady factor under
-      SHARE_COUNT_TOLERANCE, on any number of days: FMP changed the share count behind its caps
+      config.Pricing.SHARE_COUNT_TOLERANCE, on any number of days: FMP changed the share count behind its caps
       (each quarter's filings: Citigroup 1.70B -> 1.84B, Visa 1.91B -> 1.72B in Oct 2026, on the
       last days compared). The security is the right one; our history is rewritten from FMP's;
     - None: anything else (FMP's data may be what's wrong, or the symbol another security's -
       then both would be off)."""
-    if all(m.pct_diff <= REVISION_TOLERANCE for m in mismatches):
+    if all(m.pct_diff <= config.Pricing.REVISION_TOLERANCE for m in mismatches):
         return REVISION
     fields = {m.field for m in mismatches}
     if len(fields) != 1:
         return None
     ratios = [m.stored_value / m.fetched_value for m in mismatches if m.stored_value and m.fetched_value]
-    if not ratios or max(ratios) / min(ratios) > BASIS_SPREAD:
+    if not ratios or max(ratios) / min(ratios) > config.Pricing.BASIS_SPREAD:
         return None
-    if len(mismatches) >= BASIS_MIN_POINTS:
+    if len(mismatches) >= config.Pricing.BASIS_MIN_POINTS:
         return BASIS
-    if fields == {'market_cap'} and all(_ratio(r, 1.0) < SHARE_COUNT_TOLERANCE for r in ratios):
+    if fields == {'market_cap'} and all(_ratio(r, 1.0) < config.Pricing.SHARE_COUNT_TOLERANCE for r in ratios):
         return SHARES
     return None
 
@@ -474,11 +451,8 @@ def build_mismatch_reason(mismatches: list[Mismatch]) -> str:
     return MISMATCH_REASON + " on " + "; ".join(parts) + suffix
 
 
-VALUE_HISTORY_START = date(2026, 1, 1)  # start of stored ticker_value history (see scripts/data_fill_ticker_value_refresh.py)
-
-
 def resync_value_history(
-    ticker_id: int, symbol: str, currency: str | None, start: date = VALUE_HISTORY_START,
+    ticker_id: int, symbol: str, currency: str | None, start: date = config.Pricing.VALUE_HISTORY_START,
     reference_shares: float | None = None, verified_shares: float | None = None,
 ) -> int | str:
     """Rewrites a ticker's ticker_value history from `start` to today from FMP's historical
@@ -508,22 +482,22 @@ def store_validated_ticker_value(
     of `exchange` (see modules.ticker.util.listing_currency). Omit both only for callers that
     can't know either (market_cap will then be stored unconverted, native-currency).
 
-    OUTLIER_CONTEXT_DAYS of history are fetched (one call each, as before) so an FMP glitch on
+    config.Pricing.OUTLIER_CONTEXT_DAYS of history are fetched (one call each, as before) so an FMP glitch on
     value_date is recognised as one (market_cap_outliers) and stored repaired from the price,
-    or withheld when it can't be (clean_market_caps); only the last HISTORY_LOOKBACK_DAYS are
+    or withheld when it can't be (clean_market_caps); only the last config.Pricing.HISTORY_LOOKBACK_DAYS are
     compared with the stored values. `reference_shares` — the listing's share count from FMP's
     live quote, when the caller has it (the screener row) — is the glitch filter's reference;
     `verified_shares` (ticker.verified_shares) repairs a history on a wrong share count
     (clean_market_caps), the same way the stored history was rewritten.
 
-    A mismatch withholds the value (and flags the ticker invalid after GRACE_PERIOD_DAYS) unless
+    A mismatch withholds the value (and flags the ticker invalid after config.Pricing.GRACE_PERIOD_DAYS) unless
     it's ours that's off (mismatch_kind): FMP's revised values replace the stored ones, or a
     history stored on another basis or share count is rewritten from FMP - then the value is stored."""
     try:
         currency = tu.listing_currency(exchange, currency)
         # Not logging repaired/dropped glitches here: the same old glitch would be reported daily for months.
         fetched = fetch_price_and_market_cap_history(
-            symbol, value_date - timedelta(days=OUTLIER_CONTEXT_DAYS), value_date, currency=currency, log_outliers=False,
+            symbol, value_date - timedelta(days=config.Pricing.OUTLIER_CONTEXT_DAYS), value_date, currency=currency, log_outliers=False,
             reference_shares=reference_shares, verified_shares=verified_shares,
         )
         if isinstance(fetched, str):
@@ -537,7 +511,7 @@ def store_validated_ticker_value(
 
         stored = fetch_values_for_ticker(
             ticker_id,
-            value_date - timedelta(days=HISTORY_LOOKBACK_DAYS),
+            value_date - timedelta(days=config.Pricing.HISTORY_LOOKBACK_DAYS),
             value_date - timedelta(days=1),
         )
         mismatches = compare_overlap(ticker_id, fetched, stored)
@@ -559,8 +533,8 @@ def store_validated_ticker_value(
 
         if mismatches and kind is None:
             last_good_date = fetch_latest_value_date(ticker_id)
-            days_since_last_good = (value_date - last_good_date).days if last_good_date else GRACE_PERIOD_DAYS
-            if days_since_last_good >= GRACE_PERIOD_DAYS:
+            days_since_last_good = (value_date - last_good_date).days if last_good_date else config.Pricing.GRACE_PERIOD_DAYS
+            if days_since_last_good >= config.Pricing.GRACE_PERIOD_DAYS:
                 reason = build_mismatch_reason(mismatches)
                 ticker.update_invalid(ticker_id, reason)
                 log.record_notice(f"Flagged ticker_id={ticker_id} ({symbol}) invalid: {reason}")

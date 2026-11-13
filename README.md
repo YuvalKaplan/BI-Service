@@ -46,6 +46,7 @@ The same codebase runs in three ways:
 - [Simulation](#simulation)
 - [Backtesting](#backtesting)
 - [Scripts](#scripts)
+- [Configuration](#configuration)
 - [Environment variables](#environment-variables)
 - [Hosting](#hosting)
 - [Python](#python)
@@ -90,7 +91,7 @@ FMP screener ──► screener_listing ─────────────�
 
 Collection runs on the daily run days: FMP refreshes most funds' holdings once a week (dated Sunday) and some daily or on another weekday, so every run picks up whatever changed. Every day, listings come in first – the holdings and the large-cap screener – and then the ticker maintenance goes over every ticker (profiles, values, companies, style – the [ticker utilities](#ticker-utilities)), so the generators only use maintained tickers. Each step reads what the previous one stored, so any of them can be re-run on its own: on the generation day the companies are built from the stored screen and the linked listings, and the benchmarks are formed on the same day the best ideas and funds consume them. If a step fails the cron stops and emails the admin: in particular the FMP screener is retried 3 times and then fails the run, and no companies or an empty benchmark (no market cap could be validated) fails it too, so best ideas and funds never run on a partial or missing benchmark.
 
-**The daily run days**, **the weekly day** and **the generation day** are constants of `modules/cron/schedule.py`: `DAILY_RUN_DAYS` (Tue–Sat), `WEEKLY_WEEKDAY` (Sunday) and `GENERATION_WEEKDAY` (Wednesday), with the reminder's day of the month, `SEC_LIST_REMINDER_DAY` (1). The cron reads them all from there, and the holdings download's retry of unresolved lines, the screener's weekly storage and the simulation read the generation day from there too. The cron runs early in the UTC morning (the evening before in New York), so every run works on the previous trading day's close: the Wednesday run generates from Tuesday's close. When that close is an NYSE holiday (FMP's holidays-by-exchange; early closes are trading days) the generation moves a day later, else a day earlier (`GENERATION_SHIFTS`), within the same week – Tuesday 4 July 2028 moves it to Thursday 6 July. A holiday on the generation day itself doesn't matter: its close isn't used. The cron email says when and why it moved; if FMP's calendar can't be read the usual day stands. Because the day can move, a fund's recalculation frequency is counted in weeks, not days (step 8).
+**The daily run days**, **the weekly day** and **the generation day** are settings in `modules/config.py` (`config.Schedule`): `DAILY_RUN_DAYS` (Tue–Sat), `WEEKLY_WEEKDAY` (Sunday) and `GENERATION_WEEKDAY` (Wednesday), with the reminder's day of the month, `SEC_LIST_REMINDER_DAY` (1); `modules/cron/schedule.py` works out the actual days from them. The cron reads them all from there, and the holdings download's retry of unresolved lines, the screener's weekly storage and the simulation read the generation day from there too. The cron runs early in the UTC morning (the evening before in New York), so every run works on the previous trading day's close: the Wednesday run generates from Tuesday's close. When that close is an NYSE holiday (FMP's holidays-by-exchange; early closes are trading days) the generation moves a day later, else a day earlier (`GENERATION_SHIFTS`), within the same week – Tuesday 4 July 2028 moves it to Thursday 6 July. A holiday on the generation day itself doesn't matter: its close isn't used. The cron email says when and why it moved; if FMP's calendar can't be read the usual day stands. Because the day can move, a fund's recalculation frequency is counted in weeks, not days (step 8).
 
 When the run finishes (or fails), an email summary goes to the admins (step 10).
 
@@ -270,6 +271,8 @@ Each fund is defined by a JSON **strategy**, for example:
 }
 ```
 
+A setting left out of a fund's strategy takes its default from `config.FundStrategy` in `modules/config.py` (`allocation_rebalance`, `esg_only`, `rank_points`, `benchmark`, `recalc_frequency_days`).
+
 | Field | Meaning |
 |-------|---------|
 | `holdings` | number of stocks in the fund |
@@ -292,7 +295,7 @@ Each fund is defined by a JSON **strategy**, for example:
 
 The candidates are then combined per company into a **score** (`model_fund._filter_and_aggregate`): each ETF gives it the `rank_points` of its rank there (each ETF once, at its best rank), summed across the ETFs – rank 1 with one manager (512) equals rank 2 with two (2 × 256) or rank 4 with eight, so breadth of agreement counts as much as the strength of one manager's view, and marginal delta differences between ranks matter less. Alongside: its best rank, the number of ETFs scoring it (**appearances**), its highest delta and the ETF with it (the **source ETF**). Companies scoring 0 are left out. They're ordered by score, then appearances, then delta. Each **bucket** – a region of a split, and a style of a `blend` with percentages – is ordered on its own, and its **ideal** holdings are its top N, N being its share of the holdings (33 / 17 for a 50-holding Global fund on the market split of Nov 2026: 65.0% of 50 = 32.5, rounded half up).
 
-**Changes to the previous holdings** (per bucket, `model_fund.KEEP_BUFFER` = 1.25):
+**Changes to the previous holdings** (per bucket, `config.FundStrategy.KEEP_BUFFER` = 1.25):
 
 - A current holding is **kept** while it's within the top `ceil(N × 1.25)` of its bucket by score (top 63 of a single 50-holding bucket; 42 US / 22 International at 33 / 17) – a company drifting between 45th and 60th stays held.
 - A current holding no longer scored at all is **sold** ("No longer a best idea"); one scored but below that line is **sold** ("Below the score buffer").
@@ -661,6 +664,16 @@ All scripts are run from the project root with the virtual environment active. C
 | Script | What it does |
 |--------|--------------|
 | `scripts/db_sync_dev_from_prod.py` | Copies the new `provider_etf_holding` rows from production to development (per ETF, everything newer than development's latest date), matching the ETFs by their SEC series id (each database builds its own list; an ETF development doesn't have yet is skipped with a warning) and remapping tickers by symbol + exchange, adding missing tickers. Production is opened read-only. Derived data is then regenerated by running the pipeline against development. Options: `--yes`, `--dry-run`, `--provider-etf-id N`. |
+
+---
+
+## Configuration
+
+Every setting of the live pipeline is in one file, **`modules/config.py`**: thresholds and tolerances, look-back windows, the cron's weekdays, FMP / EDGAR rate limits and retries, worker counts, the screener's exchanges, the SEC profile and selection rules, the benchmark and index-fund parameters, and the **defaults of the fund strategy** (used where a fund's stored strategy leaves a setting out, with the keep buffer and the market-cap weighting). It's grouped by stage – `config.Schedule`, `config.EtfSelection`, `config.Pricing`, `config.FundStrategy`, … – and the code reads `config.<Section>.<NAME>`. Secrets stay in `.env` ([Environment variables](#environment-variables)) and are never in this file.
+
+- **Backtesting** has its own **`modules/bt/config.py`** with its copies of the values it shares with the live pipeline (best-idea limits, market-cap weighting, the style classifier, the ESG rules), so changing one pipeline never changes the other. BT-only settings stay in their BT modules ([Backtesting](#backtesting)).
+- **Scripts** keep their own run settings at the top of each script (see [Scripts](#scripts)).
+- A value quoted in the methodology (`methodology/detailed.md`, Appendix A) is changed together with that document and the strategy documents generated from it.
 
 ---
 

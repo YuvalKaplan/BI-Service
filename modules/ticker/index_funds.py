@@ -12,17 +12,17 @@ at its float-adjusted weight. Weekly (refresh, on the generation day before the 
      in the fund times the fund's scale (float cap per $ held: median over our companies of free
      float x company cap / value). Stored on each line (float_cap).
   3. The market's breakpoints: the float cap at which its largest companies make up each coverage
-     (BREAKPOINT_COVERAGES) of its total float cap (market_breakpoint).
+     (config.IndexFunds.BREAKPOINT_COVERAGES) of its total float cap (market_breakpoint).
 
 The breakpoints set size relative to the market rather than at fixed dollar lines:
   - each benchmark's large-cap cutoff is its market's breakpoint at benchmark.market_coverage
     (US 0.93 - the Russell 1000's share of the market; International 0.80), and a company is in
-    when its whole company cap reaches it and at least MIN_FLOAT_FACTOR of it floats (passes_large -
+    when its whole company cap reaches it and at least config.IndexFunds.MIN_FLOAT_FACTOR of it floats (passes_large -
     the S&P / Russell way: membership on the whole cap, a minimum float);
   - the funds' large / mid_small filter and the universe screener use the same cutoffs
     (large_cutoffs);
   - the SEC ETF profiles size their stocks by the 0.70 / 0.90 breakpoints (Morningstar-style),
-    and count the stocks the emerging fund holds (EMERGING_FUNDS - FTSE's view: Korea is
+    and count the stocks the emerging fund holds (config.IndexFunds.EMERGING_FUNDS - FTSE's view: Korea is
     developed) as a fund's emerging-market share.
 """
 import log
@@ -30,6 +30,7 @@ import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from modules import config
 from modules.core import api_stocks
 from modules.object import benchmark, market_breakpoint, ticker, universe_etf, universe_etf_holding
 from modules.object.market_breakpoint import MarketBreakpoint
@@ -40,24 +41,13 @@ from modules.ticker.resolver import FUND_REASONS, TickerResolver
 
 US = company.US
 INTERNATIONAL = company.INTERNATIONAL
-MIN_FLOAT_FACTOR = 0.10                                                    # S&P's minimum float (IWF)
-BREAKPOINT_COVERAGES = [round(0.50 + i / 100, 2) for i in range(50)]      # 0.50 - 0.99, every week
-SCREEN_MARGIN = 0.8        # the universe screener fetches from this share of the lowest benchmark cutoff
-SNAPSHOT_MAX_AGE_DAYS = 7  # an older snapshot is refreshed before it's used
 FULL_UNIVERSE_STYLES = ('blend', 'core')
-EMERGING_FUNDS = ('VWO',)  # the index funds whose stocks are emerging markets (FTSE Emerging: Korea isn't)
-# FTSE includes China A shares (Shanghai / Shenzhen listings - VWO's .SS / .SZ lines) at 25% of
-# their investable float, so their holding is scaled up by it before it's valued: 2,077 of VWO's
-# 5,035 lines are A shares, 6% of its weight, and left as held they pulled VWO's scale ~20% up
-# (flagging South African and Brazilian caps as too low) and put the A-share companies at a
-# quarter of their float.
-CHINA_A_INCLUSION = 0.25
 _PARTIAL_INCLUSION_SUFFIXES = ('.SS', '.SZ')
 
 
 def inclusion(line: dict) -> float:
     """The share of its float the index holds a line's company at, where that isn't all of it."""
-    return CHINA_A_INCLUSION if (line.get('asset') or '').upper().endswith(_PARTIAL_INCLUSION_SUFFIXES) else 1.0
+    return config.IndexFunds.CHINA_A_INCLUSION if (line.get('asset') or '').upper().endswith(_PARTIAL_INCLUSION_SUFFIXES) else 1.0
 
 
 @dataclass
@@ -223,7 +213,7 @@ def refresh(as_of: date | None = None) -> RefreshStats:
     stats.as_of = max(when for _f, when, _items in snapshots).date()
     points = []
     for market, caps in market_caps.items():
-        for coverage, (cap, n) in breakpoints(list(caps.values()), BREAKPOINT_COVERAGES).items():
+        for coverage, (cap, n) in breakpoints(list(caps.values()), config.IndexFunds.BREAKPOINT_COVERAGES).items():
             stats.breakpoints[(market, coverage)] = (cap, n)
             points.append(MarketBreakpoint(as_of_date=stats.as_of, market=market, coverage=coverage, float_cap=cap, companies=n))
 
@@ -241,7 +231,7 @@ def snapshot(as_of: date | None = None, refresh_stale: bool = True) -> dict[str,
     """{fund: (market, lines)}: each enabled index fund's stored holdings from the latest date on or
     before as_of, as FMP-shaped lines (asset, isin, securityCusip, sharesNumber, marketValue,
     weightPercentage) with their float_cap and ticker_id. A fund with no snapshot, or one older
-    than SNAPSHOT_MAX_AGE_DAYS, is downloaded first (refresh) - unless refresh_stale is False
+    than config.IndexFunds.SNAPSHOT_MAX_AGE_DAYS, is downloaded first (refresh) - unless refresh_stale is False
     (the daily company region refresh reads whatever is stored)."""
     as_of = as_of or date.today()
 
@@ -249,7 +239,7 @@ def snapshot(as_of: date | None = None, refresh_stale: bool = True) -> dict[str,
         out, stale = {}, False
         for f in universe_etf.fetch_enabled():
             items = universe_etf_holding.fetch_latest(f.id, as_of)
-            if not items or (as_of - items[0].holding_date.date()).days > SNAPSHOT_MAX_AGE_DAYS:
+            if not items or (as_of - items[0].holding_date.date()).days > config.IndexFunds.SNAPSHOT_MAX_AGE_DAYS:
                 stale = True
             out[f.symbol] = (f.market, [{
                 'asset': h.symbol or '', 'isin': h.isin or '', 'securityCusip': h.cusip or '', 'name': h.name,
@@ -318,7 +308,7 @@ def large_cutoffs(as_of: date | None = None) -> dict[str, float]:
 
 def passes_large(whole_cap: float | None, float_factor: float | None, cut: float | None) -> bool:
     """The S&P / Russell way: the whole company cap reaches the cutoff, and at least
-    MIN_FLOAT_FACTOR of it floats (no factor known: not held against it)."""
+    config.IndexFunds.MIN_FLOAT_FACTOR of it floats (no factor known: not held against it)."""
     if not whole_cap or cut is None:
         return False
-    return whole_cap >= cut and (float_factor is None or float_factor >= MIN_FLOAT_FACTOR)
+    return whole_cap >= cut and (float_factor is None or float_factor >= config.IndexFunds.MIN_FLOAT_FACTOR)

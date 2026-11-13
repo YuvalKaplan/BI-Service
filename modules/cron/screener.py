@@ -2,25 +2,13 @@ import log
 import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from modules import config
 from modules.core import api_stocks
 from modules.object import batch_run, ticker, screener_listing
 from modules.object.screener_listing import ScreenerListing, LINE_HOME, LINE_FOREIGN, LINE_NON_EQUITY, LINE_ORDER_BOOK
 from modules.object.ticker import Ticker
 from modules.ticker import company, index_funds, pricing
 from modules.ticker import util as tu
-
-# FMP's screener has to be queried per exchange to get real international coverage (an
-# unfiltered call is heavily US/Canada-biased and mixes currencies), so the screen is the
-# union of these exchanges' large caps.
-US_SCREENER_EXCHANGES = ['NYSE', 'NASDAQ', 'AMEX']
-INTERNATIONAL_EXCHANGES = [
-    'TSX', 'LSE',
-    'JPX', 'XETRA', 'HKSE', 'ASX', 'SIX', 'PAR', 'SHH', 'NSE', 'TAI', 'BSE',
-    'SHZ', 'STO', 'KSC', 'MIL', 'FSX', 'SAO', 'AMS', 'WSE', 'SES', 'BME',
-    'OSL', 'VIE', 'JNB',
-    'CPH', 'HEL', 'BRU', 'LIS', 'DUB', 'TLV', 'NZE', 'SET', 'KLS', 'IST', 'MEX', 'SAU',
-]
-SCREENER_EXCHANGES = US_SCREENER_EXCHANGES + INTERNATIONAL_EXCHANGES
 
 
 def _usd_rate(exchange: str) -> float | None:
@@ -31,7 +19,7 @@ def _usd_rate(exchange: str) -> float | None:
     if not currency:
         return None
     today = date.today()
-    rates = pricing.fetch_historic_usd_rates(currency, today - timedelta(days=10), today)
+    rates = pricing.fetch_historic_usd_rates(currency, today - timedelta(days=config.Pricing.FX_RATE_LOOKBACK_DAYS), today)
     if isinstance(rates, str) or not rates:
         return None
     return rates[max(rates)]
@@ -42,12 +30,12 @@ def screen_threshold(screen_date: date) -> float:
     markets (index_funds.large_cutoffs - a float-cap breakpoint; a company's whole cap is at least
     its float cap, so every company that can pass is screened) with a margin for the moves
     between the weekly breakpoints."""
-    return min(index_funds.large_cutoffs(screen_date).values()) * index_funds.SCREEN_MARGIN
+    return min(index_funds.large_cutoffs(screen_date).values()) * config.IndexFunds.SCREEN_MARGIN
 
 
 def _fetch_all_screener_results(min_cap_usd: float) -> list[dict]:
     """
-    One paginated screener call per exchange in SCREENER_EXCHANGES. FMP's screener compares
+    One paginated screener call per exchange in config.Screener.SCREENER_EXCHANGES. FMP's screener compares
     marketCapMoreThan against each listing's *local-currency* market cap (verified: ¥10B lets
     in $65M companies, €10B misses $10–12B ones), so the USD threshold is converted into each
     exchange's currency first. An exchange with no known currency/FX rate is skipped rather than
@@ -56,18 +44,18 @@ def _fetch_all_screener_results(min_cap_usd: float) -> list[dict]:
     seen: set[tuple[str | None, str | None]] = set()
     results: list[dict] = []
 
-    for exchange in SCREENER_EXCHANGES:
+    for exchange in config.Screener.SCREENER_EXCHANGES:
         rate = _usd_rate(exchange)
         if rate is None:
             log.record_notice(f"Screener: no currency/FX rate for exchange {exchange} — skipped.")
             continue
         local_threshold = int(min_cap_usd / rate)
         caps: list[float] = []
-        for page in range(api_stocks.SCREENER_MAX_PAGES):
+        for page in range(config.Api.SCREENER_MAX_PAGES):
             page_data = api_stocks.fetch_company_screener(
                 market_cap_more_than=local_threshold,
                 page=page,
-                limit=api_stocks.SCREENER_PAGE_LIMIT,
+                limit=config.Api.SCREENER_PAGE_LIMIT,
                 exchange=exchange,
             )
             for row in page_data:
@@ -78,7 +66,7 @@ def _fetch_all_screener_results(min_cap_usd: float) -> list[dict]:
                 results.append(row)
                 if row.get('marketCap'):
                     caps.append(row['marketCap'])
-            if len(page_data) < api_stocks.SCREENER_PAGE_LIMIT:
+            if len(page_data) < config.Api.SCREENER_PAGE_LIMIT:
                 break
         smallest = f"${min(caps) * rate / 1e9:,.1f}B" if caps else "n/a"
         log.record_status(f"Screener {exchange}: threshold {local_threshold:,} local, {len(caps)} companies, smallest {smallest}")
@@ -117,7 +105,7 @@ def _classify(symbol: str, exchange: str, name: str, country: str | None) -> str
         return LINE_NON_EQUITY
     if tu.is_iob_line(bare, exchange):
         return LINE_ORDER_BOOK
-    if tu.market_tier(country, bare, exchange) <= 2 or not tu.has_screened_home(country, SCREENER_EXCHANGES):
+    if tu.market_tier(country, bare, exchange) <= 2 or not tu.has_screened_home(country, config.Screener.SCREENER_EXCHANGES):
         return LINE_HOME
     return LINE_FOREIGN
 
@@ -265,7 +253,7 @@ def run(screen_date: date | None = None, store: bool = False) -> ScreenerRunStat
         stats = ScreenerRunStats(screen_date=screen_date, stored=store)
         listings: list[ScreenerListing] = []
         min_cap = screen_threshold(screen_date)
-        log.record_status(f"Screening from ${min_cap / 1e9:,.1f}B (the lowest benchmark cutoff x {index_funds.SCREEN_MARGIN:g}).")
+        log.record_status(f"Screening from ${min_cap / 1e9:,.1f}B (the lowest benchmark cutoff x {config.IndexFunds.SCREEN_MARGIN:g}).")
         valid = {(t.symbol, t.exchange) for t in ticker.fetch_all() if not t.invalid}
         for row in _fetch_all_screener_results(min_cap):
             symbol = row.get('symbol')

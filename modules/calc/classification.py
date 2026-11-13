@@ -1,5 +1,6 @@
 import log
 import pandas as pd
+from modules import config
 from dataclasses import dataclass
 from typing import Dict, Any
 from sklearn.compose import ColumnTransformer
@@ -91,12 +92,7 @@ def train_model(categorized_tickers: list[CategorizeTickerItem]):
 
     model = Pipeline([
         ("prep", preprocessor),
-        ("gbm", GradientBoostingClassifier(
-            n_estimators=400,
-            learning_rate=0.05,
-            max_depth=3,
-            random_state=42
-        ))
+        ("gbm", GradientBoostingClassifier(**config.Style.MODEL_PARAMS))
     ])
 
     X = df[numeric_features + categorical_features]
@@ -137,9 +133,9 @@ class StyleClassifier:
         results = []
         for i, symbol in enumerate(df["symbol"]):
             p = probs[i]
-            if p > 0.55:
+            if p > config.Style.GROWTH_MIN_PROBABILITY:
                 style = "growth"
-            elif p < 0.35:
+            elif p < config.Style.VALUE_MAX_PROBABILITY:
                 style = "value"
             else:
                 style = "blend"

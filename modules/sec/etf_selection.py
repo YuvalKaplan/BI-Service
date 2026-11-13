@@ -11,34 +11,34 @@ the current SEC list, its profile still finds it an equity fund, and:
      them as "AAPL US 10/16/26 C340", "SPY 11/17/2026 762.29 C", "SPY CALL USD 12/04/2026",
      "JPMORGAN CHASE + CO NOV26 355 CALL", "NOV26 AVGO C @ 390" or an OCC code
      ("USAR  261016C00020000") - or an equity-linked note ("WELLS FARGO ELN 10/27", "Wells Fargo &
-     Co 147.40% 12/15/2026" - a level of ELN_MIN_LEVEL or more before a date, never a bill's
+     Co 147.40% 12/15/2026" - a level of config.EtfSelection.ELN_MIN_LEVEL or more before a date, never a bill's
      coupon). Covered-call and other option-income funds hold the stocks of an ordinary fund, but
      their weights follow the option book. Once seen (provider_etf.contracts_found - in a holdings
      download or a profile's holdings) the fund is out for good;
-  2. its region is US or International (REGIONS) - a Global fund has no benchmark and no fund
+  2. its region is US or International (config.EtfSelection.REGIONS) - a Global fund has no benchmark and no fund
      region to feed;
-  3. its cap size is large or all (CAP_TYPES);
-  4. it holds MIN_STOCK_HOLDINGS to MAX_STOCK_HOLDINGS[region] stocks (lines matched to the index
+  3. its cap size is large or all (config.EtfSelection.CAP_TYPES);
+  4. it holds config.EtfSelection.MIN_STOCK_HOLDINGS to config.EtfSelection.MAX_STOCK_HOLDINGS[region] stocks (lines matched to the index
      funds' stocks) - international managers spread over more names;
-  5. no sector is more than MAX_SECTOR_EXCESS above its reference weight: the highest weight that
+  5. no sector is more than config.EtfSelection.MAX_SECTOR_EXCESS above its reference weight: the highest weight that
      sector has in our most specific benchmarks - each region's blend, or its value and growth
      benchmarks where it's split (sector_reference). A growth fund may hold as much technology
      as the growth benchmark, a value fund as much finance as the value one, plus the margin; a
      sector theme exceeds both. Measured on the fund's latest stored holdings, by our tickers'
      sectors;
-  6. its top country is at most MAX_TOP_COUNTRY_WEIGHT of the fund - a single-country fund - unless
+  6. its top country is at most config.EtfSelection.MAX_TOP_COUNTRY_WEIGHT of the fund - a single-country fund - unless
      it's a US fund whose top country is the US (our companies' domicile, a US-region company
      counting as US);
-  7. an International fund has at most MAX_EMERGING_WEIGHT in emerging markets (stocks the
-     emerging index fund holds - index_funds.EMERGING_FUNDS): the funds are developed
+  7. an International fund has at most config.EtfSelection.MAX_EMERGING_WEIGHT in emerging markets (stocks the
+     emerging index fund holds - config.IndexFunds.EMERGING_FUNDS): the funds are developed
      international;
-  8. at least MIN_COVERAGE_ENTRY of its stock weight is in companies of its region's blend
+  8. at least config.EtfSelection.MIN_COVERAGE_ENTRY of its stock weight is in companies of its region's blend
      benchmark (coverage) - a fund mostly in mid and small caps, or outside the benchmarks' universe,
-     has best ideas the benchmark can't measure. An active fund stays while at MIN_COVERAGE_STAY,
+     has best ideas the benchmark can't measure. An active fund stays while at config.EtfSelection.MIN_COVERAGE_STAY,
      so it doesn't drop in and out around one level; a fund not yet active, or never measured
      while active, needs the entry level. Measured on the fund's latest stored holdings, every
      company through its current master;
-  9. its latest stored holdings (provider_etf_holding) are at most MAX_HOLDINGS_AGE_DAYS old. FMP
+  9. its latest stored holdings (provider_etf_holding) are at most config.EtfSelection.MAX_HOLDINGS_AGE_DAYS old. FMP
      refreshes most funds' holdings weekly (dated Sunday), some on other weekdays; two weeks
      covers the longest fund look-back (recalc_frequency_days, at most 14), so every active ETF
      can feed every fund. Best ideas and the valuation pass look back as far.
@@ -62,22 +62,12 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from modules import config
 from modules.object import benchmark, provider_etf, provider_etf_holding, sec_active_etf
 from modules.object.provider_etf import ProviderEtf, ACTIVE, INACTIVE, PENDING
 from modules.sec import ncen
 from modules.ticker import index_funds
 
-REGIONS = ('US', 'International')
-CAP_TYPES = ('large', 'all')
-MIN_STOCK_HOLDINGS = 20
-MAX_STOCK_HOLDINGS = {'US': 200, 'International': 250}
-MAX_SECTOR_EXCESS = 0.20        # a sector's weight over its highest weight in our benchmarks (sector_reference)
-MAX_TOP_COUNTRY_WEIGHT = 0.35
-MAX_EMERGING_WEIGHT = 0.35
-MIN_COVERAGE_ENTRY = 0.70       # stock weight in the region's blend benchmark companies to become active...
-MIN_COVERAGE_STAY = 0.65        # ... and to stay active
-MAX_HOLDINGS_AGE_DAYS = 14
-ELN_MIN_LEVEL = 20.0            # a percentage before a date at or above this is an equity-linked note's level, not a coupon
 
 EQUITY = 'equity'   # the profile's strategy for an actively managed equity fund (etf_profile.classify)
 RULES = ('sec', 'duplicate', 'equity', 'contracts', 'region', 'cap', 'holdings', 'sector', 'country', 'emerging',
@@ -102,7 +92,7 @@ def is_contract_line(symbol: str | None, name: str | None) -> bool:
     if _OCC_CODE.search(s) or _OCC_CODE.search(n) or _OPTION_NAME.search(n) or _ELN_NAME.search(n):
         return True
     level = _ELN_LEVEL.search(n)
-    return bool(level and float(level.group(1)) >= ELN_MIN_LEVEL)
+    return bool(level and float(level.group(1)) >= config.EtfSelection.ELN_MIN_LEVEL)
 
 
 def has_contract_lines(lines: list[dict]) -> bool:
@@ -140,7 +130,7 @@ class SelectionStats:
 def coverage_level(etf: ProviderEtf) -> float:
     """The coverage an ETF needs: the stay level when it's active and was measured while active
     (benchmark_coverage stored), else the entry level."""
-    return MIN_COVERAGE_STAY if etf.status == ACTIVE and etf.benchmark_coverage is not None else MIN_COVERAGE_ENTRY
+    return config.EtfSelection.MIN_COVERAGE_STAY if etf.status == ACTIVE and etf.benchmark_coverage is not None else config.EtfSelection.MIN_COVERAGE_ENTRY
 
 
 def failed_rules(etf: ProviderEtf, current_series: set[str], latest: date | None, as_of: date,
@@ -158,23 +148,23 @@ def failed_rules(etf: ProviderEtf, current_series: set[str], latest: date | None
         failed.append('equity')
     if etf.contracts_found is not None:
         failed.append('contracts')
-    if etf.region not in REGIONS:
+    if etf.region not in config.EtfSelection.REGIONS:
         failed.append('region')
-    if etf.cap_type not in CAP_TYPES:
+    if etf.cap_type not in config.EtfSelection.CAP_TYPES:
         failed.append('cap')
-    max_holdings = MAX_STOCK_HOLDINGS.get(etf.region or '')
-    if etf.stock_holdings is None or max_holdings is None or not MIN_STOCK_HOLDINGS <= etf.stock_holdings <= max_holdings:
+    max_holdings = config.EtfSelection.MAX_STOCK_HOLDINGS.get(etf.region or '')
+    if etf.stock_holdings is None or max_holdings is None or not config.EtfSelection.MIN_STOCK_HOLDINGS <= etf.stock_holdings <= max_holdings:
         failed.append('holdings')
-    if latest is not None and (m.sector_excess is None or m.sector_excess > MAX_SECTOR_EXCESS):
+    if latest is not None and (m.sector_excess is None or m.sector_excess > config.EtfSelection.MAX_SECTOR_EXCESS):
         failed.append('sector')
-    single_country = etf.top_country_weight is None or etf.top_country_weight > MAX_TOP_COUNTRY_WEIGHT
+    single_country = etf.top_country_weight is None or etf.top_country_weight > config.EtfSelection.MAX_TOP_COUNTRY_WEIGHT
     if single_country and not (etf.region == 'US' and etf.top_country == 'US'):
         failed.append('country')
-    if etf.region == 'International' and (etf.emerging_weight is None or etf.emerging_weight > MAX_EMERGING_WEIGHT):
+    if etf.region == 'International' and (etf.emerging_weight is None or etf.emerging_weight > config.EtfSelection.MAX_EMERGING_WEIGHT):
         failed.append('emerging')
     if latest is not None and (m.benchmark_coverage is None or m.benchmark_coverage < coverage_level(etf)):
         failed.append('coverage')
-    if latest is None or latest < as_of - timedelta(days=MAX_HOLDINGS_AGE_DAYS):
+    if latest is None or latest < as_of - timedelta(days=config.EtfSelection.MAX_HOLDINGS_AGE_DAYS):
         failed.append('fresh')
     return failed
 

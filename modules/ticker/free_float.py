@@ -18,10 +18,10 @@ Weekly (refresh):
      companies below the index's minimum float (Christian Dior), some US listings of foreign
      companies — takes its primary listing's free float; with neither it has no factor.
      Benchmark membership and the funds' large-cap filter require a factor of at least
-     index_funds.MIN_FLOAT_FACTOR; weights don't use it.
+     config.IndexFunds.MIN_FLOAT_FACTOR; weights don't use it.
   3. Cap check — an index fund can't hold more of a company than the whole company: for one at
      or above its region's large-cap cutoff (index_funds.large_cutoffs), a float cap
-     CAP_CHECK_FACTOR x its company cap or more means the company cap is on too few shares
+     config.FreeFloat.CAP_CHECK_FACTOR x its company cap or more means the company cap is on too few shares
      (Bitmine's history ran on 230M shares against 570M). Flagged in FloatRunStats.cap_checks
      (cron email, scripts/current_float_factors.py); nothing is changed automatically. (A cap on too many shares — Rocket Companies' 3.79B
      against 2.82B — is refresh.verify_share_count's case: FMP's quote and financials against
@@ -33,6 +33,7 @@ import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from modules import config
 from modules.core import api_stocks
 from modules.object import ticker, ticker_value
 from modules.object.ticker import Ticker
@@ -40,9 +41,6 @@ from modules.ticker import company, index_funds, master, pricing, refresh as pro
 from modules.ticker import util as tu
 from modules.ticker.resolver import TickerResolver
 
-CAP_CHECK_FACTOR = 1.15  # an index float cap this many times the company cap flags the cap as too low
-                         # (fully floated companies sit at 0.97-1.01 — see _value_holdings)
-VALUE_LOOKBACK_DAYS = 14  # stored prices and caps a holding is valued from
 QUOTE_UNITS = (0.01, 1.0, 100.0)  # our stored price vs the fund's: same unit, or one in minor units
 
 
@@ -88,16 +86,16 @@ def _value_holdings(fund_lines: dict[str, dict[int, list[tuple[int, float, float
     series: dict[int, tuple[dict[date, float], dict[date, float]]] = {}
     for i in range(0, len(ids), 2000):
         series.update(ticker_value.fetch_price_and_cap_series_between(
-            ids[i:i + 2000], today - timedelta(days=VALUE_LOOKBACK_DAYS), today))
+            ids[i:i + 2000], today - timedelta(days=config.FreeFloat.VALUE_LOOKBACK_DAYS), today))
     rates: dict[str, dict[date, float]] = {}
 
     def usd_rate(currency: str | None, d: date) -> float | None:
         if not currency or currency == 'USD':
             return 1.0
         if currency not in rates:
-            r = pricing.fetch_historic_usd_rates(currency, today - timedelta(days=VALUE_LOOKBACK_DAYS + 7), today)
+            r = pricing.fetch_historic_usd_rates(currency, today - timedelta(days=config.FreeFloat.VALUE_LOOKBACK_DAYS + 7), today)
             rates[currency] = r if isinstance(r, dict) else {}
-        return pricing.closest_value_for_date(rates[currency], d, window_days=5) if rates[currency] else None
+        return pricing.closest_value_for_date(rates[currency], d, window_days=config.FreeFloat.FX_RATE_WINDOW_DAYS) if rates[currency] else None
 
     out: dict[str, dict[int, float]] = {}
     for fund, lines in fund_lines.items():
@@ -109,7 +107,7 @@ def _value_holdings(fund_lines: dict[str, dict[int, list[tuple[int, float, float
             for tid, shares, mv in ls:
                 t = by_id[tid]
                 prices = series.get(tid, ({}, {}))[1]
-                price = pricing.closest_value_for_date(prices, as_of, window_days=3) if (as_of and prices) else None
+                price = pricing.closest_value_for_date(prices, as_of, window_days=config.FreeFloat.PRICE_WINDOW_DAYS) if (as_of and prices) else None
                 rate = usd_rate(tu.listing_currency(t.exchange, t.currency), as_of) if price else None
                 if price and rate and shares > 0:
                     ours, theirs = price * rate, mv / shares
@@ -139,7 +137,7 @@ def _fix_flagged(flagged: list[int], by_id: dict[int, Ticker], resolver: TickerR
         if not isinstance(profile, dict):
             continue
         currency = tu.listing_currency(t.exchange, t.currency)
-        stored = ticker_value.fetch_price_and_cap_series_between([t.id], pricing.VALUE_HISTORY_START, today).get(t.id)
+        stored = ticker_value.fetch_price_and_cap_series_between([t.id], config.Pricing.VALUE_HISTORY_START, today).get(t.id)
         verified, why = profile_refresh.verify_share_count(t, full_symbol, profile, stored, currency, today)
         if not why or verified is None:
             continue
@@ -272,7 +270,7 @@ def refresh() -> FloatRunStats:
             float_cap = stats.scale[fund] * fund_value[fund][cid]
             factor = float_cap / cap  # above 1: the index holds more than our whole cap (see the cap check)
             sources[fund] += 1
-            if index_funds.passes_large(cap, None, cutoffs.get(by_id[cid].region)) and float_cap >= CAP_CHECK_FACTOR * cap:
+            if index_funds.passes_large(cap, None, cutoffs.get(by_id[cid].region)) and float_cap >= config.FreeFloat.CAP_CHECK_FACTOR * cap:
                 t = by_id[cid]
                 flagged.append(cid)
                 checks.append((float_cap / cap,

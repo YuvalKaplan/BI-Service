@@ -2,17 +2,16 @@ import os
 import re
 import log
 from datetime import date, timedelta
+from modules import config
 from modules.core.db import ENVIRONMENT
 from modules.object import provider_etf_holding, fund, fund_analysis, fund_holding, fund_holding_change
 from modules.cron import best_ideas_generator, funds_update, schedule
 from modules.calc import model_fund
 
-DEFAULT_INCEPTION_DATE = date(2026, 1, 15)
-
 
 def run(
     fund_id: int,
-    inception_date: date = DEFAULT_INCEPTION_DATE,
+    inception_date: date = config.Sim.DEFAULT_INCEPTION_DATE,
     weeks: int | None = None,
     show_holdings: bool = False,
 ) -> None:

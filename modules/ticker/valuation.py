@@ -2,15 +2,12 @@ import log
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date
+from modules import config
 from modules.object import batch_run, ticker, ticker_value, screener_listing, provider_etf_holding
 from modules.object.screener_listing import ScreenerListing
 from modules.object.ticker import Ticker
-from modules.sec import etf_selection
 from modules.ticker import pricing
 from modules.ticker.resolver import TickerResolver
-
-WORKERS = 5                  # tickers valued in parallel — FMP's rate limit (200/min) is the bound
-HOLDINGS_LOOK_BACK_DAYS = etf_selection.MAX_HOLDINGS_AGE_DAYS  # holdings best ideas can still use (best_ideas_generator.LOOK_BACK_WINDOW)
 
 
 @dataclass
@@ -67,9 +64,9 @@ def targets_for_listings(listings: list[ScreenerListing]) -> list[ValueTarget]:
 
 def targets_in_use(value_date: date, stats: ValuationStats | None = None) -> list[ValueTarget]:
     """Every ticker the generators use, once: the valid tickers in each active ETF's latest
-    holdings from the last HOLDINGS_LOOK_BACK_DAYS, and the registered lines of the screen stored
+    holdings from the last config.Valuation.HOLDINGS_LOOK_BACK_DAYS, and the registered lines of the screen stored
     for value_date (the generation day) — whose target wins, for its quote's share count."""
-    held = targets_for_tickers(ticker.fetch_by_ids(provider_etf_holding.fetch_valid_ticker_ids_in_recent_holdings(HOLDINGS_LOOK_BACK_DAYS)))
+    held = targets_for_tickers(ticker.fetch_by_ids(provider_etf_holding.fetch_valid_ticker_ids_in_recent_holdings(config.Valuation.HOLDINGS_LOOK_BACK_DAYS)))
     screened = targets_for_listings(screener_listing.fetch_for_date(value_date))
     by_id = {t.ticker_id: t for t in held}
     by_id.update({t.ticker_id: t for t in screened})
@@ -96,7 +93,7 @@ def store_values(targets: list[ValueTarget], value_date: date, stats: ValuationS
             reference_shares=t.reference_shares, verified_shares=t.verified_shares)
         return v is not None and v.market_cap is not None
 
-    with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+    with ThreadPoolExecutor(max_workers=config.Valuation.WORKERS) as executor:
         results = list(executor.map(value, todo))
     stats.validated += sum(results)
     stats.withheld += len(results) - sum(results)

@@ -8,6 +8,7 @@ Usage:
     python scripts/current_index_funds.py --dev
 """
 import atexit
+from modules import config
 from modules.object.exit import cleanup
 from modules.object import benchmark
 from modules.ticker import index_funds
@@ -25,6 +26,6 @@ if __name__ == '__main__':
             cap, n = stats.breakpoints[(market, coverage)]
             print(f"  {market:13s} {coverage:.0%}: ${cap / 1e9:8,.1f}B  ({n:,} companies)")
     print("\nBenchmark cutoffs (whole company cap, at least "
-          f"{index_funds.MIN_FLOAT_FACTOR:.0%} floating):")
+          f"{config.IndexFunds.MIN_FLOAT_FACTOR:.0%} floating):")
     for b in benchmark.fetch_all():
         print(f"  {b.name}: {b.market_coverage:.0%} of {b.region} -> ${index_funds.cutoff(b.region, b.market_coverage) / 1e9:,.1f}B")

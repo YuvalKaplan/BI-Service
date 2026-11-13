@@ -31,6 +31,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
+from modules import config
 from modules.core import api_stocks
 from modules.cron import schedule
 from modules.object import batch_run, provider_etf, provider_etf_holding
@@ -42,9 +43,6 @@ from modules.ticker import index_funds
 from modules.ticker.index_funds import Listings
 from modules.ticker.resolver import TickerResolver
 
-FETCH_WORKERS = 4               # ETFs fetched in parallel, all under api_stocks' 200-calls-a-minute throttle
-MAX_FAILED_SHARE = 0.1
-MIN_FAILED_TO_RAISE = 5
 
 LineKey = tuple[str | None, str | None, str | None, str | None]   # symbol, ISIN, CUSIP, name
 # How a line got its ticker (or didn't), in the summary's order
@@ -171,7 +169,7 @@ def summary(stats: DownloadStats) -> str:
 def run(as_of: date | None = None, retry_unresolved: bool | None = None) -> DownloadStats:
     """
     Downloads, resolves and stores the holdings of every download target, then applies the
-    selection rules. Raises - so the cron emails the failure - when more than MAX_FAILED_SHARE of
+    selection rules. Raises - so the cron emails the failure - when more than config.EtfDownloader.MAX_FAILED_SHARE of
     the targets fail or come back empty. Lines left unresolved before are tried again with
     retry_unresolved - by default on the generation day (the cron passes its own).
     """
@@ -186,7 +184,7 @@ def run(as_of: date | None = None, retry_unresolved: bool | None = None) -> Down
         if targets:
             listings = index_funds.our_listings()
             resolver = TickerResolver(TickerResolver.POPULATE_TICKER)
-            pool = ThreadPoolExecutor(max_workers=FETCH_WORKERS)
+            pool = ThreadPoolExecutor(max_workers=config.EtfDownloader.FETCH_WORKERS)
             try:
                 for n, (target, rows, error) in enumerate(pool.map(_fetch, targets), 1):
                     label = target.etf.ticker or str(target.etf.id)
@@ -204,7 +202,7 @@ def run(as_of: date | None = None, retry_unresolved: bool | None = None) -> Down
             finally:
                 pool.shutdown(wait=True, cancel_futures=True)
 
-        if len(stats.failed) > max(MIN_FAILED_TO_RAISE, MAX_FAILED_SHARE * len(targets)):
+        if len(stats.failed) > max(config.EtfDownloader.MIN_FAILED_TO_RAISE, config.EtfDownloader.MAX_FAILED_SHARE * len(targets)):
             log.record_status(summary(stats))
             raise Exception(f"{len(stats.failed)} of {len(targets)} ETF holdings downloads failed - first: {stats.failed[0]}")
         provider_etf.mark_contracts(stats.contracts)

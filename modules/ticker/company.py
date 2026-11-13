@@ -7,7 +7,7 @@ Instead one listing — the company's primary listing — is the source of both 
 its region, and is the company's master ticker. Listings are ordered (ordered_listings), best
 candidate first, by:
 
-  1. activity — a listing with no market cap in the last ACTIVE_DAYS (e.g. an old ticker left
+  1. activity — a listing with no market cap in the last config.Company.ACTIVE_DAYS (e.g. an old ticker left
      behind by a ticker change) ranks after every active one,
   2. share line — ordinary shares before preferred / note / depositary / when-issued / unit lines,
      and before a thin line (thin_lines: a sliver of the company's main line's turnover on the
@@ -27,6 +27,7 @@ import re
 from collections import defaultdict
 from collections.abc import Container
 from datetime import date, timedelta
+from modules import config
 from modules.object import ticker as ticker_obj
 from modules.object import ticker_value
 from modules.object.ticker import Ticker
@@ -36,12 +37,6 @@ from modules.ticker.pricing import closest_value_for_date
 US = 'US'
 INTERNATIONAL = 'International'
 
-ACTIVE_DAYS = 30  # no market cap within this many days of "as of" = inactive (e.g. a ticker left behind by a rename).
-                  # Generous on purpose: many listings only get a value from the weekly screener, and a
-                  # missed week or two must not flip a company's primary listing (and so its region).
-THIN_TURNOVER_SHARE = 0.05  # see thin_lines. Hybrids trade 0.1-3.5% of their company's main line
-                            # (Southern's units SOMN 2.3%, PPL's PPLC 3.4%); share classes kept as
-                            # ordinary sit above (BRK-A 6.8%, FWONA 7.3%).
 
 # Lines that aren't the company's common equity. FMP reports the parent company's full market
 # cap on many of them (Bank of America on a Merrill Lynch note, Corteva on an EIDP preferred),
@@ -116,7 +111,7 @@ def turnover_group_key(t: Ticker) -> tuple:
 
 
 def thin_lines(members: list[Ticker]) -> set[int]:
-    """Ids of the company's listings trading under THIN_TURNOVER_SHARE of its busiest ordinary
+    """Ids of the company's listings trading under config.Company.THIN_TURNOVER_SHARE of its busiest ordinary
     line on the same country's exchanges, in the same currency (turnover_group_key,
     ticker.average_turnover). FMP names some unit, note and preferred lines exactly like the
     company and stamps its whole market cap on them — Southern Company's 2025 corporate units
@@ -131,7 +126,7 @@ def thin_lines(members: list[Ticker]) -> set[int]:
             busiest[key] = max(busiest.get(key, 0.0), t.average_turnover)
     return {t.id for t in members
             if t.average_turnover is not None
-            and t.average_turnover < THIN_TURNOVER_SHARE * busiest.get(turnover_group_key(t), 0.0)}
+            and t.average_turnover < config.Company.THIN_TURNOVER_SHARE * busiest.get(turnover_group_key(t), 0.0)}
 
 
 def is_foreign_currency_line(t: Ticker) -> bool:
@@ -177,7 +172,7 @@ def ordered_listings(
     caps: dict[int, float] | None = None,
     latest_dates: dict[int, date] | None = None,
     as_of: date | None = None,
-    active_days: int = ACTIVE_DAYS,
+    active_days: int = config.Company.ACTIVE_DAYS,
 ) -> list[Ticker]:
     """The company's listings, best primary-listing candidate first (see module docstring).
     latest_dates ({ticker_id: latest ticker_value date}) enables the activity rule; without
@@ -209,7 +204,7 @@ def primary_listing(
     master_id: int | None,
     caps: dict[int, float] | None = None,
     latest_dates: dict[int, date] | None = None,
-    active_days: int = ACTIVE_DAYS,
+    active_days: int = config.Company.ACTIVE_DAYS,
 ) -> Ticker:
     return ordered_listings(members, master_id, caps, latest_dates, active_days=active_days)[0]
 
@@ -272,15 +267,8 @@ def company_caps_as_of(master_ids: list[int], target: date, window: int) -> dict
     return out
 
 
-INDEX_MARKET_DOMINANCE = 2.0  # held by both markets' index funds: one market's float cap must be this
-                              # many times the other's to decide (FMP files some foreign lines under a
-                              # US company's symbol and ISIN: PLDT as TE Connectivity, Electrica as
-                              # Estée Lauder); a real dual holding (Waste Connections, RB Global) is
-                              # near 1 and falls through to the company's country.
-
-
 def _country_region(country: str | None) -> str | None:
-    if not country or country in tu.TAX_HAVEN_COUNTRIES:
+    if not country or country in config.Markets.TAX_HAVEN_COUNTRIES:
         return None
     return US if country == US else INTERNATIONAL
 
@@ -295,19 +283,19 @@ def region(
 
       1. 'index' - the index funds holding the company (index_markets, {market: float cap} from
          index_funds.market_holdings: VTI = US, VEA / VWO = International), the index families'
-         own country assignment (CRSP, FTSE). Held by both: the market with INDEX_MARKET_DOMINANCE
+         own country assignment (CRSP, FTSE). Held by both: the market with config.Company.INDEX_MARKET_DOMINANCE
          times the other's float cap, else the next rule. This keeps the US-run companies
          incorporated abroad US (Accenture, Linde, Medtronic, Chubb) and makes the foreign ones
          listed only in the US International (PDD, Trip.com, SQM).
       2. 'country' - FMP's country (ticker.country: the headquarters' country) unless a tax haven
-         (util.TAX_HAVEN_COUNTRIES). Decides the companies no index fund holds: CRSP leaves out
+         (config.Markets.TAX_HAVEN_COUNTRIES). Decides the companies no index fund holds: CRSP leaves out
          foreign companies listed only in the US (ARM, Spotify, MercadoLibre, NXP) - and some US
          ones (partnerships, BDCs, low-float companies, new listings), which FMP files as US.
       3. 'isin' - the country of incorporation in an ordinary listing's ISIN (depositary lines
          carry the depositary's), unless a tax haven.
       4. 'exchange' - the master listing on a US exchange, or a US company's master on a venue
          with no country of its own (OTC, LSE's order book). The stored master (realigned to the
-         primary listing with master.REALIGN_ACTIVE_DAYS) rather than primary_listing's 30 days:
+         primary listing with config.Master.REALIGN_ACTIVE_DAYS) rather than primary_listing's 30 days:
          a home line not valued for a month (Banco de Chile in Santiago) mustn't hand the region
          to its ADR while it stays the master."""
     held = {m: cap for m, cap in (index_markets or {}).items()}
@@ -315,9 +303,9 @@ def region(
         return next(iter(held)), 'index'
     if held:
         us, intl = held.get(US, 0.0), max((c for m, c in held.items() if m != US), default=0.0)
-        if us >= INDEX_MARKET_DOMINANCE * intl and us > 0:
+        if us >= config.Company.INDEX_MARKET_DOMINANCE * intl and us > 0:
             return US, 'index'
-        if intl >= INDEX_MARKET_DOMINANCE * us and intl > 0:
+        if intl >= config.Company.INDEX_MARKET_DOMINANCE * us and intl > 0:
             return INTERNATIONAL, 'index'
 
     by_country = _country_region(_company_country(members, master_id))
@@ -329,7 +317,7 @@ def region(
             return by_isin, 'isin'
 
     master = next((t for t in members if t.id == master_id), None) or primary_listing(members, master_id, latest_dates=latest_dates)
-    if master.exchange in tu.US_LISTING_EXCHANGES and not tu.is_iob_line(master.symbol, master.exchange):
+    if master.exchange in config.Markets.US_LISTING_EXCHANGES and not tu.is_iob_line(master.symbol, master.exchange):
         return US, 'exchange'
     if tu.listing_country(master.symbol, master.exchange) is None and _company_country(members, master_id) == US:
         return US, 'exchange'

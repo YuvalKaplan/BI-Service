@@ -51,6 +51,7 @@ import os
 from datetime import date, datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
+from modules import config
 from modules.object.exit import cleanup
 from modules.object import ticker
 from modules.object.ticker import Ticker
@@ -109,7 +110,7 @@ def tickers_with_share_count_change(tickers: list[Ticker], resolver: TickerResol
 
     def check(t: Ticker) -> tuple[int, float | None] | None:
         caps = stored.get(t.id, ({}, {}))[0]
-        if t.verified_shares is None and (len(caps) < refresh.SHARES_CHECK_POINTS or max(caps) < today - timedelta(days=30)):
+        if t.verified_shares is None and (len(caps) < config.Refresh.SHARES_CHECK_POINTS or max(caps) < today - timedelta(days=30)):
             return None  # can't trigger: too little recent history to judge (saves the profile call)
         full_symbol = resolver.get_full_symbol(t)
         profile = api_stocks.get_stock_profile(full_symbol)

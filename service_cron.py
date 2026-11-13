@@ -1,6 +1,7 @@
 import atexit
 import log
 from datetime import datetime, timezone
+from modules import config
 from modules.object.exit import cleanup
 from modules.core.db import db_pool_instance, ENVIRONMENT
 from modules.core import sender, text_format
@@ -38,17 +39,17 @@ if __name__ == '__main__':
 
         # A moved generation is reported on its usual day (why nothing is generated) and on the day it runs.
         generation_note = schedule.generation_note(run_day)
-        if not (generation_note and (generation or weekday == schedule.GENERATION_WEEKDAY)):
+        if not (generation_note and (generation or weekday == config.Schedule.GENERATION_WEEKDAY)):
             generation_note = None
 
         # The SEC blocks the hosted cron's IP, so the SEC active ETF list (N-CEN filings on EDGAR) and
         # its funds' FMP profiles are updated by hand (scripts/current_sec_active_etfs.py): an email of
         # its own on the reminder day, first so a failed step can't skip it.
-        if run_day.day == schedule.SEC_LIST_REMINDER_DAY:
+        if run_day.day == config.Schedule.SEC_LIST_REMINDER_DAY:
             reminder = ncen.reminder(run_day)
             sender.send_admin(subject="Reminder: update the SEC active ETF list", message=reminder, html=text_format.to_html(reminder))
 
-        if weekday in schedule.DAILY_RUN_DAYS:
+        if weekday in config.Schedule.DAILY_RUN_DAYS:
             # Listings in first — the provider ETFs' FMP holdings (stage 2, then the selection rules on
             # their new dates) and the large-cap screener (stage 3), which register their tickers as
             # they read them — then ticker maintenance (stage 4) runs the
@@ -115,7 +116,7 @@ if __name__ == '__main__':
                 sender.send_admin(subject="Best Ideas Cron Failed", message=f"Failed on style assignment with error:\n{e}\n\n")
                 raise e
 
-        if weekday == schedule.WEEKLY_WEEKDAY:  # The weekly day — ticker maintenance, weekly part: style reference data, then ESG
+        if weekday == config.Schedule.WEEKLY_WEEKDAY:  # The weekly day — ticker maintenance, weekly part: style reference data, then ESG
             try:
                 total_etfs = categorize_downloader.run()
             except Exception as e:

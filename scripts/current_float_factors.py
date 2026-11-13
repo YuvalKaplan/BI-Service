@@ -15,6 +15,7 @@ Usage:
 import atexit
 import os
 from datetime import date, datetime
+from modules import config
 from modules.object.exit import cleanup
 from modules.object import ticker, screener_company
 from modules.cron.benchmark_generator import current_companies
@@ -29,7 +30,7 @@ if __name__ == '__main__':
     lines = ["# Float Factors Report", "", f"Generated: {datetime.now():%Y-%m-%d %H:%M:%S}", "", free_float.summary(stats), ""]
     lines += [f"Index fund scale (float cap per $ held): " + ", ".join(f"{f} {k:,.1f}" for f, k in stats.scale.items()), ""]
     lines += [f"## Market caps below the index funds' float cap: {len(stats.cap_checks)}", "",
-              f"An index fund can't hold more of a company than the whole company: a float cap {free_float.CAP_CHECK_FACTOR:g}x "
+              f"An index fund can't hold more of a company than the whole company: a float cap {config.FreeFloat.CAP_CHECK_FACTOR:g}x "
               "the company cap or more means the company cap looks too low (largest first).", ""]
     lines += [f"- {x}" for x in stats.cap_checks] or ["None."]
     lines += [""]

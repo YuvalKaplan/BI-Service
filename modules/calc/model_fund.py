@@ -4,17 +4,11 @@ from datetime import date, timedelta
 from typing import Any, List, Literal, Optional, cast
 from dataclasses import dataclass
 import math
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+from modules import config
 from modules.core.text_format import table
 from modules.object import benchmark_split, best_idea, ticker
-from modules.ticker import company, index_funds
-
-
-# rank 1 = 512, 2 = 256, ... 10 = 1: each ETF's best ideas run to rank 10
-# (best_ideas_generator.MAX_BEST_IDEAS_PER_FUND).
-DEFAULT_RANK_POINTS = [2 ** (10 - r) for r in range(1, 11)]
-# A holding is kept while it's within the top ceil(target x KEEP_BUFFER) of its bucket by score.
-KEEP_BUFFER = 1.25
+from modules.ticker import company
 
 
 # ── Shared strategy models ──────────────────────────────────────────────────
@@ -57,7 +51,7 @@ class Region(BaseModel):
 
 class Strategy(BaseModel):
     allocation: str
-    allocation_rebalance: str = 'on_change'  # 'none' | 'on_change' | 'full'
+    allocation_rebalance: str = config.FundStrategy.ALLOCATION_REBALANCE  # 'none' | 'on_change' | 'full'
     holdings: int
     cap: Cap
     style: Style
@@ -66,17 +60,17 @@ class Strategy(BaseModel):
     benchmarks: Optional[list[str]] = None
     provider_etfs: Optional[list[int]] = None
     exchanges: Optional[list[str]] = None
-    esg_only: bool = False
+    esg_only: bool = config.FundStrategy.ESG_ONLY
     # Points a company earns from each ETF by its rank there (index = rank - 1; ranks beyond the
     # list earn none), summed across the ETFs into its score - the selection's order. The halving
     # scale makes rank 1 worth two rank 2s, four rank 3s, ... (consensus over a single conviction).
-    rank_points: list[int] = DEFAULT_RANK_POINTS
+    rank_points: list[int] = Field(default_factory=lambda: list(config.FundStrategy.RANK_POINTS))
     # Which best ideas the fund draws on (best_idea.benchmark_mode): the market — 'full_value_growth_split'
     # (best_idea.MODE_MARKET: each company against its own style's benchmark, US value / growth, else its
     # region's blend) — or 'self' (the ETF's own holdings, market-cap weighted). The fund's style setting
     # (filter / split) only decides what it buys; the company's own style picks its benchmark.
-    benchmark: Literal['full_value_growth_split', 'self'] = 'full_value_growth_split'
-    recalc_frequency_days: int = 7
+    benchmark: Literal['full_value_growth_split', 'self'] = config.FundStrategy.BENCHMARK
+    recalc_frequency_days: int = config.FundStrategy.RECALC_FREQUENCY_DAYS
 
     @field_validator('rank_points')
     @classmethod
@@ -137,10 +131,6 @@ class FundChangesResult:
 
 
 # ── Constants ────────────────────────────────────────────────────────────────
-
-MC_WEIGHT_ALPHA = 0.5   # power-law exponent: 1.0 = pure market-cap, 0.0 = equal-weight
-MC_WEIGHT_CAP   = 0.10  # maximum weight per holding
-MC_WEIGHT_FLOOR = 0.01  # minimum weight per holding
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -216,10 +206,10 @@ def fund_best_ideas(all_best_ideas_df: pd.DataFrame, strategy: Strategy, as_of_d
 
 def large_cap_mask(df: pd.DataFrame) -> pd.Series:
     """Rows whose company is large cap: its whole cap at or above its region's cutoff
-    (large_cap_min) with at least index_funds.MIN_FLOAT_FACTOR floating (float_factor; unknown
+    (large_cap_min) with at least config.IndexFunds.MIN_FLOAT_FACTOR floating (float_factor; unknown
     passes) - index_funds.passes_large, as the benchmarks apply it. Both columns are added by
     funds_update.build_shared_context."""
-    float_ok = df['float_factor'].isna() | (pd.to_numeric(df['float_factor'], errors='coerce') >= index_funds.MIN_FLOAT_FACTOR)
+    float_ok = df['float_factor'].isna() | (pd.to_numeric(df['float_factor'], errors='coerce') >= config.IndexFunds.MIN_FLOAT_FACTOR)
     return (pd.to_numeric(df['market_cap'], errors='coerce') >= pd.to_numeric(df['large_cap_min'], errors='coerce')) & float_ok
 
 
@@ -393,7 +383,7 @@ def _fetch_and_select_by_style(
     """
     Returns (buckets, fetched): one bucket per style with a style split (style_split_percents for
     this region on as_of), else one; `fetched` is every scored idea, in score order per bucket.
-    Each bucket's keep_ids are its ideas within the top ceil(target x KEEP_BUFFER): a holding among
+    Each bucket's keep_ids are its ideas within the top ceil(target x config.FundStrategy.KEEP_BUFFER): a holding among
     them is kept. A growth bucket short of ideas leaves its places to value.
     """
     etf_ids = strategy.provider_etfs or []
@@ -407,7 +397,7 @@ def _fetch_and_select_by_style(
         ))
 
     def keep(ideas: list[best_idea.BestIdeaRanked], target: int) -> set[int]:
-        return {i.ticker_id for i in ideas[:math.ceil(target * KEEP_BUFFER)]}
+        return {i.ticker_id for i in ideas[:math.ceil(target * config.FundStrategy.KEEP_BUFFER)]}
 
     def ids(ideas: list[best_idea.BestIdeaRanked]) -> set[int]:
         return {i.ticker_id for i in ideas}
@@ -562,7 +552,7 @@ def generate(
         )
     else:
         # A holding is kept while it's within its bucket's keep buffer (the top
-        # ceil(target x KEEP_BUFFER) by score), else sold. Kept holdings carry today's score.
+        # ceil(target x config.FundStrategy.KEEP_BUFFER) by score), else sold. Kept holdings carry today's score.
         for ph in previous_holdings:
             now = fetched_by_id.get(ph.ticker_id)
             if now is None or ph.ticker_id not in keep_ids:
@@ -633,15 +623,15 @@ def apply_market_cap_weights(
     # can absorb 40–50% of the fund while the smallest holdings fall below 0.1%.
     # To address this we apply a two-stage approach:
     #
-    # Stage 1 — Power-law compression (MC_WEIGHT_ALPHA = 0.5, i.e. square root).
+    # Stage 1 — Power-law compression (config.FundStrategy.MC_WEIGHT_ALPHA = 0.5, i.e. square root).
     #   Instead of weighting by raw market cap, we weight by mc^alpha.  This
     #   preserves the relative ordering of holdings (larger cap still gets more
     #   weight) but compresses the ratio between the largest and smallest: a
     #   company 100× bigger than another gets only 10× the weight instead of 100×.
     #
     # Stage 2 — Single cap + floor pass with proportional redistribution.
-    #   After compression, holdings that still breach the hard bounds (MC_WEIGHT_CAP
-    #   and MC_WEIGHT_FLOOR) are pinned to those bounds.  The net weight freed by
+    #   After compression, holdings that still breach the hard bounds (config.FundStrategy.MC_WEIGHT_CAP
+    #   and config.FundStrategy.MC_WEIGHT_FLOOR) are pinned to those bounds.  The net weight freed by
     #   capping minus the weight consumed by flooring is redistributed to the
     #   unconstrained "middle" holdings proportionally to their compressed weights,
     #   so their relative ordering is maintained.
@@ -650,7 +640,7 @@ def apply_market_cap_weights(
 
     # Stage 1: apply power-law transform and normalise
     transformed = [
-        (mc ** MC_WEIGHT_ALPHA if (mc := market_cap_map.get(h.ticker_id)) else None)
+        (mc ** config.FundStrategy.MC_WEIGHT_ALPHA if (mc := market_cap_map.get(h.ticker_id)) else None)
         for h in holdings
     ]
     total = sum(t for t in transformed if t is not None)
@@ -661,20 +651,20 @@ def apply_market_cap_weights(
 
     # Stage 2: cap + floor with proportional redistribution to middle holdings
     valid   = [i for i, w in enumerate(weights) if w is not None]
-    capped  = [i for i in valid if weights[i] > MC_WEIGHT_CAP]   # type: ignore[operator]
-    floored = [i for i in valid if weights[i] < MC_WEIGHT_FLOOR]  # type: ignore[operator]
-    middle  = [i for i in valid if MC_WEIGHT_FLOOR <= weights[i] <= MC_WEIGHT_CAP]  # type: ignore[operator]
+    capped  = [i for i in valid if weights[i] > config.FundStrategy.MC_WEIGHT_CAP]   # type: ignore[operator]
+    floored = [i for i in valid if weights[i] < config.FundStrategy.MC_WEIGHT_FLOOR]  # type: ignore[operator]
+    middle  = [i for i in valid if config.FundStrategy.MC_WEIGHT_FLOOR <= weights[i] <= config.FundStrategy.MC_WEIGHT_CAP]  # type: ignore[operator]
 
     if capped or floored:
         # net > 0: capping freed more than flooring consumed — middle holdings grow
         # net < 0: flooring consumed more than capping freed — middle holdings shrink
-        excess  = sum(weights[i] - MC_WEIGHT_CAP   for i in capped)   # type: ignore[operator]
-        deficit = sum(MC_WEIGHT_FLOOR - weights[i]  for i in floored)  # type: ignore[operator]
+        excess  = sum(weights[i] - config.FundStrategy.MC_WEIGHT_CAP   for i in capped)   # type: ignore[operator]
+        deficit = sum(config.FundStrategy.MC_WEIGHT_FLOOR - weights[i]  for i in floored)  # type: ignore[operator]
         net = excess - deficit
         for i in capped:
-            weights[i] = MC_WEIGHT_CAP
+            weights[i] = config.FundStrategy.MC_WEIGHT_CAP
         for i in floored:
-            weights[i] = MC_WEIGHT_FLOOR
+            weights[i] = config.FundStrategy.MC_WEIGHT_FLOOR
         if middle:
             middle_total = sum(weights[i] for i in middle)  # type: ignore[misc]
             if middle_total > 0:

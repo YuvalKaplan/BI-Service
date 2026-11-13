@@ -1,18 +1,16 @@
 import log
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from modules import config
 from modules.core import api_stocks
 from modules.cron import screener
-from modules.cron.screener import SCREENER_EXCHANGES, describe, row_symbol
+from modules.cron.screener import describe, row_symbol
 from modules.object import batch_run, ticker, ticker_value, screener_listing, screener_company
 from modules.object.screener_listing import ScreenerListing, LINE_HOME, LINE_FOREIGN
 from modules.object.ticker import Ticker
 from modules.object.screener_company import ScreenerCompany
 from modules.ticker import company, identity, valuation
 from modules.ticker import util as tu
-
-RECENT_CAP_DAYS = 21  # caps the duplicate guard compares on a common date
-VALUE_WINDOW_DAYS = 5  # a listing's value may be this many days older than the screen date (a market holiday)
 
 
 @dataclass
@@ -54,7 +52,7 @@ def _listing_caps(
 ) -> dict[int, tuple[str, float]]:
     """
     {ticker_id: (exchange, market cap in USD)} for the registered listings: the latest validated
-    value stored on screen_date or up to VALUE_WINDOW_DAYS before it — a market closed on the
+    value stored on screen_date or up to config.CompanyBuilder.VALUE_WINDOW_DAYS before it — a market closed on the
     screen date (all of JPX on a Japanese holiday) keeps its last close. Without one (withheld
     in its grace period all week) the listing is left out when require_value (live: a snapshot
     needs a genuinely validated value); the sim passes False and falls back to the latest stored
@@ -68,7 +66,7 @@ def _listing_caps(
     ids = [l.ticker_id for l in listings if l.ticker_id]
     tickers_by_id = {t.id: t for t in ticker.fetch_by_ids(ids)}
     invalid = {tid: t.invalid for tid, t in tickers_by_id.items() if t.invalid}
-    recent = ticker_value.fetch_market_caps_between(ids, screen_date - timedelta(days=VALUE_WINDOW_DAYS), screen_date)
+    recent = ticker_value.fetch_market_caps_between(ids, screen_date - timedelta(days=config.CompanyBuilder.VALUE_WINDOW_DAYS), screen_date)
     latest = {} if require_value else ticker_value.fetch_latest_values(ids)
     out: dict[int, tuple[str, float]] = {}
     for l in listings:
@@ -186,7 +184,7 @@ def _one_row_per_company(listing_caps: dict[int, tuple[str, float]]) -> list[tup
             continue
         c = tickers_by_id.get(cid)
         cap = (c.company_market_cap if c and c.company_market_cap else None) or market_cap
-        region = (c.region if c else None) or (company.US if exchange in tu.US_LISTING_EXCHANGES else company.INTERNATIONAL)
+        region = (c.region if c else None) or (company.US if exchange in config.Markets.US_LISTING_EXCHANGES else company.INTERNATIONAL)
         out[cid] = (cid, region, cap)
     return list(out.values())
 
@@ -203,20 +201,20 @@ def drop_duplicate_companies(
     country's exchange, OTC), each by cap; each dropped when identity.duplicate_evidence ties it
     to a company already kept — across both regions, so a company can't sit in the US
     benchmark via its ADR and in the International one via its home listing. Caps are compared
-    over the RECENT_CAP_DAYS up to as_of (default today).
+    over the config.CompanyBuilder.RECENT_CAP_DAYS up to as_of (default today).
     """
     if not rows:
         return rows
     groups = ticker.fetch_group_members([cid for cid, _r, _mc in rows])
     ids = [t.id for ms in groups.values() for t in ms]
     as_of = as_of or date.today()
-    recent = ticker_value.fetch_market_caps_between(ids, as_of - timedelta(days=RECENT_CAP_DAYS), as_of)
+    recent = ticker_value.fetch_market_caps_between(ids, as_of - timedelta(days=config.CompanyBuilder.RECENT_CAP_DAYS), as_of)
     latest_dates = {tid: max(vals) for tid, vals in recent.items() if vals}
     views = identity.build_views({cid: ms for cid, ms in groups.items() if ms}, recent, latest_dates)
 
     def anchored(cid: int) -> bool:
         v = views.get(cid)
-        return v is None or v.home or not tu.has_screened_home(v.country, SCREENER_EXCHANGES)
+        return v is None or v.home or not tu.has_screened_home(v.country, config.Screener.SCREENER_EXCHANGES)
 
     kept: list[tuple[int, str, float]] = []
     index: dict[tuple[str, str], list[int]] = {}

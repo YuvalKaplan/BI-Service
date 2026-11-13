@@ -4,6 +4,7 @@ from psycopg.errors import Error
 from psycopg.rows import class_row, dict_row
 import pandas as pd
 from dataclasses import dataclass, asdict
+from modules import config
 from modules.core.db import db_pool_instance
 
 # best_idea.benchmark_mode — what each company's benchmark weight is (a fund picks one: strategy.benchmark):
@@ -161,7 +162,7 @@ def fetch_all_as_df(as_of_date: date, look_back_days: int) -> pd.DataFrame:
             SELECT market_cap
             FROM ticker_value
             WHERE ticker_id = bi.ticker_id
-              AND value_date BETWEEN %(date)s - INTERVAL '10 days' AND %(date)s
+              AND value_date BETWEEN %(date)s - %(cap_window_days)s * INTERVAL '1 day' AND %(date)s
             ORDER BY value_date DESC
             LIMIT 1
         ) tv ON TRUE
@@ -172,7 +173,8 @@ def fetch_all_as_df(as_of_date: date, look_back_days: int) -> pd.DataFrame:
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, {'date': as_of_date, 'look_back_days': look_back_days})
+                cur.execute(sql, {'date': as_of_date, 'look_back_days': look_back_days,
+                                  'cap_window_days': config.FundsUpdate.COMPANY_CAP_WINDOW_DAYS})
                 rows = cur.fetchall()
                 cols = [desc[0] for desc in cur.description] if cur.description else []
         return pd.DataFrame(rows, columns=cols)

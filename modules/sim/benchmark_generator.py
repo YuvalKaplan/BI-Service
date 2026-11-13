@@ -1,5 +1,6 @@
 import log
 from datetime import date, timedelta
+from modules import config
 from modules.object import batch_run, benchmark, ticker, ticker_value, screener_listing, screener_company
 from modules.object.screener_listing import ScreenerListing
 from modules.ticker import company, pricing
@@ -7,9 +8,6 @@ from modules.ticker import util as tu
 from modules.cron import schedule
 from modules.cron.benchmark_generator import (benchmark_cutoffs, company_float_factors, current_companies, company_styles,
                                               select_holdings, store_holdings)
-
-WINDOW_DAYS = 5    # how far from a generation day to search for the closest available market cap
-DATA_LAG_DAYS = 3  # FMP's historical price/market-cap endpoints don't have data yet for the most recent days
 
 
 def _most_recent_weekday(d: date) -> date:
@@ -24,7 +22,7 @@ def _most_recent_weekday(d: date) -> date:
 def data_cutoff_date() -> date:
     """The latest date FMP's historical endpoints reliably have data for: the sim's screen date
     (scripts/sim_prep_data.py) and the end of its benchmark backfill."""
-    return _most_recent_weekday(date.today() - timedelta(days=DATA_LAG_DAYS))
+    return _most_recent_weekday(date.today() - timedelta(days=config.Sim.DATA_LAG_DAYS))
 
 
 def _company_caps_for_date(
@@ -43,7 +41,7 @@ def _company_caps_for_date(
     rows: list[tuple[int, str, float]] = []
     for cid, listing_ids in listing_order.items():
         for tid in listing_ids:
-            mc = pricing.closest_value_for_date(history[tid], day, window_days=WINDOW_DAYS)
+            mc = pricing.closest_value_for_date(history[tid], day, window_days=config.Sim.WINDOW_DAYS)
             if mc and mc > 0:
                 rows.append((cid, region_lookup[cid], mc))
                 break
@@ -108,7 +106,7 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
         # the screener quote's share count as the reference.
         listing_ids = [l.ticker_id for ms in members.values() for l in ms if l.ticker_id in tickers_by_id]
         stored = ticker_value.fetch_market_caps_between(
-            listing_ids, generation_days[0] - timedelta(days=WINDOW_DAYS), generation_days[-1] + timedelta(days=WINDOW_DAYS))
+            listing_ids, generation_days[0] - timedelta(days=config.Sim.WINDOW_DAYS), generation_days[-1] + timedelta(days=config.Sim.WINDOW_DAYS))
         history: dict[int, dict[date, float]] = {}
         from_store = fetched_count = 0
         for ms in members.values():
@@ -117,13 +115,13 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
                 if t is None:
                     continue
                 series = stored.get(l.ticker_id)
-                if series and all(pricing.closest_value_for_date(series, d, window_days=WINDOW_DAYS) for d in generation_days):
+                if series and all(pricing.closest_value_for_date(series, d, window_days=config.Sim.WINDOW_DAYS) for d in generation_days):
                     history[l.ticker_id] = series
                     from_store += 1
                     continue
                 fetched = pricing.fetch_price_and_market_cap_history(
                     l.symbol,
-                    inception_date - timedelta(days=pricing.OUTLIER_CONTEXT_DAYS),
+                    inception_date - timedelta(days=config.Pricing.OUTLIER_CONTEXT_DAYS),
                     cutoff,
                     currency=tu.listing_currency(l.exchange, t.currency),
                     reference_shares=l.quote_shares,

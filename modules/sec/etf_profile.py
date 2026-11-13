@@ -15,7 +15,7 @@ market's float cap), small below the 90% one, mid in between - Morningstar-style
 A fund's strategy (classify): leveraged_inverse (its N-CEN says it seeks a multiple / inverse of
 an index, FMP's asset class, or its name), fund_of_funds (its N-CEN - left out), buffer and
 option_income (its name - FMP files many under equity), then FMP's asset class; equity needs an
-equity (or no) asset class and at least EQUITY_MIN_WEIGHT of the fund in stock lines. Only equity
+equity (or no) asset class and at least config.EtfProfile.EQUITY_MIN_WEIGHT of the fund in stock lines. Only equity
 funds go in provider_etf, profiled by region (US / International / Global), cap size (large / mid /
 small / smid / all), value / growth (large-cap funds, from our tickers' style_type), sector
 weights (FMP's, else our tickers' sectors), country weights and emerging-market share.
@@ -25,14 +25,14 @@ symbol / ISIN / CUSIP) - ADR lines aren't in the index funds, so a fund of them 
 pass for US. Region is the company's region (ticker.region, primary listing - the benchmarks'
 rule: Accenture is US), else the market of the index fund holding the stock; country is the
 company's domicile (ticker.country), a US-region company counting as US; emerging is held by an
-emerging index fund (index_funds.EMERGING_FUNDS - FTSE's view), the company's else the line's.
+emerging index fund (config.IndexFunds.EMERGING_FUNDS - FTSE's view), the company's else the line's.
 The index fallback matters for a new fund: its small caps aren't our tickers until its holdings
 are downloaded. An equity fund whose holdings show an option or an equity-linked note is marked
 (provider_etf.contracts_found, etf_selection.is_contract_line): the selection keeps it out for
 good. A provider ETF no longer equity keeps its row with its
 new strategy, and the selection makes it inactive. Every checked fund's strategy is kept in
-sec_etf_classification, so it's checked again only after PROFILE_REFRESH_DAYS (an active fund:
-PROFILE_REFRESH_DAYS_ACTIVE) or a newer filing. It runs right after the N-CEN update
+sec_etf_classification, so it's checked again only after config.EtfProfile.PROFILE_REFRESH_DAYS (an active fund:
+config.EtfProfile.PROFILE_REFRESH_DAYS_ACTIVE) or a newer filing. It runs right after the N-CEN update
 (scripts/current_sec_active_etfs.py, by hand once a month - the SEC blocks the hosted cron's IP),
 so every fund is due each time.
 """
@@ -43,6 +43,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from collections import Counter, defaultdict
+from modules import config
 from modules.core import api_stocks
 from modules.object import batch_run, provider, provider_etf, sec_active_etf, sec_etf_classification
 from modules.object.batch_run import BatchRun
@@ -53,24 +54,6 @@ from modules.sec import etf_selection, ncen
 from modules.sec.etf_selection import SelectionStats
 from modules.ticker import company, index_funds
 
-PROFILE_REFRESH_DAYS = 28   # a fund's profile is checked again after this long (or after a newer filing)
-PROFILE_REFRESH_DAYS_ACTIVE = 6  # ... an active fund's: every run
-FETCH_WORKERS = 4           # funds fetched in parallel, all under api_stocks' 200-calls-a-minute throttle
-EQUITY_MIN_WEIGHT = 0.75    # share of the fund in stock lines an equity fund needs
-MIN_COVERAGE = 0.5          # share of the fund placed (company or index fund) needed for region, size and emerging
-US_MIN = 0.8                # US share of the placed stocks for 'US'; at most 1 - US_MIN for 'International'
-LARGE_COVERAGE = 0.70       # a stock is large at or above its market's breakpoint at this coverage...
-MID_COVERAGE = 0.90         # ... mid down to this one, small below (Morningstar-style)
-LARGE_MIN = 0.7             # cap size: large share for 'large'
-SMALL_MIN = 0.5             # ... small share for 'small'
-MID_MIN = 0.5               # ... mid share for 'mid'
-SMID_MIN = 0.7              # ... mid + small share for 'smid'; otherwise 'all'
-STYLE_MIN = 0.6             # value (growth) share of the style-classified weight for 'value' ('growth')
-STYLE_MIN_COVERAGE = 0.5    # style-classified share of the stock weight needed for value / growth
-SECTOR_MIN_COVERAGE = 0.5   # sector-classified share of the stock weight needed for our own sector weights
-COUNTRY_MIN_COVERAGE = 0.5  # country-classified share of the stock weight needed for country weights
-MAX_FAILED_SHARE = 0.1
-MIN_FAILED_TO_RAISE = 5
 
 EQUITY = etf_selection.EQUITY
 REGION_US, REGION_INTERNATIONAL, REGION_GLOBAL = 'US', 'International', 'Global'
@@ -207,8 +190,8 @@ def build_reference(as_of: date | None = None) -> Reference:
     region_of = {cid: listings.by_id[cid].region for cid in listings.members if cid in listings.by_id}
     return Reference(
         index=index,
-        large_min={m: index_funds.cutoff(m, LARGE_COVERAGE, as_of) for m in markets},
-        small_below={m: index_funds.cutoff(m, MID_COVERAGE, as_of) for m in markets},
+        large_min={m: index_funds.cutoff(m, config.EtfProfile.LARGE_COVERAGE, as_of) for m in markets},
+        small_below={m: index_funds.cutoff(m, config.EtfProfile.MID_COVERAGE, as_of) for m in markets},
         listings=listings,
         style_of={cid: listings.by_id[cid].style_type for cid in listings.members if cid in listings.by_id},
         fund_of=fund_of,
@@ -235,7 +218,7 @@ def classify(etf: SecActiveEtf, asset_class: str | None, equity_weight: float | 
         if word in ac:
             return strategy
     if not ac or 'equity' in ac or 'real estate' in ac:
-        if equity_weight is not None and equity_weight >= EQUITY_MIN_WEIGHT:
+        if equity_weight is not None and equity_weight >= config.EtfProfile.EQUITY_MIN_WEIGHT:
             return EQUITY
         return 'equity_mixed' if ac else 'other'
     return 'other'
@@ -283,23 +266,23 @@ def profile_fund(etf: SecActiveEtf, info: dict | None, holdings: list[dict], ref
 
     # Region: each stock's company region (the benchmarks' rule), else its index fund's market
     markets, placed = _tally((w, ref.region_of.get(cid) or (s.market if s else None)) for w, cid, s in owned)
-    if placed >= MIN_COVERAGE:
+    if placed >= config.EtfProfile.MIN_COVERAGE:
         p.us_weight = markets.get(index_funds.US, 0.0) / placed
-        p.region = REGION_US if p.us_weight >= US_MIN else (REGION_INTERNATIONAL if p.us_weight <= 1 - US_MIN else REGION_GLOBAL)
+        p.region = REGION_US if p.us_weight >= config.EtfProfile.US_MIN else (REGION_INTERNATIONAL if p.us_weight <= 1 - config.EtfProfile.US_MIN else REGION_GLOBAL)
 
     # Emerging: held by an emerging index fund - the company (so an ADR counts), else the line itself
     funds, placed = _tally((w, ref.fund_of.get(cid) or (s.fund if s else None)) for w, cid, s in owned)
-    if placed >= MIN_COVERAGE:
-        p.emerging_weight = sum(v for f, v in funds.items() if f in index_funds.EMERGING_FUNDS) / placed
+    if placed >= config.EtfProfile.MIN_COVERAGE:
+        p.emerging_weight = sum(v for f, v in funds.items() if f in config.IndexFunds.EMERGING_FUNDS) / placed
 
-    if p.stock_weight and p.stock_weight >= MIN_COVERAGE:
+    if p.stock_weight and p.stock_weight >= config.EtfProfile.MIN_COVERAGE:
         sw = p.stock_weight
         p.avg_float_cap = sum(w * s.float_cap for w, s in stock) / sw
         p.large_weight = sum(w for w, s in stock if s.float_cap >= ref.large_min[s.market]) / sw
         p.small_weight = sum(w for w, s in stock if s.float_cap < ref.small_below[s.market]) / sw
         p.mid_weight = max(0.0, 1 - p.large_weight - p.small_weight)
-        p.cap_size = ('large' if p.large_weight >= LARGE_MIN else 'small' if p.small_weight >= SMALL_MIN
-                      else 'mid' if p.mid_weight >= MID_MIN else 'smid' if p.mid_weight + p.small_weight >= SMID_MIN else 'all')
+        p.cap_size = ('large' if p.large_weight >= config.EtfProfile.LARGE_MIN else 'small' if p.small_weight >= config.EtfProfile.SMALL_MIN
+                      else 'mid' if p.mid_weight >= config.EtfProfile.MID_MIN else 'smid' if p.mid_weight + p.small_weight >= config.EtfProfile.SMID_MIN else 'all')
 
     if p.cap_size == 'large':  # value / growth only for large-cap funds, from our companies' style
         styled, classified = _tally((w, ref.style_of.get(cid)) for w, cid, _s in owned)
@@ -307,8 +290,8 @@ def profile_fund(etf: SecActiveEtf, info: dict | None, holdings: list[dict], ref
         if classified > 0:
             p.value_weight = styled['value'] / classified
             p.growth_weight = styled['growth'] / classified
-            if p.style_coverage and p.style_coverage >= STYLE_MIN_COVERAGE:
-                p.value_growth = 'value' if p.value_weight >= STYLE_MIN else 'growth' if p.growth_weight >= STYLE_MIN else 'blend'
+            if p.style_coverage and p.style_coverage >= config.EtfProfile.STYLE_MIN_COVERAGE:
+                p.value_growth = 'value' if p.value_weight >= config.EtfProfile.STYLE_MIN else 'growth' if p.growth_weight >= config.EtfProfile.STYLE_MIN else 'blend'
 
     sectors = {s.get('industry'): (s.get('exposure') or 0) / 100 for s in (info or {}).get('sectorsList') or []
                if s.get('industry') and (s.get('exposure') or 0) > 0}
@@ -353,16 +336,16 @@ def _company_shares(owned: Owned, of_company: Callable[[int], str | None], equit
 
 def holding_sectors(owned: Owned, ref: Reference, equity_weight: float | None) -> dict[str, float]:
     """Sector weights from our tickers when FMP has none (ticker.sector), when they cover
-    SECTOR_MIN_COVERAGE of the fund's stock lines."""
+    config.EtfProfile.SECTOR_MIN_COVERAGE of the fund's stock lines."""
     by_id = ref.listings.by_id
     return _company_shares(owned, lambda cid: by_id[cid].sector if cid in by_id else None, equity_weight,
-                           SECTOR_MIN_COVERAGE)
+                           config.EtfProfile.SECTOR_MIN_COVERAGE)
 
 
 def holding_countries(owned: Owned, ref: Reference, equity_weight: float | None) -> dict[str, float]:
     """Country weights from our companies (domicile; a US-region company counts as US), when they
-    cover COUNTRY_MIN_COVERAGE of the fund's stock lines."""
-    return _company_shares(owned, ref.country_of.get, equity_weight, COUNTRY_MIN_COVERAGE)
+    cover config.EtfProfile.COUNTRY_MIN_COVERAGE of the fund's stock lines."""
+    return _company_shares(owned, ref.country_of.get, equity_weight, config.EtfProfile.COUNTRY_MIN_COVERAGE)
 
 
 def _targets(refresh_all: bool, as_of: date) -> list[SecActiveEtf]:
@@ -375,7 +358,7 @@ def _targets(refresh_all: bool, as_of: date) -> list[SecActiveEtf]:
     out = []
     for e in current:
         c = checked.get(e.series_id)
-        stale = now - timedelta(days=PROFILE_REFRESH_DAYS_ACTIVE if e.series_id in active else PROFILE_REFRESH_DAYS)
+        stale = now - timedelta(days=config.EtfProfile.PROFILE_REFRESH_DAYS_ACTIVE if e.series_id in active else config.EtfProfile.PROFILE_REFRESH_DAYS)
         if c is None or c.fmp_error or c.updated_at is None or c.updated_at < stale or (e.updated_at and c.updated_at < e.updated_at):
             out.append(e)
     return out
@@ -471,12 +454,12 @@ def summary(stats: ProfileRunStats) -> str:
 def run(refresh_all: bool = False, as_of: date | None = None) -> ProfileRunStats:
     """
     Checks the current SEC active ETFs due for a profile (never checked, a newer filing, or
-    PROFILE_REFRESH_DAYS - an active fund: PROFILE_REFRESH_DAYS_ACTIVE - since the last check;
+    config.EtfProfile.PROFILE_REFRESH_DAYS - an active fund: config.EtfProfile.PROFILE_REFRESH_DAYS_ACTIVE - since the last check;
     every one with refresh_all), saves each one's strategy, and places the equity funds, profiled,
     in provider_etf (new ones pending). Then the selection rules set every provider ETF's status -
     funds no longer equity, or no longer on the SEC list, become inactive there.
 
-    Raises when the index funds' snapshot can't be read or more than MAX_FAILED_SHARE of the
+    Raises when the index funds' snapshot can't be read or more than config.EtfProfile.MAX_FAILED_SHARE of the
     funds fail.
     """
     today = as_of or date.today()
@@ -489,7 +472,7 @@ def run(refresh_all: bool = False, as_of: date | None = None) -> ProfileRunStats
         if targets:
             ref = build_reference(today)
             provider_series = {e.sec_series_id for e in provider_etf.fetch_all() if e.sec_series_id}
-            pool = ThreadPoolExecutor(max_workers=FETCH_WORKERS)
+            pool = ThreadPoolExecutor(max_workers=config.EtfProfile.FETCH_WORKERS)
             try:
                 for n, (etf, info, holdings, error) in enumerate(pool.map(_fetch, targets), 1):
                     _apply(etf, info, holdings, error, ref, provider_series, stats)
@@ -498,7 +481,7 @@ def run(refresh_all: bool = False, as_of: date | None = None) -> ProfileRunStats
             finally:
                 pool.shutdown(wait=True, cancel_futures=True)
 
-        if len(stats.failed) > max(MIN_FAILED_TO_RAISE, MAX_FAILED_SHARE * len(targets)):
+        if len(stats.failed) > max(config.EtfProfile.MIN_FAILED_TO_RAISE, config.EtfProfile.MAX_FAILED_SHARE * len(targets)):
             log.record_status(summary(stats))
             raise Exception(f"{len(stats.failed)} of {len(targets)} fund profiles failed - first: {stats.failed[0]}")
         stats.selection = etf_selection.run(today)

@@ -2,13 +2,12 @@ import log
 import pandas as pd
 from datetime import date, timedelta
 from typing import List
+from modules import config
 from modules.object import batch_run
 from modules.object import best_idea, fund, fund_analysis, fund_holding, fund_holding_change, provider_etf, ticker
 from modules.calc import model_fund
 from modules.cron import best_ideas_generator, schedule
 from modules.ticker import company, index_funds
-
-COMPANY_CAP_WINDOW_DAYS = 10  # matches best_idea.fetch_all_as_df's market-cap lookback
 
 
 def build_shared_context(as_of_date: date, look_back_days: int) -> tuple[pd.DataFrame, dict]:
@@ -27,7 +26,7 @@ def build_shared_context(as_of_date: date, look_back_days: int) -> tuple[pd.Data
     # filter and the market-cap weighting (mc_map).
     if not all_best_ideas_df.empty:
         company_caps = company.company_caps_as_of(
-            [int(t) for t in all_best_ideas_df['ticker_id'].unique()], as_of_date, COMPANY_CAP_WINDOW_DAYS)
+            [int(t) for t in all_best_ideas_df['ticker_id'].unique()], as_of_date, config.FundsUpdate.COMPANY_CAP_WINDOW_DAYS)
         if company_caps:
             all_best_ideas_df['market_cap'] = [
                 company_caps.get(int(t), mc) for t, mc in zip(all_best_ideas_df['ticker_id'], all_best_ideas_df['market_cap'])
@@ -35,7 +34,7 @@ def build_shared_context(as_of_date: date, look_back_days: int) -> tuple[pd.Data
 
     # The large-cap line (model_fund._eligibility_masks): the company's whole cap against its
     # region's full-universe benchmark cutoff as of the date (index_funds.large_cutoffs), with at
-    # least index_funds.MIN_FLOAT_FACTOR of it floating - the same rule as the benchmark's.
+    # least config.IndexFunds.MIN_FLOAT_FACTOR of it floating - the same rule as the benchmark's.
     cutoffs = index_funds.large_cutoffs(as_of_date)
     all_best_ideas_df['large_cap_min'] = all_best_ideas_df['region'].map(cutoffs) if not all_best_ideas_df.empty else []
     company_ids = [int(c) for c in all_best_ideas_df['canonical_ticker_id'].dropna().unique()] if not all_best_ideas_df.empty else []
@@ -156,7 +155,7 @@ def _record_fund_analysis(
                 benchmark_id, benchmark_date = pe.benchmark_id, universe.holding_date
 
             weights = best_ideas_generator.compute_active_weights(inputs, universe)
-            selected = best_ideas_generator.select_best_ideas(weights, best_ideas_generator.MAX_BEST_IDEAS_PER_FUND)
+            selected = best_ideas_generator.select_best_ideas(weights, config.BestIdeas.MAX_BEST_IDEAS_PER_FUND)
 
             stored = best_idea.fetch_for_etf_date(etf_id, value_date, strategy.benchmark)
             if [s.ticker_id for s in stored] != [int(t) for t in selected['ticker_id']] or any(

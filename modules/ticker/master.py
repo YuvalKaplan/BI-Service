@@ -1,15 +1,10 @@
 import log
 from datetime import date, datetime, timedelta
+from modules import config
 from modules.object import ticker, ticker_value
 from modules.object.ticker import Ticker
 from modules.ticker import company, identity, index_funds
 from modules.ticker import util as tu
-
-# A master is realigned to a better primary listing only when that listing has a market cap
-# within this many days — longer than company.ACTIVE_DAYS, so a listing that misses a few weekly
-# screener runs doesn't swap the company's id back and forth.
-REALIGN_ACTIVE_DAYS = 90
-RECENT_CAP_DAYS = 21  # how far back link_same_company looks for caps to compare on a common date
 
 
 def _elect_master(
@@ -263,7 +258,7 @@ def link_same_company() -> int:
     all_t, members = _current_companies()
     ids = [t.id for t in all_t]
     today = date.today()
-    recent = ticker_value.fetch_market_caps_between(ids, today - timedelta(days=RECENT_CAP_DAYS), today)
+    recent = ticker_value.fetch_market_caps_between(ids, today - timedelta(days=config.Master.RECENT_CAP_DAYS), today)
     latest_dates = {tid: max(vals) for tid, vals in recent.items() if vals}
     views = identity.build_views(members, recent, latest_dates)
 
@@ -336,7 +331,7 @@ def align_masters_to_primary() -> int:
     shares in the home market, else a US listing, …), re-pointing the whole group when a better
     listing than the current master exists — e.g. Bank of America's master 0Q16 (LSE order
     book) becomes BAC (NYSE), TSMC's becomes 2330 (Taiwan). The current master wins ties, and a
-    listing needs a market cap within REALIGN_ACTIVE_DAYS to take over, so masters don't swap
+    listing needs a market cap within config.Master.REALIGN_ACTIVE_DAYS to take over, so masters don't swap
     back and forth. Stored ids referring to the old master (benchmark_holding, best_idea,
     fund_holding) still resolve to the company through COALESCE(master_ticker_id, id).
     Returns the number of companies realigned.
@@ -361,7 +356,7 @@ def align_masters_to_primary() -> int:
         candidates = [t for t in ms if not t.invalid] or ms
         if root not in {t.id for t in candidates}:
             candidates = candidates + [by_id[root]]
-        primary = company.primary_listing(candidates, root, caps, latest_dates, active_days=REALIGN_ACTIVE_DAYS)
+        primary = company.primary_listing(candidates, root, caps, latest_dates, active_days=config.Master.REALIGN_ACTIVE_DAYS)
         if primary.id == root:
             continue
         clears.append(primary.id)

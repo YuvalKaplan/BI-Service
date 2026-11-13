@@ -1,6 +1,7 @@
 import log
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
+from modules import config
 from modules.core import api_stocks
 from modules.object import ticker, ticker_value
 from modules.object.ticker import Ticker
@@ -8,7 +9,6 @@ from modules.ticker import company, pricing
 from modules.ticker import util as tu
 from modules.ticker.resolver import TickerResolver, profile_invalid_reason
 
-WORKERS = 5   # tickers refreshed in parallel — FMP's rate limit (200/min, api_stocks' shared throttle) is the bound
 UPDATED, INVALID = 'updated', 'invalid'
 
 
@@ -31,7 +31,7 @@ def refresh_ticker_profiles(include_invalid: bool = False, recheck_reasons: list
     recently (after a rule change: the old name rule's 'Fund or ETF' — include_invalid would also
     clear the price-mismatch flags without repairing those histories).
 
-    WORKERS tickers at a time: each one's profile call, share-count checks and database writes are
+    config.Refresh.WORKERS tickers at a time: each one's profile call, share-count checks and database writes are
     round trips, so one at a time runs far below FMP's rate limit (a full refresh of ~7,000
     tickers took about 3.5 hours).
 
@@ -44,11 +44,11 @@ def refresh_ticker_profiles(include_invalid: bool = False, recheck_reasons: list
         tickers = ticker.fetch_stale_tickers(include_invalid=include_invalid)
 
     today = date.today()
-    stored_values = ticker_value.fetch_price_and_cap_series_between([t.id for t in tickers], pricing.VALUE_HISTORY_START, today)
+    stored_values = ticker_value.fetch_price_and_cap_series_between([t.id for t in tickers], config.Pricing.VALUE_HISTORY_START, today)
     # Full symbols first, in this thread: the resolver loads FMP's exchange list on first use.
     targets = [(t, resolver.get_full_symbol(t)) for t in tickers]
 
-    with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+    with ThreadPoolExecutor(max_workers=config.Refresh.WORKERS) as executor:
         results = list(executor.map(lambda target: _refresh_one(*target, stored_values.get(target[0].id), today), targets))
 
     updated = sum(1 for outcome, _ in results if outcome == UPDATED)
@@ -129,24 +129,17 @@ def _refresh_one(t: Ticker, full_symbol: str, stored: tuple[dict[date, float], d
     return UPDATED, False
 
 
-SHARES_CHECK_POINTS = 10   # the latest stored values stored_shares_off_profile looks at
-FINANCIALS_TOLERANCE = 0.05  # FMP's quarterly weighted shares within this of the profile's count confirm it
-INDEX_TOLERANCE = 0.15  # the index funds' float shares may exceed the quote's share count by at most this
-INDEX_OVER_HISTORY = 1.15  # index float shares this many times FMP's history count refute the history (free_float.CAP_CHECK_FACTOR)
-HISTORY_COUNT_DAYS = 10    # the days of FMP's market-cap history index_backs_quote reads the history's share count from
-
-
 def _latest_usd_rate(currency: str | None, today: date) -> float | None:
     if not currency or currency == 'USD':
         return 1.0
-    rates = pricing.fetch_historic_usd_rates(currency, today - timedelta(days=10), today)
+    rates = pricing.fetch_historic_usd_rates(currency, today - timedelta(days=config.Pricing.FX_RATE_LOOKBACK_DAYS), today)
     return rates[max(rates)] if isinstance(rates, dict) and rates else None
 
 
 def stored_shares_off_profile(
     stored: tuple[dict[date, float], dict[date, float]] | None, profile: dict, currency: str | None, today: date,
 ) -> bool:
-    """Whether the latest SHARES_CHECK_POINTS stored market caps (USD; `stored` = ({date: cap},
+    """Whether the latest config.Refresh.SHARES_CHECK_POINTS stored market caps (USD; `stored` = ({date: cap},
     {date: price})) all imply a share count between SHARE_COUNT_TOLERANCE- and
     REFERENCE_FACTOR-fold off the profile's, on the same side — FMP's history carried on another
     count than its quote throughout (Rocket Companies: 3.79B against 2.82B), too close for the
@@ -159,21 +152,21 @@ def stored_shares_off_profile(
         return False
     shares = cap / price
     caps, prices = stored
-    recent = sorted(d for d, v in caps.items() if v and v > 0 and prices.get(d))[-SHARES_CHECK_POINTS:]
-    if len(recent) < SHARES_CHECK_POINTS:
+    recent = sorted(d for d, v in caps.items() if v and v > 0 and prices.get(d))[-config.Refresh.SHARES_CHECK_POINTS:]
+    if len(recent) < config.Refresh.SHARES_CHECK_POINTS:
         return False
     ratios = [caps[d] / (prices[d] * rate) / shares for d in recent]
-    return (all(pricing.SHARE_COUNT_TOLERANCE <= r < pricing.REFERENCE_FACTOR for r in ratios)
-            or all(pricing.SHARE_COUNT_TOLERANCE <= 1 / r < pricing.REFERENCE_FACTOR for r in ratios))
+    return (all(config.Pricing.SHARE_COUNT_TOLERANCE <= r < config.Pricing.REFERENCE_FACTOR for r in ratios)
+            or all(config.Pricing.SHARE_COUNT_TOLERANCE <= 1 / r < config.Pricing.REFERENCE_FACTOR for r in ratios))
 
 
 def _history_share_count(t: Ticker, full_symbol: str, currency: str | None, rate: float, today: date) -> float | None:
-    """The share count FMP's own market-cap history implies over its last HISTORY_COUNT_DAYS
+    """The share count FMP's own market-cap history implies over its last config.Refresh.HISTORY_COUNT_DAYS
     (median of cap / price) — not our stored history, which a verified count has rewritten."""
     if t.verified_shares is None:
         return None   # nothing rewritten: the stored history is FMP's (the caller uses it)
     history = pricing.fetch_price_and_market_cap_history(
-        full_symbol, today - timedelta(days=HISTORY_COUNT_DAYS), today, currency, log_outliers=False)
+        full_symbol, today - timedelta(days=config.Refresh.HISTORY_COUNT_DAYS), today, currency, log_outliers=False)
     if isinstance(history, str):
         return None
     counts = sorted(cap / (price * rate) for price, cap in history.values() if price and cap and price > 0 and cap > 0)
@@ -188,9 +181,9 @@ def index_backs_quote(
 
     An index can't hold more of a company than the whole company (free_float's cap check), so the
     index funds' float shares — ticker.float_factor (their float cap over our company cap,
-    modules/ticker/free_float.py) times our latest stored share count — at INDEX_OVER_HISTORY x
+    modules/ticker/free_float.py) times our latest stored share count — at config.Refresh.INDEX_OVER_HISTORY x
     FMP's history count or more mean the history is on too few shares; they back the quote when
-    they also fit within its count (INDEX_TOLERANCE). Omnicom and Devon Energy after their mergers:
+    they also fit within its count (config.Refresh.INDEX_TOLERANCE). Omnicom and Devon Energy after their mergers:
     history and financials on the old count, the quote and the index on the new one. The history
     count is read from FMP (_history_share_count) once a verified count has rewritten our stored
     history, so the answer doesn't flip with that rewrite.
@@ -214,8 +207,8 @@ def index_backs_quote(
     index_float_shares = t.float_factor * stored_count
     quote_count = cap / price
     history_count = _history_share_count(t, full_symbol, currency, rate, today) or stored_count
-    return (index_float_shares >= INDEX_OVER_HISTORY * history_count
-            and index_float_shares <= quote_count * (1 + INDEX_TOLERANCE))
+    return (index_float_shares >= config.Refresh.INDEX_OVER_HISTORY * history_count
+            and index_float_shares <= quote_count * (1 + config.Refresh.INDEX_TOLERANCE))
 
 
 def verify_share_count(
@@ -226,7 +219,7 @@ def verify_share_count(
 
     When the stored history is off the profile's share count (stored_shares_off_profile), or the
     ticker already has a verified count, a second source breaks the tie: FMP's quarterly
-    financials (their weighted share count within FINANCIALS_TOLERANCE of the profile's), else the
+    financials (their weighted share count within config.Refresh.FINANCIALS_TOLERANCE of the profile's), else the
     index funds (index_backs_quote). Either makes the profile's count verified — two sources
     against FMP's history, which pricing.clean_market_caps then repairs on every fetch. The profile
     isn't trusted alone: it can be the wrong side (SABESP), and then the financials and the index
@@ -245,14 +238,14 @@ def verify_share_count(
         return None, None
     financial = api_stocks.get_quarterly_weighted_shares(full_symbol)
     unit = tu.minor_unit_factor(profile.get('currency'))
-    if financial and abs(financial / (shares * unit) - 1) <= FINANCIALS_TOLERANCE:
+    if financial and abs(financial / (shares * unit) - 1) <= config.Refresh.FINANCIALS_TOLERANCE:
         witness = 'financials'
     elif index_backs_quote(t, full_symbol, profile, stored, currency, today):
         witness = 'index funds'
     else:
         witness = None
     if witness:
-        if t.verified_shares and abs(shares / t.verified_shares - 1) < 0.005:
+        if t.verified_shares and abs(shares / t.verified_shares - 1) < config.Refresh.SAME_SHARES_TOLERANCE:
             return t.verified_shares, None
         verb = 'set' if t.verified_shares is None else f'updated from {t.verified_shares:,.0f}'
         return shares, f"verified share count {verb} to {shares:,.0f} (quote and {witness} agree against FMP's history)"
@@ -265,7 +258,7 @@ def stored_cap_off_profile(
     stored: tuple[dict[date, float], dict[date, float]] | None, profile: dict, currency: str | None, today: date,
 ) -> str | None:
     """Why some stored market caps (USD; `stored` = ({date: cap}, {date: price})) are
-    pricing.REFERENCE_FACTOR-fold off what the profile's share count (market cap / price) gives at
+    config.Pricing.REFERENCE_FACTOR-fold off what the profile's share count (market cap / price) gives at
     that date's stored price — converted at the latest FX rate, close enough for a 3-fold test —
     or None when none are, or data is missing. Catches a history on a wrong share count
     throughout (no jump for the glitch filter) and DuPont-like steps just under its threshold."""
@@ -274,14 +267,14 @@ def stored_cap_off_profile(
         return None
     rate = 1.0
     if currency and currency != 'USD':
-        rates = pricing.fetch_historic_usd_rates(currency, today - timedelta(days=10), today)
+        rates = pricing.fetch_historic_usd_rates(currency, today - timedelta(days=config.Pricing.FX_RATE_LOOKBACK_DAYS), today)
         if isinstance(rates, str) or not rates:
             return None
         rate = rates[max(rates)]
     shares = cap / price
     caps, prices = stored
     off = sorted(d for d, v in caps.items()
-                 if v and v > 0 and prices.get(d) and max(v, prices[d] * shares * rate) / min(v, prices[d] * shares * rate) >= pricing.REFERENCE_FACTOR)
+                 if v and v > 0 and prices.get(d) and max(v, prices[d] * shares * rate) / min(v, prices[d] * shares * rate) >= config.Pricing.REFERENCE_FACTOR)
     if not off:
         return None
     return f"{len(off)} stored cap(s) {off[0]} .. {off[-1]} 2.5x+ off the profile's share count"

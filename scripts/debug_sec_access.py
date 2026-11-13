@@ -28,11 +28,12 @@ import time
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from dotenv import load_dotenv
+from modules import config
 from modules.sec import edgar
 
 load_dotenv()
 
-URL = f"{edgar.EDGAR_ARCHIVES_URL}/full-index/2025/QTR4/form.idx"
+URL = f"{config.Edgar.EDGAR_ARCHIVES_URL}/full-index/2025/QTR4/form.idx"
 PAUSE = 3  # seconds between requests - far below the SEC's rate limit
 EMAIL = re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}')
 
@@ -55,7 +56,7 @@ def describe(ua: str) -> list[str]:
 def python_request(ua: str) -> str:
     """As edgar.get sends it."""
     try:
-        with urlopen(Request(URL, headers={'User-Agent': ua, 'Accept-Encoding': 'gzip'}), timeout=edgar.REQUEST_TIMEOUT) as response:
+        with urlopen(Request(URL, headers={'User-Agent': ua, 'Accept-Encoding': 'gzip'}), timeout=config.Edgar.REQUEST_TIMEOUT) as response:
             return str(response.status)
     except HTTPError as e:
         return f"{e.code} {edgar.error_page_heading(e)}"
@@ -69,7 +70,7 @@ def curl_request(ua: str) -> str:
         return "curl not available"
     with tempfile.TemporaryDirectory() as folder:
         page_path = os.path.join(folder, 'page')
-        result = subprocess.run([curl, '-s', '--compressed', '--max-time', str(edgar.REQUEST_TIMEOUT), '-A', ua,
+        result = subprocess.run([curl, '-s', '--compressed', '--max-time', str(config.Edgar.REQUEST_TIMEOUT), '-A', ua,
                                  '-o', page_path, '-w', '%{http_code}', URL], capture_output=True, text=True)
         status = result.stdout.strip()
         if status != '403':
