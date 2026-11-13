@@ -256,9 +256,9 @@ Each fund is defined by a strategy:
 |-----------|---------|
 | Number of holdings | e.g. 30, 40, 50 |
 | Reference for best ideas | Full universe, value / growth split, or self ([§9](#9-measuring-a-managers-best-ideas)) |
-| Region | US, International, or a fixed split (e.g. 70% US / 30% International by number of holdings) |
+| Region | US, International, or Global: split by number of holdings – the **market split** (below) or a fixed one (e.g. 70% US / 30% International) |
 | Size | Large (above its region's benchmark line with ≥ 10% float), mid / small (below it), or any |
-| Style | Value, growth, any, or a fixed split (e.g. 60% growth / 40% value by number of holdings) |
+| Style | Value, growth, any, or a split by number of holdings – the **market split** (US only) or a fixed one (e.g. 60% growth / 40% value) |
 | Rank points | The points a company earns for each rank on a manager's list (by default 512 for #1 down to 1 for #10, each rank half the one above – [below](#the-candidate-list)) |
 | ESG | Optionally, ESG-qualified companies only ([§12](#12-esg-screen)) |
 | Weighting | Equal, or market-cap based ([below](#weighting)) |
@@ -266,6 +266,8 @@ Each fund is defined by a strategy:
 | Restrictions | Optionally specific ETFs only, or specific exchanges |
 
 Every fund draws on **all active ETFs** unless restricted.
+
+**The market split.** A fund can divide its holdings by the market's own weights instead of fixed numbers – between the US and International, and within the US between growth and value. Each part's share is measured on **the same reference benchmarks the best ideas are measured against** ([§7](#7-market-size-and-the-reference-benchmarks)), so a fund is consistent from the measure of a manager's conviction to its own allocation: the US share is the US large-cap benchmark's total over the US and International ones together, the growth share the US growth benchmark's over growth and value. The totals are **float-adjusted** – each company's market cap times the share of it that floats – as the index providers weight their indexes: on whole market caps, International would count the state-, family- and cross-held shares common outside the US in full (58% US on whole caps against 65% float-adjusted, November 2026). The split is recalculated **quarterly**, on the first weekly run of each calendar quarter, and each rebalancing uses the latest one. International has no style split. As of November 2026 the market split was 65.0% US / 35.0% International and 57.5% growth / 42.5% value (US), so a 50-holding global fund holds 33 US and 17 International companies (each share of the holdings rounded to the nearest whole number, half up; the last part takes the rest). When a new split moves a holding from one part to another, nothing is sold to rebalance: the part above its new target makes no buys until its own sells bring it down, and freed positions go to the part below its target.
 
 ### The candidate list
 
@@ -282,7 +284,7 @@ Every fund draws on **all active ETFs** unless restricted.
 
 So a stock that is the #2 of three managers (768) comes ahead of one that is the #1 of a single manager (512), and a stock ranked #4 to #10 by many managers can outscore one ranked #3 by only one. The ranking deltas within a manager's list, which can be marginal, matter less than how many managers agree.
 
-5. **The ideal portfolio** is built in **buckets**, each ordered on its own: one per region of a region split, and one per style of a style split. Each bucket's ideal holdings are the top of its list, up to its share of the holdings (35 and 15 for a 50-holding 70% US / 30% International fund). With a region split, the International list is built first and those companies are excluded from the US list.
+5. **The ideal portfolio** is built in **buckets**, each ordered on its own: one per region of a region split, and one per style of a style split. Each bucket's ideal holdings are the top of its list, up to its share of the holdings (33 and 17 for a 50-holding fund on the November 2026 market split). With a region split, the International list is built first and those companies are excluded from the US list.
 
 ### Weighting
 
@@ -295,7 +297,7 @@ Funds are re-evaluated on the weekly generation day, when their rebalancing peri
 
 | Current holding | Action |
 |-----------------|--------|
-| Within the top 1.25 × its bucket's share by score (e.g. the top 63 of a 50-holding fund; 44 US / 19 International in a 70/30 fund) | **Keep** – a holding that drifts a few places below the cut-off is tolerated, to limit turnover |
+| Within the top 1.25 × its bucket's share by score (e.g. the top 63 of a 50-holding fund; 42 US / 22 International at 33 / 17) | **Keep** – a holding that drifts a few places below the cut-off is tolerated, to limit turnover |
 | Still scored, but below that line | **Sell** – "below the score buffer" |
 | No longer among any manager's best ideas | **Sell** – "no longer a best idea" |
 
@@ -337,6 +339,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 - **Market-relative size lines** rather than fixed dollar thresholds, so "large cap" means the same thing in every market environment.
 - **Consensus before single conviction.** A company's score adds up every manager that ranks it, each rank worth half the one above, so agreement across managers weighs as much as the strength of one manager's view, and marginal differences between neighbouring ranks matter less. Ranking by best rank alone (the earlier rule) let one manager's #1 outrank ten managers' #2 and turned small active-weight differences into portfolio changes.
 - **Every manager counts equally**, regardless of assets under management or holdings date – the method aggregates opinions, not money.
+- **The market split from our own benchmarks.** Measuring the split on the benchmarks the best ideas are measured against keeps the fund consistent across region and style, and it follows the market every quarter without a manual input. It's our definition – our large-cap lines, float factors from the index funds and the data vendor – not a published index weight. The float factors are current ones: older splits can't be re-measured on the float of their day.
 - **Style split trade-off.** Under the value / growth reference, a manager holding both styles is measured against two benchmarks in which large companies weigh more than in the blend (×2.3 for value, ×1.75 for growth), so its largest holdings rank somewhat lower than under the blend. Accepted, in exchange for not crediting out-of-style mega-caps as convictions.
 
 **Limitations**
@@ -356,6 +359,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 | **Active weight (Δ)** | A company's weight in the ETF minus its weight in the reference. |
 | **Appearances** | Number of managers ranking a company among their best ideas. |
 | **Best idea** | One of the top 10 positive active weights of an ETF in a week. |
+| **Market split** | A fund's division of its holdings by the float-adjusted weights of the reference benchmarks (US / International; growth / value within the US), recalculated quarterly. |
 | **Bucket** | A region (and, with a style split, a style) of a fund, filled from its own ordered list up to its share of the holdings. |
 | **Breakpoint** | The company size at which the market's largest companies reach a given share of total market value. |
 | **Company market cap** | The whole company's equity value, all share classes, in USD. |
@@ -389,6 +393,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Best ideas: maximum active weight | 20% |
 | Best ideas: per ETF | 10 |
 | Fund: rank points, ranks 1–10 | 512, 256, 128, 64, 32, 16, 8, 4, 2, 1 |
+| Fund: market split (US / International; growth / value, US) | Float-adjusted reference benchmark totals, recalculated quarterly – 65.0% / 35.0%; 57.5% / 42.5% (November 2026) |
 | Fund: keep buffer | Top 1.25 × the bucket's share of holdings, by score |
 | Fund weighting: exponent / cap / floor | 0.5 (square root) / 10% / 1% |
 | ESG: risk rating / ESG score / governance | AAA–B / ≥ 50 / ≥ 50 |

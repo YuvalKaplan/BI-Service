@@ -5,7 +5,7 @@ from modules.object.exit import cleanup
 from modules.core.db import db_pool_instance, ENVIRONMENT
 from modules.core import sender, text_format
 from modules.calc.model_fund import results_to_string
-from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, benchmark_generator, screener, company_builder, schedule
+from modules.cron import categorize_downloader, etf_downloader, best_ideas_generator, funds_update, benchmark_generator, screener, company_builder, market_split, schedule
 from modules.ticker import esg, free_float, index_funds, master, refresh, style, valuation
 from modules.sec import etf_selection, ncen
 
@@ -175,6 +175,14 @@ if __name__ == '__main__':
                 raise e
 
             sections.append(benchmark_generator.summary(bench))
+
+            # The market split (quarterly: only the first generation day of a quarter recalculates).
+            # A failure keeps the split in force - funds on "split": "market" read the latest stored.
+            try:
+                sections.append(market_split.summary(market_split.refresh(bench.holding_date)))
+            except Exception as e:
+                log.record_error(f"Market split failed: {e}")
+                sections.append(f"Market split\n- Failed, the split in force is kept: {e}")
 
             try:
                 ideas = best_ideas_generator.run()

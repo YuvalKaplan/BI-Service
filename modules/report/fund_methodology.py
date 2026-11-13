@@ -18,6 +18,7 @@ from openpyxl.utils import get_column_letter
 from modules.calc import model_fund
 from modules.cron import best_ideas_generator as big
 from modules.cron import funds_update
+from modules.object import benchmark_split
 from modules.object import (
     benchmark, best_idea, fund, fund_analysis, fund_holding, fund_holding_change,
     provider, provider_etf, ticker,
@@ -114,7 +115,7 @@ class _Context:
             previous_holdings=[model_fund.FundHolding(**vars(p)) for p in self.previous],
             all_best_ideas_df=self.ideas_df, mc_map=self.mc_map,
         )
-        self.buckets, self.candidates = model_fund._select_region_buckets(self.strategy, self.ideas_df, self.held_ids)
+        self.buckets, self.candidates = model_fund._select_region_buckets(self.strategy, self.ideas_df, self.as_of_date, self.held_ids)
 
         # ETFs, keyed by id, with the holdings date the fund used
         self.etf_dates = {a.provider_etf_id: a.holding_date for a in self.analysis}
@@ -300,14 +301,13 @@ def _eligibility(ctx: _Context, df: pd.DataFrame) -> tuple[pd.Series, pd.Series]
     buckets under the same masks the selection applies, with a rank that earns points
     (strategy.rank_points)."""
     s = ctx.strategy
-    styles = ['growth', 'value'] if (s.style.name == 'blend' and s.style.value is not None and s.style.growth is not None) else [s.style.name]
     labels = {'etf': 'not one of the fund ETFs', 'style': 'style', 'cap': 'market cap', 'region': 'region (primary listing)',
               'exchange': 'exchange', 'esg': 'not ESG-qualified'}
 
     eligible = pd.Series(False, index=df.index)
     reasons: pd.Series = pd.Series([None] * len(df), index=df.index, dtype=object)
     for country_type in model_fund.strategy_country_types(s):
-        for style in styles:
+        for style in model_fund.bucket_styles(s, ctx.as_of_date, country_type):
             masks = model_fund._eligibility_masks(df, s.provider_etfs or [], style, s.cap.name, country_type,
                                                   s.exchanges or [], s.esg_only, ctx.held_ids)
             ok = pd.Series(True, index=df.index)
@@ -378,10 +378,13 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
         return bool(r and r.score == h.score and r.ranking == h.ranking and r.source_etf_id == h.source_etf_id
                     and abs((r.weight or 0) - (h.weight or 0)) < 1e-9)
 
+    bucket_of = {t: i for i, b in enumerate(ctx.buckets) for t in b.fetched_ids}
+
     def bucket(ticker_id: int) -> str:
-        t = ctx.tickers.get(ticker_id)
-        region = ('US' if t and t.region == 'US' else 'International') if s.region and s.region.split else (s.region.name if s.region else 'all')
-        return f"{region} / {t.style_type if t else '?'}"
+        if ticker_id in bucket_of:
+            return ctx.buckets[bucket_of[ticker_id]].label
+        t = ctx.tickers.get(ticker_id)   # no longer an idea: its region / style
+        return f"{t.region if t else '?'} / {t.style_type if t else '?'} (no bucket)"
 
     holdings = pd.DataFrame([{
         'Symbol': ctx.sym(h.ticker_id),
@@ -406,16 +409,13 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
                                     ascending=[False, False, False, False], na_position='last', ignore_index=True)
 
     selected = {h.ticker_id for h in ctx.stored_holdings}
-    # Each candidate's position in its own list (region bucket, and style with a blend split),
+    # Each candidate's position in its own bucket's list (region, and style with a style split),
     # in the selection's score order - the position the keep buffer is measured at.
-    bucket_of = {t: i for i, b in enumerate(ctx.buckets) for t in b.fetched_ids}
-    split_style = s.style.name == 'blend' and s.style.value is not None and s.style.growth is not None
     keep_ids = {t for b in ctx.buckets for t in b.keep_ids}
-    counters: dict[tuple, int] = {}
+    counters: dict[int | None, int] = {}
     positioned = []
     for c in ctx.candidates:
-        t = ctx.tickers.get(c.ticker_id)
-        k = (bucket_of.get(c.ticker_id), t.style_type if split_style and t else None)
+        k = bucket_of.get(c.ticker_id)
         counters[k] = counters.get(k, 0) + 1
         positioned.append((counters[k], c))
     candidates = pd.DataFrame([{
@@ -445,6 +445,8 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
                          f"{', '.join(map(str, s.rank_points))}), summed (each ETF's latest best ideas from the last {s.recalc_frequency_days} days)"),
             ('Order', 'score desc, appearances desc, max delta desc (per region / style bucket)'),
             ('Keep buffer', f"a holding is kept while within the top {model_fund.KEEP_BUFFER} x its bucket's target by score"),
+        ] + _split_rows(s, ctx.as_of_date) + [
+            ('Buckets (target holdings)', ", ".join(f"{b.label} {b.target}" for b in ctx.buckets)),
             ('MC weight alpha / cap / floor', f"{model_fund.MC_WEIGHT_ALPHA} / {model_fund.MC_WEIGHT_CAP:.0%} / {model_fund.MC_WEIGHT_FLOOR:.0%}"),
         ],
         columns=['Item', 'Value'],
@@ -454,6 +456,26 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
         _write_sheet(w, 'Candidates', candidates, {'Max delta': PCT})
         _write_sheet(w, 'Summary', summary)
     return path
+
+
+def _split_rows(s: model_fund.Strategy, as_of: date) -> list[tuple[str, str]]:
+    """The region / style splits in force on as_of: percentages, and for a market split the
+    benchmark snapshot it was measured on."""
+    rows = []
+    region = model_fund.region_split_percents(s, as_of)
+    if region:
+        text = f"{region[0]:.2f}% US / {region[1]:.2f}% International"
+        if s.region and s.region.split == model_fund.MARKET:
+            text += f" (market: float-adjusted blend benchmarks of {benchmark_split.weights_in_force(benchmark_split.REGION, as_of)[0]})"
+        rows.append(('Region split', text))
+    style = model_fund.style_split_percents(s, as_of, 'US')
+    if style:
+        text = f"{style[0]:.2f}% growth / {style[1]:.2f}% value"
+        if s.style.split == model_fund.MARKET:
+            text += (f" (market, US only: float-adjusted US style benchmarks of "
+                     f"{benchmark_split.weights_in_force(benchmark_split.STYLE, as_of)[0]})")
+        rows.append(('Style split', text))
+    return rows
 
 
 # ── README ───────────────────────────────────────────────────────────────────
