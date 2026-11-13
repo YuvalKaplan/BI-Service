@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from modules import config
 from modules.core import api_stocks
 
 NAME_NOISE: set[str] = {
@@ -79,16 +80,7 @@ EXCHANGE_COUNTRY: dict[str, str] = {
     'JNB': 'ZA', 'TLV': 'IL', 'SAU': 'SA', 'DFM': 'AE', 'DOH': 'QA',
 }
 
-# Exchanges whose listings make a company "US-listed" for region purposes (OTC excluded:
-# it mostly carries foreign companies' unsponsored ADRs). Cboe Global Markets is listed on its
-# own exchange (FMP: CBOE) - left out, it was the one US company called International.
-US_LISTING_EXCHANGES: set[str] = {'NYSE', 'NASDAQ', 'AMEX', 'CBOE'}
 
-# Countries companies are incorporated in for legal / tax reasons rather than run from (Bermuda,
-# Cayman, BVI, the Channel Islands, Isle of Man, the ship registries Liberia and the Marshall
-# Islands, the Bahamas, Curaçao, Gibraltar): neither FMP's country nor an ISIN from one tells
-# where a company belongs (Viking, XP, Nu, Credicorp, Amer Sports, Birkenstock).
-TAX_HAVEN_COUNTRIES: set[str] = {'BM', 'KY', 'VG', 'JE', 'GG', 'IM', 'LR', 'MH', 'BS', 'CW', 'GI'}
 # ISIN prefixes that aren't a country (Euroclear / Clearstream international securities, EU).
 _NON_COUNTRY_ISIN_PREFIXES: set[str] = {'XS', 'EU'}
 
@@ -100,17 +92,6 @@ def isin_country(isin: str | None) -> str | None:
         return None
     return isin[:2].upper()
 
-# Extra countries counted as a company's home market beyond its own (HK-listed Chinese companies).
-HOME_COUNTRY_ALIASES: dict[str, set[str]] = {'CN': {'HK'}}
-
-# Dutch and Luxembourg holding companies are often primarily listed on another continental
-# exchange (Airbus and Euronext in Paris, Stellantis and Ferrari in Milan, argenx in Brussels,
-# ArcelorMittal in Amsterdam/Madrid, Tenaris in Milan), so those markets count as home for
-# them too — ranked after the domicile country's own exchanges.
-WIDER_HOME_COUNTRIES: dict[str, set[str]] = {
-    'NL': {'FR', 'BE', 'IT', 'PT', 'ES'},
-    'LU': {'NL', 'FR', 'BE', 'IT', 'PT', 'ES'},
-}
 
 # LSE's International Order Book: foreign securities mirrored on LSE under 4-character codes
 # starting with 0 (0Q16 = Bank of America), carrying the issuer's home-market data. FMP files
@@ -121,7 +102,7 @@ _IOB_SYMBOL = re.compile(r'^0[0-9A-Z]{3}$')
 def home_countries(country: str | None) -> set[str]:
     if not country:
         return set()
-    return {country} | HOME_COUNTRY_ALIASES.get(country, set())
+    return {country} | config.Markets.HOME_COUNTRY_ALIASES.get(country, set())
 
 
 def is_iob_line(symbol: str | None, exchange: str | None) -> bool:
@@ -138,15 +119,15 @@ def listing_country(symbol: str | None, exchange: str | None) -> str | None:
 
 def market_tier(domicile: str | None, symbol: str | None, exchange: str | None) -> int:
     """How strong a candidate for a company's primary listing a listing is, by market:
-    0 = the domicile country's own market (incl. HOME_COUNTRY_ALIASES), 1 = a wider home market
-    (WIDER_HOME_COUNTRIES), 2 = a US exchange, 3 = another country's exchange, 4 = a venue with
+    0 = the domicile country's own market (incl. config.Markets.HOME_COUNTRY_ALIASES), 1 = a wider home market
+    (config.Markets.WIDER_HOME_COUNTRIES), 2 = a US exchange, 3 = another country's exchange, 4 = a venue with
     no country of its own (OTC, LSE's International Order Book, unknown)."""
     country = listing_country(symbol, exchange)
     if country and country in home_countries(domicile):
         return 0
-    if country and country in WIDER_HOME_COUNTRIES.get(domicile or '', set()):
+    if country and country in config.Markets.WIDER_HOME_COUNTRIES.get(domicile or '', set()):
         return 1
-    if exchange in US_LISTING_EXCHANGES and not is_iob_line(symbol, exchange):
+    if exchange in config.Markets.US_LISTING_EXCHANGES and not is_iob_line(symbol, exchange):
         return 2
     return 3 if country else 4
 

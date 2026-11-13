@@ -5,7 +5,7 @@ on EDGAR.
 Every registered fund files N-CEN once a year, within 75 days of its fiscal year end, and states
 its type there (Item C.3: exchange-traded fund, index fund, fund of funds, ...). An ETF that
 isn't an index fund is actively managed. run() reads EDGAR's form index for the last
-WINDOW_QUARTERS quarters and every N-CEN / N-CEN/A filing in it not read yet, oldest first:
+config.Ncen.WINDOW_QUARTERS quarters and every N-CEN / N-CEN/A filing in it not read yet, oldest first:
 - a filing's active ETFs are upserted, so each series keeps its latest filing (carried forward
   until the next one, a year later);
 - a series it reports as an index fund (or no longer an ETF) is removed;
@@ -22,6 +22,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from modules import config
 from modules.object import batch_run, sec_active_etf, sec_ncen_filing
 from modules.object.batch_run import BatchRun
 from modules.object.sec_active_etf import SecActiveEtf
@@ -32,13 +33,6 @@ from modules.sec.edgar import IndexEntry
 NCEN_FORMS = ('N-CEN', 'N-CEN/A')
 BATCH_PROCESS = 'ncen_active_etfs'  # batch_run.process
 UPDATE_COMMAND = 'python scripts/current_sec_active_etfs.py --prod'
-WINDOW_QUARTERS = 5         # a filing year plus slack for late filers, so the first run builds the whole list
-CURRENT_WINDOW_DAYS = 455   # no filing in ~15 months (liquidated, no termination listed yet): off the current list
-MAX_FAILED_SHARE = 0.1      # more failed filings than this in a run fails the run
-MIN_FAILED_TO_RAISE = 5     # ... but a handful never does
-PROGRESS_EVERY = 250        # filings between progress lines
-DOWNLOAD_WORKERS = 4        # parallel filing downloads, all under edgar's 5-requests-per-second throttle
-FAILED_XML_DIR = os.path.join('.output', 'downloads', 'ncen')
 
 # Item C.3 fund-type labels as they appear in the XML (fundTypes/fundType text, or the fundType
 # attribute of e.g. indexFundInfo). Multiple / inverse funds are labelled "Inverse of a
@@ -205,15 +199,15 @@ def parse_filing(xml: bytes, entry: IndexEntry) -> NcenFiling:
 
 
 def _window(today: date) -> list[tuple[int, int]]:
-    """(year, quarter) of the last WINDOW_QUARTERS quarters, oldest first, the current one last."""
+    """(year, quarter) of the last config.Ncen.WINDOW_QUARTERS quarters, oldest first, the current one last."""
     index = today.year * 4 + (today.month - 1) // 3
-    return [((i // 4), (i % 4) + 1) for i in range(index - WINDOW_QUARTERS + 1, index + 1)]
+    return [((i // 4), (i % 4) + 1) for i in range(index - config.Ncen.WINDOW_QUARTERS + 1, index + 1)]
 
 
 def _save_failed_xml(entry: IndexEntry, xml: bytes) -> None:
     try:
-        os.makedirs(FAILED_XML_DIR, exist_ok=True)
-        with open(os.path.join(FAILED_XML_DIR, f'{entry.accession}.xml'), 'wb') as f:
+        os.makedirs(config.Ncen.FAILED_XML_DIR, exist_ok=True)
+        with open(os.path.join(config.Ncen.FAILED_XML_DIR, f'{entry.accession}.xml'), 'wb') as f:
             f.write(xml)
     except OSError:
         pass
@@ -278,7 +272,7 @@ def _apply(entry: IndexEntry, xml: bytes | None, error: Exception | None, stats:
 
 def filed_since(as_of: date | None = None) -> date:
     """The earliest filing date a fund on the current list can have."""
-    return (as_of or date.today()) - timedelta(days=CURRENT_WINDOW_DAYS)
+    return (as_of or date.today()) - timedelta(days=config.Ncen.CURRENT_WINDOW_DAYS)
 
 
 def last_completed() -> datetime | None:
@@ -287,7 +281,7 @@ def last_completed() -> datetime | None:
 
 
 def reminder(as_of: date | None = None) -> str:
-    """The monthly reminder email (service_cron.py on schedule.SEC_LIST_REMINDER_DAY): the SEC
+    """The monthly reminder email (service_cron.py on config.Schedule.SEC_LIST_REMINDER_DAY): the SEC
     blocks the hosted cron's IP, so the list is updated by hand from a machine EDGAR accepts."""
     today = as_of or date.today()
     try:
@@ -328,11 +322,11 @@ def summary(stats: NcenRunStats) -> str:
 
 def run(reload: bool = False, as_of: date | None = None) -> NcenRunStats:
     """
-    Reads the N-CEN / N-CEN/A filings of the last WINDOW_QUARTERS quarters not read yet (all of
+    Reads the N-CEN / N-CEN/A filings of the last config.Ncen.WINDOW_QUARTERS quarters not read yet (all of
     them with reload) into sec_active_etf, oldest first. Filings that fail to download or parse
     are stored with their error and read again next run.
 
-    Raises when EDGAR's form index can't be read or more than MAX_FAILED_SHARE of the filings fail.
+    Raises when EDGAR's form index can't be read or more than config.Ncen.MAX_FAILED_SHARE of the filings fail.
     """
     today = as_of or date.today()
     quarters = _window(today)
@@ -353,18 +347,18 @@ def run(reload: bool = False, as_of: date | None = None) -> NcenRunStats:
 
         # Downloads run in parallel (a filing's download time, not the throttle, is the limit on
         # one thread); filings are applied one at a time, in filing-date order.
-        pool = ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS)
+        pool = ThreadPoolExecutor(max_workers=config.Ncen.DOWNLOAD_WORKERS)
         try:
             for n, (entry, xml, error) in enumerate(pool.map(_download, to_read), 1):
                 _apply(entry, xml, error, stats)
-                if n % PROGRESS_EVERY == 0:
+                if n % config.Ncen.PROGRESS_EVERY == 0:
                     print(f"[ncen] {n}/{stats.to_read} filings read ({len(stats.failed)} failed)")
         finally:
             pool.shutdown(wait=True, cancel_futures=True)  # a database failure doesn't wait for the rest
 
         stats.current, stats.tracked = sec_active_etf.count_current(filed_since(today))
         log.record_status(summary(stats))
-        if len(stats.failed) > max(MIN_FAILED_TO_RAISE, MAX_FAILED_SHARE * stats.to_read):
+        if len(stats.failed) > max(config.Ncen.MIN_FAILED_TO_RAISE, config.Ncen.MAX_FAILED_SHARE * stats.to_read):
             raise Exception(f"{len(stats.failed)} of {stats.to_read} N-CEN filings failed - first: {stats.failed[0]}")
 
         batch_run.update_completed_at(batch_run_id)

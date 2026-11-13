@@ -13,12 +13,8 @@ from datetime import date
 from threading import Lock
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from modules import config
 
-EDGAR_ARCHIVES_URL = 'https://www.sec.gov/Archives/edgar'
-MIN_REQUEST_INTERVAL = 0.2  # seconds between requests: 5 per second
-API_RETRIES = 3
-API_RETRY_DELAY = 2.0       # seconds; doubles on each subsequent attempt
-REQUEST_TIMEOUT = 60        # seconds
 
 _last_request = 0.0
 _throttle_lock = Lock()
@@ -37,7 +33,7 @@ class IndexEntry:
 def _throttle() -> None:
     global _last_request
     with _throttle_lock:
-        wait = MIN_REQUEST_INTERVAL - (time.monotonic() - _last_request)
+        wait = config.Edgar.MIN_REQUEST_INTERVAL - (time.monotonic() - _last_request)
         if wait > 0:
             time.sleep(wait)
         _last_request = time.monotonic()
@@ -77,10 +73,10 @@ def get(url: str) -> bytes:
     page's heading - retrying can't help and only prolongs an IP block."""
     headers = {'User-Agent': _user_agent(), 'Accept-Encoding': 'gzip'}
     last_exc: Exception | None = None
-    for attempt in range(API_RETRIES):
+    for attempt in range(config.Edgar.API_RETRIES):
         _throttle()
         try:
-            with urlopen(Request(url, headers=headers), timeout=REQUEST_TIMEOUT) as response:
+            with urlopen(Request(url, headers=headers), timeout=config.Edgar.REQUEST_TIMEOUT) as response:
                 body = response.read()
                 return gzip.decompress(body) if response.headers.get('Content-Encoding') == 'gzip' else body
         except HTTPError as e:
@@ -91,16 +87,16 @@ def get(url: str) -> bytes:
             last_exc = e
         except Exception as e:
             last_exc = e
-        if attempt < API_RETRIES - 1:
-            time.sleep(API_RETRY_DELAY * (2 ** attempt))
-    raise Exception(f"EDGAR request failed after {API_RETRIES} attempts ({url}): {last_exc}")
+        if attempt < config.Edgar.API_RETRIES - 1:
+            time.sleep(config.Edgar.API_RETRY_DELAY * (2 ** attempt))
+    raise Exception(f"EDGAR request failed after {config.Edgar.API_RETRIES} attempts ({url}): {last_exc}")
 
 
 def form_index(year: int, quarter: int, form_types: tuple[str, ...]) -> list[IndexEntry]:
     """The filings of the given form types in EDGAR's form index for a quarter (updated nightly
     for the current one). [] when the quarter's index doesn't exist yet."""
     try:
-        text = get(f"{EDGAR_ARCHIVES_URL}/full-index/{year}/QTR{quarter}/form.idx").decode('latin-1')
+        text = get(f"{config.Edgar.EDGAR_ARCHIVES_URL}/full-index/{year}/QTR{quarter}/form.idx").decode('latin-1')
     except HTTPError as e:
         if e.code == 404:
             return []
@@ -132,7 +128,7 @@ def form_index(year: int, quarter: int, form_types: tuple[str, ...]) -> list[Ind
 
 def filing_xml(cik: str, accession: str) -> bytes:
     """A filing's XML document: primary_doc.xml, else the first .xml its folder index lists."""
-    folder = f"{EDGAR_ARCHIVES_URL}/data/{int(cik)}/{accession.replace('-', '')}"
+    folder = f"{config.Edgar.EDGAR_ARCHIVES_URL}/data/{int(cik)}/{accession.replace('-', '')}"
     try:
         return get(f"{folder}/primary_doc.xml")
     except HTTPError as e:

@@ -13,13 +13,11 @@ benchmark's duplicate guard (benchmark_generator) as a last safety net (duplicat
 import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from modules import config
 from modules.object.ticker import Ticker
 from modules.ticker import company
 from modules.ticker import util as tu
 
-ISIN_CAP_TOLERANCE = 0.10   # a shared ISIN whose names disagree still links when the caps agree this closely
-NAME_CAP_TOLERANCE = 0.02   # matching names (without a shared ISIN or CIK) link only when the caps agree this closely
-CAP_MAX_DAY_GAP = 1         # caps are compared on the same date, give or take this many days
 
 # First name tokens too common to identify a company on their own; an ISIN link between names
 # starting with one of these also needs the full names_match.
@@ -100,9 +98,9 @@ def build_views(
 
 def caps_agree(a: CompanyView, b: CompanyView, tolerance: float) -> bool:
     """The two companies' caps agree within `tolerance` on the latest date both have a value
-    for (± CAP_MAX_DAY_GAP days). No common date = no evidence."""
+    for (± config.Identity.CAP_MAX_DAY_GAP days). No common date = no evidence."""
     for d in sorted(a.caps, reverse=True):
-        for off in range(CAP_MAX_DAY_GAP + 1):
+        for off in range(config.Identity.CAP_MAX_DAY_GAP + 1):
             for d2 in (d - timedelta(days=off), d + timedelta(days=off)):
                 if d2 in b.caps:
                     ca, cb = a.caps[d], b.caps[d2]
@@ -121,10 +119,10 @@ def _names_match_any(a: CompanyView, b: CompanyView) -> bool:
 
 def link_evidence(a: CompanyView, b: CompanyView) -> str | None:
     """Evidence strong enough to merge two companies permanently, or None:
-      - a shared ISIN, with names agreeing on their first word or caps within ISIN_CAP_TOLERANCE
+      - a shared ISIN, with names agreeing on their first word or caps within config.Identity.ISIN_CAP_TOLERANCE
         (FMP occasionally attaches another company's ISIN — Seabridge Gold carrying Santander's —
         whose cap is nowhere near),
-      - same domicile, matching names and caps within NAME_CAP_TOLERANCE on the same date (FMP
+      - same domicile, matching names and caps within config.Identity.NAME_CAP_TOLERANCE on the same date (FMP
         reports the whole company's cap on each listing, so two listings of one company agree),
       - a depositary receipt whose company name (core_name) matches a company of the same
         domicile (a receipt's cap is its own, so no cap check).
@@ -134,10 +132,10 @@ def link_evidence(a: CompanyView, b: CompanyView) -> str | None:
     shared = a.isins & b.isins
     if a.ciks and b.ciks and a.ciks.isdisjoint(b.ciks):
         return f"dual listing, ISIN {min(shared)}" if shared and same_name(a, b) else None
-    if shared and (first_word_agrees(a.name, b.name) or caps_agree(a, b, ISIN_CAP_TOLERANCE)):
+    if shared and (first_word_agrees(a.name, b.name) or caps_agree(a, b, config.Identity.ISIN_CAP_TOLERANCE)):
         return f"ISIN {min(shared)}"
     if a.country and a.country == b.country:
-        if _names_match_any(a, b) and caps_agree(a, b, NAME_CAP_TOLERANCE):
+        if _names_match_any(a, b) and caps_agree(a, b, config.Identity.NAME_CAP_TOLERANCE):
             return "name and market cap"
         if (a.depositary or b.depositary) and tu.names_match(core_name(a.name), core_name(b.name)):
             return "depositary receipt"

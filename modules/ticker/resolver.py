@@ -3,6 +3,7 @@ import log
 from datetime import date, timedelta
 from typing import Any
 
+from modules import config
 from modules.core import api_stocks
 from modules.ticker import esg
 from modules.ticker import util as tu
@@ -12,16 +13,15 @@ from modules.object import categorize_ticker as _cat_ticker
 # Why a ticker is invalid, from its FMP profile (profile_invalid_reason)
 CRYPTO, MISSING_DETAILS, ETF, FUND, NOT_TRADING = 'Crypto', 'Missing details', 'ETF', 'Fund', 'Not actively trading'
 FUND_REASONS = (ETF, FUND)   # a holding line on one of these tickers isn't a stock (index_funds.is_fund_line)
-TRADING_LOOKBACK_DAYS = 10   # a day with volume within this many days keeps a ticker FMP calls inactive valid
 
 
 def trades_recently(full_symbol: str, today: date | None = None) -> bool:
-    """Whether FMP's daily prices show the symbol traded (volume > 0) within TRADING_LOOKBACK_DAYS -
+    """Whether FMP's daily prices show the symbol traded (volume > 0) within config.Resolver.TRADING_LOOKBACK_DAYS -
     a second opinion on FMP's isActivelyTrading flag, which is wrong for some (Energy Transfer,
     Dillard's: flagged inactive while trading millions of shares a day). A frozen quote FMP keeps
     serving after a delisting has no volume."""
     today = today or date.today()
-    rows = api_stocks.get_symbol_historic_prices(full_symbol, today - timedelta(days=TRADING_LOOKBACK_DAYS), today)
+    rows = api_stocks.get_symbol_historic_prices(full_symbol, today - timedelta(days=config.Resolver.TRADING_LOOKBACK_DAYS), today)
     return isinstance(rows, list) and any((r.get('volume') or 0) > 0 for r in rows)
 
 

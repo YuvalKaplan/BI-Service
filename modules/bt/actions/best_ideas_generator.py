@@ -1,6 +1,7 @@
 import log
 import pandas as pd
 from datetime import date
+from modules.bt import config
 from modules.bt.object import provider, provider_etf
 from modules.bt.object.provider_etf_holding import ProviderEtfHolding, fetch_holding_dates_available_past_period, fetch_valid_holdings_by_provider_etf_id
 from modules.bt.object.ticker_value import TickerValue, fetch_latest_price_date_for_ticker, fetch_ticker_dates_available_past_period, fetch_tickers_by_symbols_on_date
@@ -8,10 +9,7 @@ from modules.bt.object import best_idea
 
 # Configuration constants
 DAYS_NO_PRICING = 7
-MIN_HOLDINGS_WITH_PRICES_PCT = 0.9
 LOOK_BACK_FOR_COMMON_DATE = 14
-MAX_BEST_IDEAS_PER_FUND = 10
-HOLDING_DELTA_LIMIT_DROP_OFF = 0.25
 
 
 def find_best_ideas(
@@ -47,10 +45,10 @@ def find_best_ideas(
 
     best_ideas = df[df["delta"] > 0].sort_values("delta", ascending=False)
 
-    dropped = best_ideas[best_ideas["delta"] > HOLDING_DELTA_LIMIT_DROP_OFF]
+    dropped = best_ideas[best_ideas["delta"] > config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF]
     if not dropped.empty:
-        log.record_status(f"Dropping {len(dropped)} best-idea(s) above delta limit {HOLDING_DELTA_LIMIT_DROP_OFF}: {dropped['symbol'].tolist()}")
-    best_ideas = best_ideas[best_ideas["delta"] <= HOLDING_DELTA_LIMIT_DROP_OFF]
+        log.record_status(f"Dropping {len(dropped)} best-idea(s) above delta limit {config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF}: {dropped['symbol'].tolist()}")
+    best_ideas = best_ideas[best_ideas["delta"] <= config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF]
 
     if limit is not None:
         if limit <= 0:
@@ -149,7 +147,7 @@ def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
 
                 coverage_ratio = len(final_holdings_to_process) / len(current_holdings)
 
-                if coverage_ratio < MIN_HOLDINGS_WITH_PRICES_PCT:
+                if coverage_ratio < config.BestIdeas.MIN_HOLDINGS_WITH_PRICES_PCT:
                     missing_count = len(current_holdings) - len(final_holdings_to_process)
                     msg = f"Coverage {coverage_ratio:.1%}. Missing {missing_count} prices for date {latest_common_date.strftime('%Y-%m-%d')}"
                     record_problem(etf_id=etf_id, error="Insufficient pricing coverage", message=msg, problem_etfs=problem_etfs)
@@ -159,7 +157,7 @@ def run(etf_ids: list[int], today: date) -> tuple[int, int, list[str]]:
                 best_ideas_df = find_best_ideas(
                     current_holdings,
                     values,
-                    MAX_BEST_IDEAS_PER_FUND
+                    config.BestIdeas.MAX_BEST_IDEAS_PER_FUND
                 )
                 rows = best_idea.df_to_rows(
                     best_ideas_df,

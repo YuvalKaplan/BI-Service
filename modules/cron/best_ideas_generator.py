@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from functools import partial
+from modules import config
 from modules.core.text_format import table
 from modules.object import batch_run, batch_run_log
 from modules.object import provider, provider_etf, ticker
@@ -11,14 +12,7 @@ from modules.object.provider_etf_holding import ProviderEtfHolding, QuarantinedH
 from modules.object.ticker_value import fetch_latest_market_caps_within_window
 from modules.object import best_idea, benchmark
 from modules.object.fund_analysis import FundAnalysis
-from modules.sec import etf_selection
 from modules.ticker import company
-
-DAYS_NO_MARKET_CAP = 5
-MIN_HOLDINGS_WITH_PRICES_PCT = 0.90
-LOOK_BACK_WINDOW = etf_selection.MAX_HOLDINGS_AGE_DAYS  # an active ETF's holdings are never older
-MAX_BEST_IDEAS_PER_FUND = 10
-HOLDING_DELTA_LIMIT_DROP_OFF = 0.20
 
 
 @dataclass
@@ -43,10 +37,10 @@ def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = N
     """
     Loads an ETF's latest holdings (as of up_to_date, or now) and the market data needed to
     compute its active weights. Returns None if no holdings were downloaded within
-    LOOK_BACK_WINDOW. Shared by run() and the per-fund analysis snapshot so both see exactly
+    config.BestIdeas.LOOK_BACK_WINDOW. Shared by run() and the per-fund analysis snapshot so both see exactly
     the same inputs.
     """
-    raw_holdings = fetch_latest_holdings_for_etf(pe.id, LOOK_BACK_WINDOW, up_to_date=up_to_date)
+    raw_holdings = fetch_latest_holdings_for_etf(pe.id, config.BestIdeas.LOOK_BACK_WINDOW, up_to_date=up_to_date)
     if not raw_holdings:
         return None
 
@@ -57,11 +51,11 @@ def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = N
     holding_date = raw_holdings[0].holding_date
     holding_date = holding_date.date() if isinstance(holding_date, datetime) else holding_date
 
-    # Latest market caps within +/- DAYS_NO_MARKET_CAP of the holding date. Going a few days
+    # Latest market caps within +/- config.BestIdeas.DAYS_NO_MARKET_CAP of the holding date. Going a few days
     # after the holding is useful if we have a new ticker that was just added to the holdings,
     # as the first market_cap downloaded using the profile API may be a day or two after it.
     ticker_ids = [h.ticker_id for h in holdings if h.ticker_id]
-    market_cap_values = fetch_latest_market_caps_within_window(ticker_ids, holding_date, DAYS_NO_MARKET_CAP)
+    market_cap_values = fetch_latest_market_caps_within_window(ticker_ids, holding_date, config.BestIdeas.DAYS_NO_MARKET_CAP)
 
     # Master-ticker info for held tickers, plus a second hop for any master not itself among
     # the holdings (e.g. an ETF holding only GOOG still needs the company_market_cap stored on
@@ -79,7 +73,7 @@ def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = N
     # so historical (sim) dates weigh multi-listing companies at that date's value like every
     # other company. Masters with no listing value near the date keep the stored cap.
     master_ids = [tid for tid, (mid, cap) in master_info.items() if mid is None and cap is not None]
-    for mid, cap in company.company_caps_as_of(master_ids, holding_date, DAYS_NO_MARKET_CAP).items():
+    for mid, cap in company.company_caps_as_of(master_ids, holding_date, config.BestIdeas.DAYS_NO_MARKET_CAP).items():
         master_info[mid] = (None, cap)
 
     priced_ids = {v.ticker_id for v in market_cap_values}
@@ -201,7 +195,7 @@ def compute_active_weights(inputs: EtfInputs, universe: UniverseWeights | None =
     # weights (and its place in the self-mode cap weights) but is never one of the ETF's best
     # ideas: every regional fund requires the company's region to be the ETF's
     # (model_fund._eligibility_masks), so it could never be bought and would only push a usable
-    # idea out of the ETF's top MAX_BEST_IDEAS_PER_FUND. A fund with no region (none today)
+    # idea out of the ETF's top config.BestIdeas.MAX_BEST_IDEAS_PER_FUND. A fund with no region (none today)
     # would lose these ideas. A Global ETF (no fund region) or a company with no region is kept.
     etf_region = inputs.etf.region
     grouped["region"] = grouped["ticker_id"].map(lambda t: inputs.regions.get(int(t)))
@@ -218,10 +212,10 @@ def select_best_ideas(weights: pd.DataFrame, limit: int | None = None) -> pd.Dat
     eligible = weights[~weights["other_region"].astype(bool)] if "other_region" in weights else weights
     best_ideas = eligible[eligible["delta"] > 0].sort_values("delta", ascending=False)
 
-    dropped = best_ideas[best_ideas["delta"] > HOLDING_DELTA_LIMIT_DROP_OFF]
+    dropped = best_ideas[best_ideas["delta"] > config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF]
     if not dropped.empty:
-        log.record_status(f"Dropping {len(dropped)} best-idea(s) above delta limit {HOLDING_DELTA_LIMIT_DROP_OFF}: {dropped['ticker_id'].tolist()}")
-    best_ideas = best_ideas[best_ideas["delta"] <= HOLDING_DELTA_LIMIT_DROP_OFF]
+        log.record_status(f"Dropping {len(dropped)} best-idea(s) above delta limit {config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF}: {dropped['ticker_id'].tolist()}")
+    best_ideas = best_ideas[best_ideas["delta"] <= config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF]
 
     if limit is not None:
         if limit <= 0:
@@ -247,7 +241,7 @@ def get_benchmark_weights(
     id compute_active_weights looks it up by."""
     key = ('snapshot', benchmark_id)
     if key not in cache:
-        bm_holdings = benchmark.fetch_latest_holdings(benchmark_id, LOOK_BACK_WINDOW, up_to_date=as_of_date)
+        bm_holdings = benchmark.fetch_latest_holdings(benchmark_id, config.BestIdeas.LOOK_BACK_WINDOW, up_to_date=as_of_date)
         ids = [h.ticker_id for h in bm_holdings if h.ticker_id]
         master_of = {tid: mid for tid, (mid, _cap) in ticker.fetch_master_info_by_ids(ids).items() if mid}
         weights: dict[int, float] = {}
@@ -325,7 +319,7 @@ def build_analysis_rows(
             note = 'other_region'
         elif r["delta"] <= 0:
             note = 'delta<=0'
-        elif r["delta"] > HOLDING_DELTA_LIMIT_DROP_OFF:
+        elif r["delta"] > config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF:
             note = 'delta>limit'
         else:
             note = 'beyond_top_N'
@@ -434,8 +428,8 @@ def run(as_of_date: date | None = None) -> RunStats:
                     #    duplicate lines summed or quarantined, plus market caps and master info.
                     inputs = prepare_etf_inputs(pe, as_of_date)
                     if inputs is None:
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"No holdings have been downloaded for the past {LOOK_BACK_WINDOW} days", message=None)
-                        etf_stats.notes.append(f"no holdings in {LOOK_BACK_WINDOW} days")
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"No holdings have been downloaded for the past {config.BestIdeas.LOOK_BACK_WINDOW} days", message=None)
+                        etf_stats.notes.append(f"no holdings in {config.BestIdeas.LOOK_BACK_WINDOW} days")
                         continue
                     etf_stats.holding_date, etf_stats.priced, etf_stats.total = inputs.holding_date, len(inputs.holdings), inputs.total_holdings
 
@@ -450,12 +444,12 @@ def run(as_of_date: date | None = None) -> RunStats:
 
                     # 3. Identify and report stale tickers (no market cap within window)
                     for ticker_id in inputs.unpriced_ticker_ids:
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="STALE HOLDING", message=f"ticker_id={ticker_id} has no market cap for over {DAYS_NO_MARKET_CAP} days")
+                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="STALE HOLDING", message=f"ticker_id={ticker_id} has no market cap for over {config.BestIdeas.DAYS_NO_MARKET_CAP} days")
                     if inputs.unpriced_ticker_ids:
                         etf_stats.notes.append(f"{len(inputs.unpriced_ticker_ids)} stale")
 
                     # 4. Coverage check
-                    if inputs.coverage_ratio < MIN_HOLDINGS_WITH_PRICES_PCT:
+                    if inputs.coverage_ratio < config.BestIdeas.MIN_HOLDINGS_WITH_PRICES_PCT:
                         missing_count = inputs.total_holdings - len(inputs.holdings)
                         msg = f"Coverage {inputs.coverage_ratio:.1%}. Missing {missing_count} market caps for holding date {inputs.holding_date.strftime('%Y-%m-%d')}"
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Insufficient market cap coverage", message=msg)
@@ -463,7 +457,7 @@ def run(as_of_date: date | None = None) -> RunStats:
                         continue
 
                     # 5a. Always generate self-benchmark best ideas
-                    self_df = _find_best_ideas(inputs, MAX_BEST_IDEAS_PER_FUND)
+                    self_df = _find_best_ideas(inputs, config.BestIdeas.MAX_BEST_IDEAS_PER_FUND)
                     best_idea.insert_bulk(pe.id, inputs.holding_date, best_idea.MODE_SELF, best_idea.df_to_rows(self_df, provider_etf_id=pe.id, value_date=inputs.holding_date, benchmark_mode=best_idea.MODE_SELF))
                     etf_stats.self_ideas = len(self_df)
 
@@ -474,7 +468,7 @@ def run(as_of_date: date | None = None) -> RunStats:
                         universe = get_market_weights(pe.benchmark_id, as_of_date, _bm_cache)
                         if universe.weights:
                             mode = best_idea.MODE_MARKET
-                            universe_df = _find_best_ideas(inputs, MAX_BEST_IDEAS_PER_FUND, universe=universe)
+                            universe_df = _find_best_ideas(inputs, config.BestIdeas.MAX_BEST_IDEAS_PER_FUND, universe=universe)
                             best_idea.insert_bulk(pe.id, inputs.holding_date, mode, best_idea.df_to_rows(universe_df, provider_etf_id=pe.id, value_date=inputs.holding_date, benchmark_mode=mode))
                             etf_stats.market_ideas = len(universe_df)
 

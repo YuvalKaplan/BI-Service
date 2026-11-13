@@ -28,6 +28,7 @@ import atexit
 import os
 from datetime import date, timedelta
 import log
+from modules import config
 from modules.core.db import ENVIRONMENT
 from modules.object.exit import cleanup
 from modules.object import best_idea, fund, fund_analysis, fund_holding, fund_holding_change, screener_listing
@@ -52,7 +53,7 @@ def confirm(funds: list, days: list[date], screens: list[date]) -> bool:
     print(f"Generation days: {', '.join(str(d) for d in days)}")
     if REBUILD_BENCHMARKS:
         print(f"Screens rebuilt (companies + benchmarks): {', '.join(str(d) for d in screens)}")
-    print(f"Best ideas deleted and regenerated from: {days[0] - timedelta(days=best_ideas_generator.LOOK_BACK_WINDOW)}")
+    print(f"Best ideas deleted and regenerated from: {days[0] - timedelta(days=config.BestIdeas.LOOK_BACK_WINDOW)}")
     print("Active funds erased and replayed:")
     for f in funds:
         print(f"  {f.id}: {f.name}")
@@ -94,7 +95,7 @@ def main() -> None:
         fund_holding.delete_all_for_fund(f.id)
         fund_holding_change.delete_all_for_fund(f.id)
         fund_analysis.delete_all_for_fund(f.id)
-    deleted = best_idea.delete_from(days[0] - timedelta(days=best_ideas_generator.LOOK_BACK_WINDOW))
+    deleted = best_idea.delete_from(days[0] - timedelta(days=config.BestIdeas.LOOK_BACK_WINDOW))
     log.record_status(f"[funds_replay] Erased {len(funds)} funds' history and {deleted} best ideas.")
 
     # 3. The generation days: best ideas for every active ETF, then every active fund.

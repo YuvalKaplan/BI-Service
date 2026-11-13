@@ -1,5 +1,6 @@
 """
 The cron's week (service_cron.py), and the generation day the live generators and the sim share.
+The days themselves are settings (config.Schedule).
 
 service_cron.py runs once a day early in the UTC morning - the evening before in New York - so
 every run works on the previous trading day's close (pricing.latest_value_date):
@@ -20,21 +21,14 @@ come from FMP (holidays-by-exchange); a year it can't answer for keeps the prefe
 """
 import log
 from datetime import date, datetime, time, timedelta, timezone
+from modules import config
 from modules.core import api_stocks
 from modules.ticker import pricing
 
-MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY = range(7)
-DAILY_RUN_DAYS = (TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY)   # the daily run days: each follows a US trading day's close
-WEEKLY_WEEKDAY = SUNDAY          # the weekly day: style reference ETFs, ESG
-GENERATION_WEEKDAY = WEDNESDAY    # the generators' preferred run day (on Tuesday's close)
-SEC_LIST_REMINDER_DAY = 1         # day of the month: the reminder to update the SEC active ETF list by hand
-GENERATION_SHIFTS = (1, -1)       # tried in order when its close is a holiday: a day later, else a day earlier
-HOLIDAY_EXCHANGE = 'NYSE'
-
-assert all(GENERATION_WEEKDAY + s in DAILY_RUN_DAYS for s in (0, *GENERATION_SHIFTS)), \
+assert all(config.Schedule.GENERATION_WEEKDAY + s in config.Schedule.DAILY_RUN_DAYS for s in (0, *config.Schedule.GENERATION_SHIFTS)), \
     "The generation day and its shifts must be days the daily steps run (the generators use their screen and values)"
 
-_holiday_cache: dict[int, dict[date, str]] = {}   # year -> {date: name} of HOLIDAY_EXCHANGE's full closures
+_holiday_cache: dict[int, dict[date, str]] = {}   # year -> {date: name} of config.Schedule.HOLIDAY_EXCHANGE's full closures
 
 
 def week_start(d: date) -> date:
@@ -50,7 +44,7 @@ def market_day(run_day: date) -> date:
 
 
 def holidays(start: date, end: date) -> dict[date, str]:
-    """{date: name} of HOLIDAY_EXCHANGE's full closures over [start, end] - an early close is a
+    """{date: name} of config.Schedule.HOLIDAY_EXCHANGE's full closures over [start, end] - an early close is a
     trading day - read from FMP a calendar year at a time and cached. A year FMP can't answer for is
     left out (logged, not cached), so only the weekday rule applies to it. FMP's `from` is
     exclusive (from=2025-01-01 leaves out New Year's Day), so each year is asked for with a week
@@ -58,9 +52,9 @@ def holidays(start: date, end: date) -> dict[date, str]:
     closed: dict[date, str] = {}
     for year in range(start.year, end.year + 1):
         if year not in _holiday_cache:
-            rows = api_stocks.get_exchange_holidays(HOLIDAY_EXCHANGE, date(year - 1, 12, 24), date(year + 1, 1, 7))
+            rows = api_stocks.get_exchange_holidays(config.Schedule.HOLIDAY_EXCHANGE, date(year - 1, 12, 24), date(year + 1, 1, 7))
             if isinstance(rows, str):
-                log.record_notice(f"{HOLIDAY_EXCHANGE} holidays of {year} unavailable, the generation day isn't moved for them: {rows}")
+                log.record_notice(f"{config.Schedule.HOLIDAY_EXCHANGE} holidays of {year} unavailable, the generation day isn't moved for them: {rows}")
                 continue
             year_closed: dict[date, str] = {}
             for r in rows:
@@ -77,8 +71,8 @@ def holidays(start: date, end: date) -> dict[date, str]:
 
 def _candidates(d: date) -> list[date]:
     """d's week's possible generation days, in order of preference."""
-    preferred = week_start(d) + timedelta(days=GENERATION_WEEKDAY)
-    return [preferred + timedelta(days=s) for s in (0, *GENERATION_SHIFTS)]
+    preferred = week_start(d) + timedelta(days=config.Schedule.GENERATION_WEEKDAY)
+    return [preferred + timedelta(days=s) for s in (0, *config.Schedule.GENERATION_SHIFTS)]
 
 
 def _pick(candidates: list[date], closed: dict[date, str]) -> date:
@@ -93,7 +87,7 @@ def _week(d: date) -> tuple[list[date], dict[date, str]]:
 
 
 def generation_day(d: date) -> date:
-    """The generation day of d's week: GENERATION_WEEKDAY, else the first of its shifts whose
+    """The generation day of d's week: config.Schedule.GENERATION_WEEKDAY, else the first of its shifts whose
     close isn't a holiday."""
     return _pick(*_week(d))
 
@@ -117,7 +111,7 @@ def generation_days_between(start: date, end: date) -> list[date]:
 
 
 def generation_note(d: date) -> str | None:
-    """Why d's week generates on another day than GENERATION_WEEKDAY (for the cron email) - None
+    """Why d's week generates on another day than config.Schedule.GENERATION_WEEKDAY (for the cron email) - None
     when it doesn't."""
     candidates, closed = _week(d)
     preferred, close = candidates[0], market_day(candidates[0])
@@ -126,6 +120,6 @@ def generation_note(d: date) -> str | None:
     day = _pick(candidates, closed)
     if day == preferred:
         return (f"Generation on {preferred:%a} {preferred} as usual, though its close ({close:%a} {close}, "
-                f"{closed[close]}) and every other candidate's falls on a {HOLIDAY_EXCHANGE} closure")
-    return (f"Generation moved from {preferred:%a} {preferred} to {day:%a} {day}: {HOLIDAY_EXCHANGE} was closed on "
+                f"{closed[close]}) and every other candidate's falls on a {config.Schedule.HOLIDAY_EXCHANGE} closure")
+    return (f"Generation moved from {preferred:%a} {preferred} to {day:%a} {day}: {config.Schedule.HOLIDAY_EXCHANGE} was closed on "
             f"{close:%a} {close} ({closed[close]})")

@@ -9,8 +9,7 @@ from threading import Lock
 from urllib.parse import quote
 from urllib.request import urlopen
 import json
-
-FMP_API_URL = 'https://financialmodelingprep.com/stable'
+from modules import config
 
 
 def _q(value) -> str:
@@ -19,8 +18,6 @@ def _q(value) -> str:
     profile, prices and market caps."""
     return quote(str(value), safe='')
 
-CALLS_PER_MINUTE = 200
-WINDOW_SECONDS = 60.0
 
 _call_timestamps = deque()
 _bucket_lock = Lock()
@@ -28,36 +25,34 @@ _bucket_lock = Lock()
 def throttle_api_calls() -> None:
     """
     Token bucket rate limiter.
-    Guarantees no more than CALLS_PER_MINUTE in WINDOW_SECONDS.
+    Guarantees no more than config.Api.CALLS_PER_MINUTE in config.Api.WINDOW_SECONDS.
     Thread-safe and burst-safe.
     """
     with _bucket_lock:
         now = time.monotonic()
 
         # Remove timestamps older than the rolling window
-        while _call_timestamps and now - _call_timestamps[0] >= WINDOW_SECONDS:
+        while _call_timestamps and now - _call_timestamps[0] >= config.Api.WINDOW_SECONDS:
             _call_timestamps.popleft()
 
         # If bucket is full, wait until a token frees up
-        if len(_call_timestamps) >= CALLS_PER_MINUTE:
-            sleep_time = WINDOW_SECONDS - (now - _call_timestamps[0])
+        if len(_call_timestamps) >= config.Api.CALLS_PER_MINUTE:
+            sleep_time = config.Api.WINDOW_SECONDS - (now - _call_timestamps[0])
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
             # Recalculate after sleeping
             now = time.monotonic()
-            while _call_timestamps and now - _call_timestamps[0] >= WINDOW_SECONDS:
+            while _call_timestamps and now - _call_timestamps[0] >= config.Api.WINDOW_SECONDS:
                 _call_timestamps.popleft()
 
         # Consume a token
         _call_timestamps.append(time.monotonic())
 
-API_RETRIES = 3
-API_RETRY_DELAY = 2.0  # seconds; doubles on each subsequent attempt
 
 def get_jsonparsed_data(url: str) -> dict:
     last_exc: Exception | None = None
-    for attempt in range(API_RETRIES):
+    for attempt in range(config.Api.API_RETRIES):
         try:
             response = urlopen(url)
             if response.code != 200:
@@ -66,14 +61,14 @@ def get_jsonparsed_data(url: str) -> dict:
             return json.loads(data)
         except Exception as e:
             last_exc = e
-            if attempt < API_RETRIES - 1:
-                time.sleep(API_RETRY_DELAY * (2 ** attempt))
+            if attempt < config.Api.API_RETRIES - 1:
+                time.sleep(config.Api.API_RETRY_DELAY * (2 ** attempt))
     raise last_exc if last_exc is not None else Exception("Failed to fetch data after retries")
 
 def get_stock_profile(symbol: str) -> dict[str,str] | str:
     try:
         throttle_api_calls()
-        url = (f"{FMP_API_URL}/profile?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        url = (f"{config.Api.FMP_API_URL}/profile?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
         array = get_jsonparsed_data(url)
         
         if not isinstance(array, list) or len(array) == 0:
@@ -116,7 +111,7 @@ def get_etf_holdings(symbol: str) -> list[dict]:
     provider ETFs, the index funds and the style reference ETFs."""
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/etf/holdings?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{config.Api.FMP_API_URL}/etf/holdings?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         rows = get_jsonparsed_data(url)
         if not isinstance(rows, list):
             return []
@@ -134,13 +129,12 @@ def get_etf_info(symbol: str) -> dict | None:
     etf/sector-weightings), or None when FMP has none. Raises when the call fails, so a failure
     isn't taken for a fund FMP doesn't carry."""
     throttle_api_calls()
-    url = f"{FMP_API_URL}/etf/info?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+    url = f"{config.Api.FMP_API_URL}/etf/info?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
     rows = get_jsonparsed_data(url)
     if not isinstance(rows, list):
         raise Exception(f"Unexpected FMP etf/info response for {symbol}: {str(rows)[:200]}")
     return rows[0] if rows else None
 
-SHARES_FLOAT_PAGE_LIMIT = 5000
 
 def get_all_shares_float() -> list[dict]:
     """FMP's free float for every listing it has (symbol = FMP full symbol, freeFloat %,
@@ -150,13 +144,13 @@ def get_all_shares_float() -> list[dict]:
     page = 0
     while True:
         throttle_api_calls()
-        url = (f"{FMP_API_URL}/shares-float-all?page={page}&limit={SHARES_FLOAT_PAGE_LIMIT}"
+        url = (f"{config.Api.FMP_API_URL}/shares-float-all?page={page}&limit={config.Api.SHARES_FLOAT_PAGE_LIMIT}"
                f"&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
         rows = get_jsonparsed_data(url)
         if not isinstance(rows, list):
             raise Exception(f"Unexpected shares-float-all response on page {page}: {str(rows)[:200]}")
         out.extend(rows)
-        if len(rows) < SHARES_FLOAT_PAGE_LIMIT:
+        if len(rows) < config.Api.SHARES_FLOAT_PAGE_LIMIT:
             return out
         page += 1
 
@@ -165,7 +159,7 @@ def get_quarterly_weighted_shares(symbol: str) -> float | None:
     financials — a source independent of its quote and its market-cap history), or None."""
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/income-statement?symbol={_q(symbol)}&period=quarter&limit=1&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{config.Api.FMP_API_URL}/income-statement?symbol={_q(symbol)}&period=quarter&limit=1&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         rows = get_jsonparsed_data(url)
         if not isinstance(rows, list) or not rows:
             return None
@@ -178,7 +172,7 @@ def get_quarterly_weighted_shares(symbol: str) -> float | None:
 def search_by_isin(isin: str) -> dict | None:
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/search-isin?isin={_q(isin)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{config.Api.FMP_API_URL}/search-isin?isin={_q(isin)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         result = get_jsonparsed_data(url)
         if not isinstance(result, list) or len(result) == 0:
             return None
@@ -190,7 +184,7 @@ def search_by_isin(isin: str) -> dict | None:
 def search_by_symbol(query: str) -> list[dict]:
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/search-symbol?query={_q(query)}&limit=1000&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{config.Api.FMP_API_URL}/search-symbol?query={_q(query)}&limit=1000&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         result = get_jsonparsed_data(url)
         if not isinstance(result, list):
             return []
@@ -202,7 +196,7 @@ def search_by_symbol(query: str) -> list[dict]:
 def search_by_name(query: str) -> list[dict]:
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/search-name?query={_q(query)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{config.Api.FMP_API_URL}/search-name?query={_q(query)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         result = get_jsonparsed_data(url)
         if not isinstance(result, list):
             return []
@@ -214,7 +208,7 @@ def search_by_name(query: str) -> list[dict]:
 def fetch_available_exchanges() -> list[dict]:
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/available-exchanges?apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{config.Api.FMP_API_URL}/available-exchanges?apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         result = get_jsonparsed_data(url)
         if not isinstance(result, list):
             return []
@@ -229,7 +223,7 @@ def get_exchange_holidays(exchange: str, start: date, end: date) -> list[dict] |
     isFullyClosed false). An empty list is a valid answer (no holidays published for the range)."""
     try:
         throttle_api_calls()
-        url = (f"{FMP_API_URL}/holidays-by-exchange?exchange={_q(exchange)}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        url = (f"{config.Api.FMP_API_URL}/holidays-by-exchange?exchange={_q(exchange)}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
         result = get_jsonparsed_data(url)
         if not isinstance(result, list):
             return f"Unexpected holidays response for {exchange}: {str(result)[:200]}"
@@ -240,7 +234,7 @@ def get_exchange_holidays(exchange: str, start: date, end: date) -> list[dict] |
 def get_symbol_historic_prices(symbol: str, start: date, end: date) -> list[dict[str,str]] | str:
     try:
         throttle_api_calls()
-        url = (f"{FMP_API_URL}/historical-price-eod/light?symbol={_q(symbol)}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        url = (f"{config.Api.FMP_API_URL}/historical-price-eod/light?symbol={_q(symbol)}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
         array = get_jsonparsed_data(url)
         
         if not isinstance(array, list) or len(array) == 0:
@@ -258,7 +252,7 @@ def get_symbol_historic_prices(symbol: str, start: date, end: date) -> list[dict
 def get_stock_historic_dividend(symbol: str) -> list[dict[str,str]] | str:
     try:
         throttle_api_calls()
-        url = (f"{FMP_API_URL}/dividends?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        url = (f"{config.Api.FMP_API_URL}/dividends?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
         array = get_jsonparsed_data(url)
         
         if not isinstance(array, list):
@@ -276,7 +270,7 @@ def get_stock_historic_dividend(symbol: str) -> list[dict[str,str]] | str:
 def get_stock_historic_splits(symbol: str) -> list[dict[str,str]] | str:
     try:
         throttle_api_calls()
-        url = (f"{FMP_API_URL}/splits?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        url = (f"{config.Api.FMP_API_URL}/splits?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
         array = get_jsonparsed_data(url)
         
         if not isinstance(array, list):
@@ -294,7 +288,7 @@ def get_stock_historic_splits(symbol: str) -> list[dict[str,str]] | str:
 def get_stock_historic_market_cap(symbol: str, start: date, end: date) -> list[dict[str,str]] | str:
     try:
         throttle_api_calls()
-        url = (f"{FMP_API_URL}/historical-market-capitalization?symbol={_q(symbol)}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
+        url = (f"{config.Api.FMP_API_URL}/historical-market-capitalization?symbol={_q(symbol)}&from={start.strftime("%Y-%m-%d")}&to={end.strftime("%Y-%m-%d")}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}")
         array = get_jsonparsed_data(url)
         
         if not isinstance(array, list) or len(array) == 0:
@@ -332,7 +326,7 @@ def get_fx_rate(from_currency: str, to_currency: str = 'USD') -> float | str:
     symbol = f"{from_currency}{to_currency}"
     try:
         throttle_api_calls()
-        url = f"{FMP_API_URL}/quote-short?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
+        url = f"{config.Api.FMP_API_URL}/quote-short?symbol={_q(symbol)}&apikey={os.getenv('SECRET_MARKET_DATA_API_KEY')}"
         array = get_jsonparsed_data(url)
         if not isinstance(array, list) or len(array) == 0:
             message = f"Invalid FX rate response for '{symbol}': empty result"
@@ -356,12 +350,12 @@ def fetch_company_factors(symbol: str) -> tuple[Dict, Dict]:
 
     try:
         endpoints = {
-            "profile": f"{FMP_API_URL}/profile?symbol={_q(symbol)}&apikey={apikey}",
-            "growth": f"{FMP_API_URL}/financial-growth?symbol={_q(symbol)}&apikey={apikey}",
-            "ratios": f"{FMP_API_URL}/ratios-ttm?symbol={_q(symbol)}&apikey={apikey}",
-            "metrics": f"{FMP_API_URL}/key-metrics-ttm?symbol={_q(symbol)}&apikey={apikey}",
-            "income": f"{FMP_API_URL}/income-statement?symbol={_q(symbol)}&limit=1&apikey={apikey}",
-            "cashflow": f"{FMP_API_URL}/cash-flow-statement?symbol={_q(symbol)}&limit=1&apikey={apikey}",
+            "profile": f"{config.Api.FMP_API_URL}/profile?symbol={_q(symbol)}&apikey={apikey}",
+            "growth": f"{config.Api.FMP_API_URL}/financial-growth?symbol={_q(symbol)}&apikey={apikey}",
+            "ratios": f"{config.Api.FMP_API_URL}/ratios-ttm?symbol={_q(symbol)}&apikey={apikey}",
+            "metrics": f"{config.Api.FMP_API_URL}/key-metrics-ttm?symbol={_q(symbol)}&apikey={apikey}",
+            "income": f"{config.Api.FMP_API_URL}/income-statement?symbol={_q(symbol)}&limit=1&apikey={apikey}",
+            "cashflow": f"{config.Api.FMP_API_URL}/cash-flow-statement?symbol={_q(symbol)}&limit=1&apikey={apikey}",
         }
 
         results = {}
@@ -458,8 +452,8 @@ def fetch_esg_data(symbol: str) -> tuple[Dict, Dict]:
 
     try:
         endpoints = {
-            "disclosure": f"{FMP_API_URL}/esg-disclosures?symbol={_q(symbol)}&apikey={apikey}",
-            "rating":     f"{FMP_API_URL}/esg-ratings?symbol={_q(symbol)}&apikey={apikey}",
+            "disclosure": f"{config.Api.FMP_API_URL}/esg-disclosures?symbol={_q(symbol)}&apikey={apikey}",
+            "rating":     f"{config.Api.FMP_API_URL}/esg-ratings?symbol={_q(symbol)}&apikey={apikey}",
         }
         results = {}
         with ThreadPoolExecutor(max_workers=2) as executor:
@@ -478,10 +472,7 @@ def fetch_esg_data(symbol: str) -> tuple[Dict, Dict]:
         return {}, {}
 
 
-SCREENER_PAGE_LIMIT = 1000
-SCREENER_MAX_PAGES = 20
-
-def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = SCREENER_PAGE_LIMIT, exchange: str | None = None) -> list[dict]:
+def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = config.Api.SCREENER_PAGE_LIMIT, exchange: str | None = None) -> list[dict]:
     """
     Paged call to FMP /stable/company-screener filtered by minimum market cap, optionally
     also filtered to a single exchange. FMP's unfiltered screener results are heavily
@@ -494,7 +485,7 @@ def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = SC
     isActivelyTrading. Listings FMP marks not actively trading are included - its flag is wrong
     for some (Energy Transfer, Dillard's) - and left to the caller (modules/cron/screener.py).
 
-    Raises when the call still fails after get_jsonparsed_data's API_RETRIES attempts, or when
+    Raises when the call still fails after get_jsonparsed_data's config.Api.API_RETRIES attempts, or when
     FMP answers with something other than a list (e.g. an error message). Returning [] instead
     would read as "no more companies on this exchange" and silently build a benchmark with an
     exchange missing or cut off mid-pagination.
@@ -502,7 +493,7 @@ def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = SC
     throttle_api_calls()
     apikey = os.getenv('SECRET_MARKET_DATA_API_KEY')
     url = (
-        f"{FMP_API_URL}/company-screener"
+        f"{config.Api.FMP_API_URL}/company-screener"
         f"?marketCapMoreThan={market_cap_more_than}&limit={limit}&page={page}"
         f"&isEtf=false&isFund=false"
     )
@@ -511,7 +502,7 @@ def fetch_company_screener(market_cap_more_than: int, page: int, limit: int = SC
     try:
         result = get_jsonparsed_data(url + f"&apikey={apikey}")
     except Exception as e:
-        raise Exception(f"FMP company screener failed after {API_RETRIES} attempts (exchange={exchange}, page={page}): {e}")
+        raise Exception(f"FMP company screener failed after {config.Api.API_RETRIES} attempts (exchange={exchange}, page={page}): {e}")
     if not isinstance(result, list):
         raise Exception(f"Unexpected FMP company screener response (exchange={exchange}, page={page}): {str(result)[:200]}")
     return result

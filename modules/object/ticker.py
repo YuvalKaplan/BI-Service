@@ -4,9 +4,8 @@ from typing import Optional, Sequence
 from psycopg.errors import Error
 from psycopg.rows import class_row, dict_row
 from dataclasses import dataclass
+from modules import config
 from modules.core.db import db_pool_instance
-
-US_EXCHANGES = {'NYSE', 'NASDAQ'}
 
 
 def is_preferred_exchange(candidate_exchange: str | None, current_exchange: str | None) -> bool:
@@ -18,9 +17,9 @@ def is_preferred_exchange(candidate_exchange: str | None, current_exchange: str 
     """
     if current_exchange is None:
         return True
-    if candidate_exchange in US_EXCHANGES:
+    if candidate_exchange in config.Markets.PREFERRED_EXCHANGES:
         return True
-    return current_exchange not in US_EXCHANGES
+    return current_exchange not in config.Markets.PREFERRED_EXCHANGES
 
 
 @dataclass
@@ -206,14 +205,14 @@ def fetch_stale_tickers(include_invalid: bool = False) -> list['Ticker']:
                 if include_invalid:
                     cur.execute("""
                         SELECT * FROM ticker
-                        WHERE updated_at IS NULL OR updated_at < NOW() - INTERVAL '7 days';
-                    """)
+                        WHERE updated_at IS NULL OR updated_at < NOW() - %s * INTERVAL '1 day';
+                    """, (config.Refresh.PROFILE_MAX_AGE_DAYS,))
                 else:
                     cur.execute("""
                         SELECT * FROM ticker
                         WHERE invalid IS NULL
-                          AND (updated_at IS NULL OR updated_at < NOW() - INTERVAL '7 days');
-                    """)
+                          AND (updated_at IS NULL OR updated_at < NOW() - %s * INTERVAL '1 day');
+                    """, (config.Refresh.PROFILE_MAX_AGE_DAYS,))
                 return cur.fetchall()
     except Error as e:
         raise Exception(f"Error fetching stale tickers: {e}")
@@ -524,9 +523,9 @@ def fetch_retry_tickers_for_style() -> list['Ticker']:
                     SELECT id, symbol FROM ticker
                     WHERE style_type IS NULL AND invalid IS NULL
                       AND master_ticker_id IS NULL
-                      AND style_factors_failed_at < NOW() - INTERVAL '30 days'
-                    LIMIT 200
-                """)
+                      AND style_factors_failed_at < NOW() - %s * INTERVAL '1 day'
+                    LIMIT %s
+                """, (config.Style.FACTORS_RETRY_DAYS, config.Style.RETRY_BATCH_SIZE))
                 return cur.fetchall()
     except Error as e:
         raise Exception(f"Error fetching retry tickers for style classification: {e}")

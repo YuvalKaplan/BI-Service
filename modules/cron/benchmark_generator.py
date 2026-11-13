@@ -48,7 +48,7 @@ def select_holdings(
     """
     {benchmark_id: [(company_ticker_id, market_cap)]}: the companies each benchmark row
     specifies — its region; a whole company cap at its market's breakpoint for its
-    market_coverage and at least index_funds.MIN_FLOAT_FACTOR floating (index_funds.passes_large —
+    market_coverage and at least config.IndexFunds.MIN_FLOAT_FACTOR floating (index_funds.passes_large —
     the S&P / Russell way); and its style_type ('blend'/'core': any style; 'value'/'growth': the
     company's ticker.style_type).
     """

@@ -15,18 +15,16 @@ import json
 from datetime import date, timedelta
 import pandas as pd
 from openpyxl.utils import get_column_letter
+from modules import config
 from modules.calc import model_fund
-from modules.cron import best_ideas_generator as big
 from modules.cron import funds_update
 from modules.object import benchmark_split
 from modules.object import (
     benchmark, best_idea, fund, fund_analysis, fund_holding, fund_holding_change,
     provider, provider_etf, ticker,
 )
-from modules.object.provider_etf_holding import DUP_PRICE_TOLERANCE, aggregate_holdings, fetch_latest_holdings_for_etf, implied_price
+from modules.object.provider_etf_holding import aggregate_holdings, fetch_latest_holdings_for_etf, implied_price
 from modules.ticker import index_funds
-
-OUTPUT_ROOT = os.path.join('.output', 'methodology')
 
 
 def _num(value) -> float | None:
@@ -126,7 +124,7 @@ class _Context:
 
         # Raw holding lines per ETF (for listing-level detail and quarantined lines)
         self.raw_lines = {
-            e: fetch_latest_holdings_for_etf(e, big.LOOK_BACK_WINDOW, up_to_date=d) for e, d in self.etf_dates.items()
+            e: fetch_latest_holdings_for_etf(e, config.BestIdeas.LOOK_BACK_WINDOW, up_to_date=d) for e, d in self.etf_dates.items()
         }
 
         ids = {a.ticker_id for a in self.analysis}
@@ -229,7 +227,7 @@ def _write_etf_files(ctx: _Context, out_dir: str) -> list[str]:
             ('Region', pe.region),
             ('Holdings date', ctx.etf_dates[etf_id]),
             ('Benchmark', bm_text),
-            ('Best ideas', f"top {big.MAX_BEST_IDEAS_PER_FUND} by delta = ETF weight - benchmark weight, delta > 0 and <= {big.HOLDING_DELTA_LIMIT_DROP_OFF:.0%}"),
+            ('Best ideas', f"top {config.BestIdeas.MAX_BEST_IDEAS_PER_FUND} by delta = ETF weight - benchmark weight, delta > 0 and <= {config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF:.0%}"),
         ]
         path = os.path.join(etf_dir, f"{_safe(pe.name or 'ETF')}_{pe.id}.xlsx")
         with pd.ExcelWriter(path, engine='openpyxl') as w:
@@ -243,7 +241,7 @@ def _write_etf_files(ctx: _Context, out_dir: str) -> list[str]:
                 'Shares': h.shares, 'Market value': h.market_value, 'Implied price': implied_price(h),
             } for qh in quarantined for h in qh.lines])
             _write_sheet(w, 'Quarantined', q if not q.empty else pd.DataFrame({'Note': [
-                f"No ticker was listed on several lines with inconsistent prices (tolerance {DUP_PRICE_TOLERANCE})."
+                f"No ticker was listed on several lines with inconsistent prices (tolerance {config.Holdings.DUP_PRICE_TOLERANCE})."
             ]}), {'Shares': NUM, 'Market value': MONEY, 'Implied price': NUM})
         written.append(path)
     return written
@@ -276,7 +274,7 @@ def _write_benchmark_file(ctx: _Context, out_dir: str) -> str:
                     ('Benchmark', f"{bm.name} ({bm.id})"), ('Region', bm.region), ('Snapshot date', bm_date),
                     ('Membership', f"{bm.cap_type} {bm.style_type}, USD company cap >= {index_funds.cutoff(bm.region, bm.market_coverage, bm_date):,.0f} "
                                  f"(its market's float-cap breakpoint at {bm.market_coverage:.0%} coverage, from the index funds) with at least "
-                                 f"{index_funds.MIN_FLOAT_FACTOR:.0%} floating, market-cap weighted, one row per company (its primary listing's cap), region by primary listing"),
+                                 f"{config.IndexFunds.MIN_FLOAT_FACTOR:.0%} floating, market-cap weighted, one row per company (its primary listing's cap), region by primary listing"),
                     ('Constituents', len(df)), ('Used for ETFs', etfs),
                 ])
         else:
@@ -359,7 +357,7 @@ def _write_best_ideas_file(ctx: _Context, out_dir: str) -> str:
     with pd.ExcelWriter(path, engine='openpyxl') as w:
         _write_sheet(w, 'Best ideas', out, {'ETF weight': PCT, 'Benchmark weight': PCT, 'Delta': PCT, 'Market cap': MONEY}, [
             ('Benchmark mode', ctx.mode),
-            ('Per ETF', f"top {big.MAX_BEST_IDEAS_PER_FUND} companies by delta (0 < delta <= {big.HOLDING_DELTA_LIMIT_DROP_OFF:.0%})"),
+            ('Per ETF', f"top {config.BestIdeas.MAX_BEST_IDEAS_PER_FUND} companies by delta (0 < delta <= {config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF:.0%})"),
             ('ETFs', len(ctx.etf_dates)),
         ])
     return path
@@ -444,10 +442,10 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
             ('Score = ', f"the points each fund ETF gives a company for its rank there (rank 1..{len(s.rank_points)}: "
                          f"{', '.join(map(str, s.rank_points))}), summed (each ETF's latest best ideas from the last {s.recalc_frequency_days} days)"),
             ('Order', 'score desc, appearances desc, max delta desc (per region / style bucket)'),
-            ('Keep buffer', f"a holding is kept while within the top {model_fund.KEEP_BUFFER} x its bucket's target by score"),
+            ('Keep buffer', f"a holding is kept while within the top {config.FundStrategy.KEEP_BUFFER} x its bucket's target by score"),
         ] + _split_rows(s, ctx.as_of_date) + [
             ('Buckets (target holdings)', ", ".join(f"{b.label} {b.target}" for b in ctx.buckets)),
-            ('MC weight alpha / cap / floor', f"{model_fund.MC_WEIGHT_ALPHA} / {model_fund.MC_WEIGHT_CAP:.0%} / {model_fund.MC_WEIGHT_FLOOR:.0%}"),
+            ('MC weight alpha / cap / floor', f"{config.FundStrategy.MC_WEIGHT_ALPHA} / {config.FundStrategy.MC_WEIGHT_CAP:.0%} / {config.FundStrategy.MC_WEIGHT_FLOOR:.0%}"),
         ],
         columns=['Item', 'Value'],
     )
@@ -505,11 +503,11 @@ def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
         f"1. **ETF holdings** — `etfs/` has one workbook per constituent ETF ({len(etf_files)}), with the holdings file "
         f"downloaded from the provider for the date shown: each ETF's latest within the fund's {s.recalc_frequency_days}-day "
         "look-back, every ETF counting equally whatever its date. A ticker listed on several lines is summed when all lines "
-        f"imply the same price (within {DUP_PRICE_TOLERANCE - 1:.0%}), and excluded (quarantined) when they don't. "
+        f"imply the same price (within {config.Holdings.DUP_PRICE_TOLERANCE - 1:.0%}), and excluded (quarantined) when they don't. "
         "Listings of one company (share classes such as GOOGL/GOOG, and foreign listings) are combined under the company's master ticker (*Master used*), measured by the company market cap of its primary listing.",
         f"2. **Benchmark** — mode `{ctx.mode}`: {bm_text}.",
         f"3. **Active weight** — for each company, ETF weight minus benchmark weight (delta). The top "
-        f"{big.MAX_BEST_IDEAS_PER_FUND} companies with 0 < delta <= {big.HOLDING_DELTA_LIMIT_DROP_OFF:.0%} are the ETF's "
+        f"{config.BestIdeas.MAX_BEST_IDEAS_PER_FUND} companies with 0 < delta <= {config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF:.0%} are the ETF's "
         "best ideas, ranked 1..N by delta. Every company and why it did or didn't qualify is in the ETF workbook (*Note*).",
         "4. **Best ideas** — `best_ideas.xlsx` lists all ETFs' best ideas, and whether each passes the fund's filters "
         f"(ETF list, style `{s.style.name}`, cap `{s.cap.name}`, region, exchange, ESG), and the points its rank earns.",
@@ -517,20 +515,20 @@ def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
         f"rank there ({', '.join(map(str, s.rank_points))} for ranks 1..{len(s.rank_points)}), summed across the fund's ETFs. "
         "Companies are ordered by score, then the number of ETFs scoring it (appearances), then its largest delta, and each "
         f"region / style bucket takes its top share of the {s.holdings} holdings. A current holding is kept while it stays within "
-        f"the top {model_fund.KEEP_BUFFER}x its bucket's target; sold places are filled from the same bucket. "
+        f"the top {config.FundStrategy.KEEP_BUFFER}x its bucket's target; sold places are filled from the same bucket. "
         f"Weights: {'market-cap based (square-root compressed, capped and floored)' if s.allocation == 'market_cap' else 'equal'}. "
         "See `fund.xlsx` — *Holdings* shows the justification per holding, *Candidates* shows who wasn't selected and why.",
         "",
         "## Constants",
         "",
-        f"- Best ideas per ETF: {big.MAX_BEST_IDEAS_PER_FUND}; delta limit: {big.HOLDING_DELTA_LIMIT_DROP_OFF:.0%}",
+        f"- Best ideas per ETF: {config.BestIdeas.MAX_BEST_IDEAS_PER_FUND}; delta limit: {config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF:.0%}",
         f"- Look-back: each ETF's latest best ideas from the last {s.recalc_frequency_days} days (`recalc_frequency_days`)",
         "- Large-cap cutoffs (whole company cap, with at least "
-        f"{index_funds.MIN_FLOAT_FACTOR:.0%} floating; each region's full-universe benchmark coverage of its market's float cap, per the index funds): "
+        f"{config.IndexFunds.MIN_FLOAT_FACTOR:.0%} floating; each region's full-universe benchmark coverage of its market's float cap, per the index funds): "
         + ", ".join(f"{region} ${cut:,.0f} ({index_funds.full_universe_coverage()[region]:.0%})"
                     for region, cut in index_funds.large_cutoffs(ctx.as_of_date).items()),
-        f"- Duplicate-line price tolerance: {DUP_PRICE_TOLERANCE}",
-        f"- Market-cap weighting: alpha {model_fund.MC_WEIGHT_ALPHA}, cap {model_fund.MC_WEIGHT_CAP:.0%}, floor {model_fund.MC_WEIGHT_FLOOR:.0%}",
+        f"- Duplicate-line price tolerance: {config.Holdings.DUP_PRICE_TOLERANCE}",
+        f"- Market-cap weighting: alpha {config.FundStrategy.MC_WEIGHT_ALPHA}, cap {config.FundStrategy.MC_WEIGHT_CAP:.0%}, floor {config.FundStrategy.MC_WEIGHT_FLOOR:.0%}",
         "",
         "## Caveat",
         "",
@@ -550,7 +548,7 @@ def run(fund_id: int, as_of_date: date | None = None) -> str:
     """Writes the methodology folder for fund_id (as of its inception unless as_of_date is
     given) and returns its path."""
     ctx = _Context(fund_id, as_of_date)
-    out_dir = os.path.join(OUTPUT_ROOT, f"{_safe(ctx.fund.name)}_{fund_id}_{ctx.as_of_date}")
+    out_dir = os.path.join(config.FundMethodology.OUTPUT_ROOT, f"{_safe(ctx.fund.name)}_{fund_id}_{ctx.as_of_date}")
     os.makedirs(out_dir, exist_ok=True)
 
     etf_files = _write_etf_files(ctx, out_dir)

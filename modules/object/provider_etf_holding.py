@@ -3,6 +3,7 @@ from datetime import date, datetime
 from psycopg.errors import Error
 from psycopg.rows import class_row
 from dataclasses import dataclass
+from modules import config
 from modules.core.db import db_pool_instance
 
 @dataclass
@@ -40,7 +41,7 @@ def fetch_valid_ticker_ids_in_holdings() -> List[int]:
 
 def fetch_valid_ticker_ids_in_recent_holdings(look_back_days: int) -> List[int]:
     """Valid tickers in each active ETF's latest holdings from the last look_back_days — the
-    holdings best ideas can use (best_ideas_generator.LOOK_BACK_WINDOW)."""
+    holdings best ideas can use (config.BestIdeas.LOOK_BACK_WINDOW)."""
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
@@ -139,11 +140,6 @@ def fetch_latest_holdings_for_etf(provider_etf_id: int, look_back_days: int, up_
         raise Exception(f"Error fetching latest holdings for provider ETF {provider_etf_id}: {e}")
 
 
-# Max/min ratio of implied prices (market_value / shares) under which duplicate lines of one
-# ticker are treated as lots of the same security rather than different securities.
-DUP_PRICE_TOLERANCE = 1.02
-
-
 @dataclass
 class QuarantinedHolding:
     ticker_id: int
@@ -161,7 +157,7 @@ def aggregate_holdings(raw: List[ProviderEtfHolding]) -> tuple[List[ProviderEtfH
     """
     Collapses an ETF's holding lines to one holding per ticker_id. Providers sometimes list a
     ticker on more than one line: when every line implies the same price (within
-    DUP_PRICE_TOLERANCE) they're lots of one security, so shares/market_value/weight are summed
+    config.Holdings.DUP_PRICE_TOLERANCE) they're lots of one security, so shares/market_value/weight are summed
     into a single holding that keeps the lowest line id. When the implied prices disagree (or
     can't be computed) the lines are most likely different securities that ticker resolution
     mapped onto the same ticker — there's no telling which one is right, so all of that
@@ -190,7 +186,7 @@ def aggregate_holdings(raw: List[ProviderEtfHolding]) -> tuple[List[ProviderEtfH
 
         prices = [implied_price(h) for h in lines]
         valid = [p for p in prices if p is not None]
-        if len(valid) != len(prices) or max(valid) / min(valid) > DUP_PRICE_TOLERANCE:
+        if len(valid) != len(prices) or max(valid) / min(valid) > config.Holdings.DUP_PRICE_TOLERANCE:
             quarantined.append(QuarantinedHolding(ticker_id=ticker_id, lines=lines, implied_prices=prices))
             continue
 
