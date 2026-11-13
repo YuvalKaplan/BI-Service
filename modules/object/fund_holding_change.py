@@ -24,7 +24,7 @@ def fetch_for_date(fund_id: int, change_date: date) -> List[FundHoldingChange]:
             with conn.cursor(row_factory=class_row(FundHoldingChange)) as cur:
                 cur.execute(
                     """
-                    SELECT fund_id, ticker_id, change_date, direction, ranking, appearances, max_delta,
+                    SELECT fund_id, ticker_id, change_date, direction, ranking, score, appearances, max_delta,
                            top_delta_provider_etf_id, all_provider_etf_ids, reason
                     FROM fund_holding_change
                     WHERE fund_id = %s AND change_date = %s;
@@ -62,13 +62,14 @@ def insert_fund_changes(items: List[FundHoldingChange]) -> None:
                         change_date,
                         direction,
                         ranking,
+                        score,
                         appearances,
                         max_delta,
                         top_delta_provider_etf_id,
                         all_provider_etf_ids,
                         reason
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::integer[], %s);
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::integer[], %s);
                 """
 
                 insert_values = [
@@ -78,6 +79,7 @@ def insert_fund_changes(items: List[FundHoldingChange]) -> None:
                         i.change_date,
                         i.direction,
                         i.ranking,
+                        i.score,
                         i.appearances,
                         i.max_delta,
                         i.top_delta_provider_etf_id,

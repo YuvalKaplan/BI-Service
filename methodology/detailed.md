@@ -36,7 +36,7 @@ The model funds apply this across the whole population of US-listed actively man
 1. identify every actively managed equity ETF and keep the diversified, broad-market ones;
 2. read each one's holdings every week;
 3. for each, measure each holding's **active weight** – its weight in the ETF minus its weight in a market reference – and keep the top overweights as that manager's best ideas;
-4. combine the best ideas of all managers, preferring the stocks that rank highest for any manager and that several managers share;
+4. combine the best ideas of all managers into a consensus score – points for each manager's rank, summed – so the stocks that several managers rank highly come first;
 5. build a rules-based portfolio from them – by region, size, style, weighting scheme – and rebalance it on a fixed schedule, with turnover controls.
 
 Active ETFs are used rather than mutual funds because they publish their holdings far more often (most daily; we read them weekly – [§5](#5-holdings)), so the ideas are recent rather than a quarter old.
@@ -259,7 +259,7 @@ Each fund is defined by a strategy:
 | Region | US, International, or a fixed split (e.g. 70% US / 30% International by number of holdings) |
 | Size | Large (above its region's benchmark line with ≥ 10% float), mid / small (below it), or any |
 | Style | Value, growth, any, or a fixed split (e.g. 60% growth / 40% value by number of holdings) |
-| Rank depth | Which ranks of each manager's list count – e.g. only each manager's #1, or their top 3 |
+| Rank points | The points a company earns for each rank on a manager's list (by default 512 for #1 down to 1 for #10, each rank half the one above – [below](#the-candidate-list)) |
 | ESG | Optionally, ESG-qualified companies only ([§12](#12-esg-screen)) |
 | Weighting | Equal, or market-cap based ([below](#weighting)) |
 | Rebalancing frequency | Every week or every two weeks |
@@ -271,15 +271,18 @@ Every fund draws on **all active ETFs** unless restricted.
 
 1. **Collect** each active ETF's latest best ideas within the fund's look-back (its rebalancing period), in the fund's chosen reference.
 2. **Filter** by the mandate. Region applies to both sides: a US fund takes US companies from US-region ETFs; an International fund, International companies from International ETFs. Size, style, exchange and ESG as configured.
-3. **Combine across managers**, per company:
-   - its **best rank** with any manager;
-   - its **appearances** – how many managers rank it at that best rank;
-   - its **largest active weight** among them, and the ETF that holds it (the *source ETF*).
-4. **Order**: best rank first, then most appearances, then largest active weight. Every manager counts equally, whatever its size or the date of its holdings within the look-back.
+3. **Score each company across managers.** Each manager gives a company points for its rank on that manager's best-ideas list, and the points are summed into the company's **consensus score**:
 
-So a stock that is the #1 overweight of four managers comes ahead of one that is the #1 of one manager, which comes ahead of anyone's #2.
+   | Rank | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+   |------|---|---|---|---|---|---|---|---|---|----|
+   | Points | 512 | 256 | 128 | 64 | 32 | 16 | 8 | 4 | 2 | 1 |
 
-5. **The ideal portfolio** is the top of this list, within the rank depth, up to the number of holdings. With a style split, the growth and value lists are built separately and each fills its share of the holdings. With a region split, the International list is built first and those companies are excluded from the US list, then each fills its share.
+   Each rank is worth half the one above, so one manager's #1 (512) equals two managers' #2 or eight managers' #4. A manager counts once per company. Alongside the score, each company carries its **best rank** with any manager, its **appearances** (how many managers rank it) and its **largest active weight** among them, with the ETF that holds it (the *source ETF*).
+4. **Order**: highest score first, then most appearances, then largest active weight. Every manager counts equally, whatever its size or the date of its holdings within the look-back.
+
+So a stock that is the #2 of three managers (768) comes ahead of one that is the #1 of a single manager (512), and a stock ranked #4 to #10 by many managers can outscore one ranked #3 by only one. The ranking deltas within a manager's list, which can be marginal, matter less than how many managers agree.
+
+5. **The ideal portfolio** is built in **buckets**, each ordered on its own: one per region of a region split, and one per style of a style split. Each bucket's ideal holdings are the top of its list, up to its share of the holdings (35 and 15 for a 50-holding 70% US / 30% International fund). With a region split, the International list is built first and those companies are excluded from the US list.
 
 ### Weighting
 
@@ -292,20 +295,19 @@ Funds are re-evaluated on the weekly generation day, when their rebalancing peri
 
 | Current holding | Action |
 |-----------------|--------|
-| Still in the ideal portfolio | **Keep** |
-| No longer among any manager's ideas within the fund's rank depth + a buffer (5 ranks for market-cap funds, 2 for equal-weight funds) | **Sell** – "not in best ideas" |
-| Still a best idea, but its rank has worsened by 5 or more (market-cap funds) / 2 or more (equal-weight) since it was bought | **Sell** – "dropped in ranking" |
-| Still a best idea, worsened by less | **Keep** – tolerated to limit turnover |
+| Within the top 1.25 × its bucket's share by score (e.g. the top 63 of a 50-holding fund; 44 US / 19 International in a 70/30 fund) | **Keep** – a holding that drifts a few places below the cut-off is tolerated, to limit turnover |
+| Still scored, but below that line | **Sell** – "below the score buffer" |
+| No longer among any manager's best ideas | **Sell** – "no longer a best idea" |
 
-Free positions are then filled from the ideal portfolio in order (**buys**); with a region split, region by region – each region's free positions from its own ideas, up to its share, so a sold international holding is replaced by an international idea. Holdings are never sold just to restore the split, and a region short of ideas isn't made up from the other. A held stock is not replaced merely because a better-ranked idea has appeared: positions are only freed by sells. Weights are then recalculated for the whole portfolio.
+Free positions are then filled from the ideal portfolio in score order (**buys**), bucket by bucket – each bucket's free positions from its own ideas, up to its share, so a sold international holding is replaced by an international idea and the split stays exact. A bucket short of ideas isn't made up from another. A held stock is not replaced merely because a higher-scoring idea has appeared: positions are only freed by sells, so a new idea scoring inside the cut-off can wait outside the fund until a position frees up. That delay is the price of the lower turnover. Weights are then recalculated for the whole portfolio.
 
 Other maintenance rules:
 
-- **A large-cap holding that slips below the large-cap line** is not sold for that reason alone – it stays eligible while managers keep ranking it – but such a stock can never be a new buy.
+- **A large-cap holding that slips below the large-cap line** is not sold for that reason alone – it stays eligible while it keeps its place by score – but such a stock can never be a new buy.
 - **Corporate changes**: holdings are tracked at company level, so a change in a company's primary listing (e.g. after a re-listing) doesn't trigger a sale and re-purchase.
 - **No ideas at all** (e.g. a data outage): the fund carries its holdings over unchanged rather than liquidating.
 
-Every buy and sell is recorded with its reason, rank, number of managers and contributing ETFs.
+Every buy and sell is recorded with its reason, score, best rank, number of managers and contributing ETFs.
 
 ## 12. ESG screen
 
@@ -333,7 +335,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 
 - **Whole-company cap, not float-adjusted, for benchmark weights.** Managers size positions against a company's full size; a float-adjusted benchmark would make closely held companies look like overweights for every manager. A float-weighted version was tested and reverted. Float is used only as a minimum (10%) for membership.
 - **Market-relative size lines** rather than fixed dollar thresholds, so "large cap" means the same thing in every market environment.
-- **Rank before breadth.** A company's best rank with any manager outweighs how many managers hold it; breadth breaks ties. This favours each manager's single strongest conviction over consensus names.
+- **Consensus before single conviction.** A company's score adds up every manager that ranks it, each rank worth half the one above, so agreement across managers weighs as much as the strength of one manager's view, and marginal differences between neighbouring ranks matter less. Ranking by best rank alone (the earlier rule) let one manager's #1 outrank ten managers' #2 and turned small active-weight differences into portfolio changes.
 - **Every manager counts equally**, regardless of assets under management or holdings date – the method aggregates opinions, not money.
 - **Style split trade-off.** Under the value / growth reference, a manager holding both styles is measured against two benchmarks in which large companies weigh more than in the blend (×2.3 for value, ×1.75 for growth), so its largest holdings rank somewhat lower than under the blend. Accepted, in exchange for not crediting out-of-style mega-caps as convictions.
 
@@ -352,14 +354,15 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Term | Meaning |
 |------|---------|
 | **Active weight (Δ)** | A company's weight in the ETF minus its weight in the reference. |
-| **Appearances** | Number of managers ranking a company at its best rank. |
+| **Appearances** | Number of managers ranking a company among their best ideas. |
 | **Best idea** | One of the top 10 positive active weights of an ETF in a week. |
+| **Bucket** | A region (and, with a style split, a style) of a fund, filled from its own ordered list up to its share of the holdings. |
 | **Breakpoint** | The company size at which the market's largest companies reach a given share of total market value. |
 | **Company market cap** | The whole company's equity value, all share classes, in USD. |
 | **Float factor** | The investable share of a company's equity, from the index funds' holdings or free float. |
 | **Primary listing** | The listing that represents a company: its home-market ordinary shares. |
 | **Rank** | A company's position in a manager's best-ideas list (1 = largest overweight). |
-| **Rank depth** | How many of each manager's ranks a fund draws on. |
+| **Consensus score** | The sum of the rank points a company earns from every manager ranking it. |
 | **Source ETF** | The ETF with the largest active weight in a fund holding. |
 
 ---
@@ -385,7 +388,8 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Best ideas: market cap window | ± 5 days of the holdings date |
 | Best ideas: maximum active weight | 20% |
 | Best ideas: per ETF | 10 |
-| Fund: rank buffer / sell on rank drop | 5 (market-cap funds), 2 (equal-weight funds) |
+| Fund: rank points, ranks 1–10 | 512, 256, 128, 64, 32, 16, 8, 4, 2, 1 |
+| Fund: keep buffer | Top 1.25 × the bucket's share of holdings, by score |
 | Fund weighting: exponent / cap / floor | 0.5 (square root) / 10% / 1% |
 | ESG: risk rating / ESG score / governance | AAA–B / ≥ 50 / ≥ 50 |
 | Weekly generation | Wednesday on Tuesday's close (moved around NYSE holidays) |

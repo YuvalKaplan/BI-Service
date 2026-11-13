@@ -35,7 +35,7 @@ The fund applies this across the population of US-listed, actively managed, dive
 1. identify every actively managed US equity ETF with a broad, diversified mandate;
 2. read each one's holdings every week;
 3. for each, measure each holding's **active weight** – its weight in the ETF minus its weight in its style's US large-cap benchmark – and keep the top overweights as that manager's best ideas;
-4. combine the best ideas of all managers, preferring the stocks that rank highest for any manager and that several managers share;
+4. combine the best ideas of all managers into a consensus score – points for each manager's rank, summed – so the stocks that several managers rank highly come first;
 5. hold the top 50 US large-cap companies at equal weight, and rebalance every two weeks with turnover controls.
 
 Active ETFs are used rather than mutual funds because they publish their holdings far more often (most daily; we read them weekly – [§5](#5-holdings)), so the ideas are recent rather than a quarter old.
@@ -47,8 +47,8 @@ Active ETFs are used rather than mutual funds because they publish their holding
 | **Universe** | US large-cap companies |
 | **Source of ideas** | Every qualifying actively managed US equity ETF |
 | **Best ideas measured against** | The US Large Cap Value benchmark for value companies, the US Large Cap Growth benchmark for growth companies |
-| **Ideas used** | Each manager's top three |
-| **Style** | No constraint: value and growth ideas compete on rank alone |
+| **Ideas used** | Each manager's ten best ideas, scored by rank and summed across managers |
+| **Style** | No constraint: value and growth ideas compete on score alone |
 | **Holdings** | 50 |
 | **Weighting** | Equal (2% each) |
 | **Rebalancing** | Every two weeks, with turnover controls |
@@ -235,15 +235,18 @@ All of a manager's active weights, value and growth companies alike, are then ra
 
 1. **Collect** each active ETF's latest best ideas from the last two weeks (the rebalancing period).
 2. **Filter**: US companies only, from US ETFs, and only those that are large cap on the rebalancing date – their whole market cap at or above the US large-cap breakpoint, with at least 10% float ([§7](#7-us-large-cap-and-the-value--growth-benchmarks)).
-3. **Combine across managers**, per company:
-   - its **best rank** with any manager;
-   - its **appearances** – how many managers rank it at that best rank;
-   - its **largest active weight** among them, and the ETF that holds it (the *source ETF*).
-4. **Order**: best rank first, then most appearances, then largest active weight. Every manager counts equally, whatever its size or the date of its holdings within the two weeks.
+3. **Score each company across managers.** Each manager gives a company points for its rank on that manager's best-ideas list – all ten ranks count – and the points are summed into the company's **consensus score**:
 
-So a stock that is the #1 overweight of four managers comes ahead of one that is the #1 of one manager, which comes ahead of anyone's #2.
+   | Rank | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+   |------|---|---|---|---|---|---|---|---|---|----|
+   | Points | 512 | 256 | 128 | 64 | 32 | 16 | 8 | 4 | 2 | 1 |
 
-5. **The ideal portfolio** is the top 50 of this list among the companies ranked **#1 to #3** by at least one manager. Value and growth companies compete on the same list; there is no style quota.
+   Each rank is worth half the one above, so one manager's #1 (512) equals two managers' #2 or eight managers' #4. A manager counts once per company. Alongside the score, each company carries its **best rank** with any manager, its **appearances** (how many managers rank it) and its **largest active weight** among them, with the ETF that holds it (the *source ETF*).
+4. **Order**: highest score first, then most appearances, then largest active weight. Every manager counts equally, whatever its size or the date of its holdings within the two weeks.
+
+So a stock that is the #2 of three managers (768) comes ahead of one that is the #1 of a single manager (512), and a stock ranked #4 to #10 by many managers can outscore one ranked #3 by only one. The ranking deltas within a manager's list, which can be marginal, matter less than how many managers agree.
+
+5. **The ideal portfolio** is the top 50 of this list. Value and growth companies compete on the same list; there is no style quota.
 
 ### Weighting
 
@@ -255,20 +258,19 @@ The fund is rebalanced every two weeks, on the weekly run. Starting from the cur
 
 | Current holding | Action |
 |-----------------|--------|
-| Still in the ideal portfolio | **Keep** |
-| No longer ranked #5 or better by any manager | **Sell** – "not in best ideas" |
-| Still ranked, but its best rank has worsened by 2 or more since it was bought | **Sell** – "dropped in ranking" |
-| Still ranked, worsened by less | **Keep** – tolerated to limit turnover |
+| Within the top 63 by score (1.25 × 50) | **Keep** – a holding that drifts a few places below the top 50 is tolerated, to limit turnover |
+| Still scored, but below 63rd | **Sell** – "below the score buffer" |
+| No longer among any manager's best ideas | **Sell** – "no longer a best idea" |
 
-Free positions are then filled from the ideal portfolio in order (**buys**), up to 50. A held stock is not replaced merely because a better-ranked idea has appeared: positions are only freed by sells. All holdings are then reset to equal weight.
+Free positions are then filled from the ideal portfolio in score order (**buys**), up to 50. A held stock is not replaced merely because a higher-scoring idea has appeared: positions are only freed by sells, so a new idea that scores inside the top 50 can wait outside the fund until a position frees up. That delay is the price of the lower turnover. All holdings are then reset to equal weight.
 
 Other maintenance rules:
 
-- **A holding that slips below the large-cap line** is not sold for that reason alone – it stays eligible while managers keep ranking it – but such a stock can never be a new buy.
+- **A holding that slips below the large-cap line** is not sold for that reason alone – it stays eligible while it keeps its place by score – but such a stock can never be a new buy.
 - **Corporate changes**: holdings are tracked at company level, so a change in a company's primary listing (e.g. after a re-listing) doesn't trigger a sale and re-purchase.
 - **No ideas at all** (e.g. a data outage): the fund carries its holdings over unchanged rather than liquidating.
 
-Every buy and sell is recorded with its reason, rank, number of managers and contributing ETFs.
+Every buy and sell is recorded with its reason, score, best rank, number of managers and contributing ETFs.
 
 ## 12. Audit trail
 
@@ -285,7 +287,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 - **Each company against its own style's benchmark.** Out-of-style mega-caps aren't credited as convictions ([§9](#9-measuring-a-managers-best-ideas)). The trade-off: a manager that holds both styles is measured against two benchmarks in which large companies weigh more than in the whole large-cap market (×2.3 for value, ×1.75 for growth), so its largest holdings rank somewhat lower. Accepted.
 - **Whole-company cap, not float-adjusted, for benchmark weights.** Managers size positions against a company's full size; a float-adjusted benchmark would make closely held companies look like overweights for every manager. A float-weighted version was tested and reverted. Float is used only as a minimum (10%) for large-cap membership.
 - **A market-relative large-cap line** rather than a fixed dollar threshold, so "large cap" means the same thing in every market environment.
-- **Rank before breadth.** A company's best rank with any manager outweighs how many managers hold it; breadth breaks ties. This favours each manager's single strongest conviction over consensus names.
+- **Consensus before single conviction.** A company's score adds up every manager that ranks it, each rank worth half the one above, so agreement across managers weighs as much as the strength of one manager's view, and marginal differences between neighbouring ranks matter less. Ranking by best rank alone (the earlier rule) let one manager's #1 outrank ten managers' #2 and turned small active-weight differences into portfolio changes.
 - **Every manager counts equally**, regardless of assets under management or holdings date – the method aggregates opinions, not money.
 - **Equal weight.** Each idea gets the same conviction in the fund, whatever the company's size; the fund carries no market-cap tilt.
 
@@ -304,9 +306,10 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Term | Meaning |
 |------|---------|
 | **Active weight (Δ)** | A company's weight in the ETF minus its weight in its style's benchmark. |
-| **Appearances** | Number of managers ranking a company at its best rank. |
+| **Appearances** | Number of managers ranking a company among their best ideas. |
 | **Best idea** | One of the top 10 positive active weights of an ETF in a week. |
 | **Breakpoint** | The company size at which the market's largest companies reach a given share of total market value. |
+| **Consensus score** | The sum of the rank points a company earns from every manager ranking it. |
 | **Company market cap** | The whole company's equity value, all share classes, in USD. |
 | **Float factor** | The investable share of a company's equity, from the index fund's holdings or free float. |
 | **Primary listing** | The listing that represents a company: its home-market ordinary shares. |
@@ -337,9 +340,8 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Best ideas: maximum active weight | 20% |
 | Best ideas: per ETF | 10 |
 | Fund: holdings | 50 |
-| Fund: ideas used | Each manager's ranks 1–3 |
+| Fund: rank points, ranks 1–10 | 512, 256, 128, 64, 32, 16, 8, 4, 2, 1 |
 | Fund: weighting | Equal (2%) |
 | Fund: rebalancing | Every two weeks |
-| Fund: kept while ranked | #5 or better |
-| Fund: sell on rank drop | 2 ranks or more since bought |
+| Fund: keep buffer | Top 63 by score (1.25 × 50 holdings) |
 | Weekly run | Wednesday on Tuesday's close (moved around NYSE holidays) |

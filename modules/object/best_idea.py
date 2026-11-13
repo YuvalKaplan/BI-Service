@@ -114,7 +114,10 @@ def fetch_for_etfs(etf_value_dates: dict[int, date], benchmark_mode: str) -> Lis
 
 @dataclass
 class BestIdeaRanked:
+    """One company's aggregate over a fund's ETFs (model_fund._filter_and_aggregate): its score
+    (the fund's rank_points summed), best rank, number of ETFs scoring it, largest delta."""
     ticker_id: int
+    score: int
     ranking: int
     appearances: int
     max_delta: float
