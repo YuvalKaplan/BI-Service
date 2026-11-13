@@ -147,11 +147,10 @@ def _record_fund_analysis(
 
             benchmark_id = benchmark_date = None
             universe = None
-            if strategy.benchmark in best_idea.EXTERNAL_MODES:
+            if strategy.benchmark == best_idea.MODE_MARKET:
                 if not pe.benchmark_id:
                     continue
-                universe = best_ideas_generator.get_full_universe_weights(
-                    pe.benchmark_id, as_of_date, bm_cache, style_split=strategy.benchmark == best_idea.MODE_SPLIT)
+                universe = best_ideas_generator.get_market_weights(pe.benchmark_id, as_of_date, bm_cache)
                 if not universe.weights:
                     continue
                 benchmark_id, benchmark_date = pe.benchmark_id, universe.holding_date

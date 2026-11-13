@@ -256,7 +256,7 @@ def _write_benchmark_file(ctx: _Context, out_dir: str) -> str:
     used: set[str] = set()
     held = {a.ticker_id for a in ctx.analysis}
     with pd.ExcelWriter(path, engine='openpyxl') as w:
-        if ctx.mode in best_idea.EXTERNAL_MODES:
+        if ctx.mode == best_idea.MODE_MARKET:
             snapshots = sorted({(a.benchmark_id, a.benchmark_date) for a in ctx.analysis if a.benchmark_id and a.benchmark_date})
             for bm_id, bm_date in snapshots:
                 bm = ctx.benchmarks[bm_id]
@@ -485,8 +485,7 @@ def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
     external = ("each ETF's configured external benchmark (see `benchmark.xlsx`): a synthetic large-cap, market-cap-weighted "
                 "benchmark built from the companies screened on FMP")
     bm_text = {
-        best_idea.MODE_FULL_UNIVERSE: external,
-        best_idea.MODE_SPLIT: external + "; where the region is split into value and growth benchmarks (US), each company "
+        best_idea.MODE_MARKET: external + "; where the region is split into value and growth benchmarks (US), each company "
                               "is compared with the benchmark of its own style (a company of neither style with the blend), "
                               "and all the ETF's deltas are ranked together",
     }.get(ctx.mode, "each ETF's own holdings, weighted by market cap (see `benchmark.xlsx`)")

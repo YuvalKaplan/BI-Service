@@ -50,7 +50,7 @@ Active ETFs are used rather than mutual funds because they publish their holding
 | Company data | Prices, market caps, share-class consolidation, region, validation ([§6](#6-company-data-and-data-quality)) | Daily |
 | Size breakpoints | Where "large cap" ends, measured from the total market ([§7](#7-market-size-and-the-reference-benchmarks)) | Weekly |
 | Reference benchmarks | US large blend, US large value, US large growth, International large blend ([§7](#7-market-size-and-the-reference-benchmarks)) | Weekly |
-| Best ideas | Top 10 active weights per ETF, against three different references ([§9](#9-measuring-a-managers-best-ideas)) | Weekly |
+| Best ideas | Top 10 active weights per ETF, against two references – the market and the ETF itself ([§9](#9-measuring-a-managers-best-ideas)) | Weekly |
 | Funds | Candidate list across all managers → portfolio → buys / sells / weights ([§10](#10-building-a-fund), [§11](#11-maintaining-a-fund-rebalancing-and-turnover)) | Weekly or every two weeks, per fund |
 
 **Weekly timing.** The weekly generation runs on Wednesday on **Tuesday's closing data**: benchmarks, best ideas and funds all use the same close. When Tuesday is an NYSE holiday, the generation moves a day later (Thursday, on Wednesday's close), else a day earlier, staying in the same week. A fund's rebalancing frequency is counted in calendar weeks, so a moved generation never makes a weekly fund skip a week.
@@ -129,7 +129,7 @@ The rules aim to remove the fund types that don't express stock selection within
 - **Behaviour, not names.** Funds are excluded for what they hold, never for what they are called: a fund name is a marketing choice, and the same words ("innovation", "leaders", "quality") are used by thematic and diversified funds alike. The only name rules are in the equity classification above (leveraged, buffer and option-income funds), where the name states a structure rather than a theme, and they are backed by the derivatives rule, which reads the holdings.
 - **Derivatives by the holding lines.** A holding line is an option when it carries an expiry date with a strike and a call / put marker – in any of the formats the data vendor uses ("AAPL US 10/16/26 C340", "SPY 11/17/2026 762.29 C", "SPY CALL USD 12/04/2026", "JPMORGAN CHASE + CO NOV26 355 CALL", the exchanges' standard option code "USAR 261016C00020000") – and an equity-linked note when it is named as one ("WELLS FARGO ELN 10/27") or shows a participation level of 20% or more before a maturity date ("Wells Fargo & Co 147.40% 12/15/2026"). Treasury bills, money-market sweeps, currency forwards and rights also carry dates but never a strike, a call / put marker or a note level, so they don't trigger the rule. Every holding set read since a fund entered the universe counts, as does the holding set read for its monthly profile.
 - **Sector concentration against the market, by style and region.** A fixed ceiling on the top sector (the earlier rule: 50%) penalises a growth manager for holding what the growth market holds – technology is over half of the US large growth benchmark – while letting through a fund concentrated in a small sector. Measuring each sector against its own reference weight treats every sector alike: a growth manager may hold as much technology as the growth benchmark, a value manager as much finance as the value benchmark, plus the margin, whereas a defence, retail or semiconductor theme exceeds every benchmark's weight in its sector. The reference is the highest weight across the region / style benchmarks rather than the fund's own region or style, so a fund is never penalised for its style label (a "blend" fund tilted to growth is measured as generously as a growth fund). Sector weights are taken from the fund's identified stock holdings, using our companies' sectors – the same classification as the benchmarks.
-- **Benchmark coverage as the universe test.** Best ideas are overweights against the region's large-cap blend benchmark; a holding outside it has no benchmark weight, so it is an overweight by definition. The share of the fund's identified stock weight in companies of that benchmark (each company counted once, across share classes) measures how far the manager invests in the universe the benchmark describes. Thematic and concentrated funds tend to fail it as well, because their themes run into mid and small caps.
+- **Benchmark coverage as the universe test.** Best ideas are overweights against the region's large-cap benchmarks (in the US, the blend's value and growth halves); a holding outside the blend has no benchmark weight, so it is an overweight by definition. The share of the fund's identified stock weight in companies of that benchmark (each company counted once, across share classes) measures how far the manager invests in the universe the benchmark describes. Thematic and concentrated funds tend to fail it as well, because their themes run into mid and small caps.
 - **A band, not a line, for a measure that moves weekly.** Coverage changes with prices, trades and the benchmark's weekly reconstitution, so a fund near a single line would drop in and out. A fund enters at 70% and stays while at 65% or more; the stay level applies only to a fund that entered under the entry level, so every fund first faces 70%.
 - **Round levels.** The levels are set in steps of 5 points rather than at the exact point that separates today's funds: a level fitted precisely to one week's pool is fitted to noise and stops working as funds enter and leave. Each level was chosen where it removes the funds of the targeted type – single-country, emerging, sector-concentrated, out-of-universe – with the fewest ordinary diversified funds removed, and was checked against the funds on either side of it.
 - **Accepted residue.** Some thematic funds are diversified enough to pass every test – their holdings look like a broad large-cap portfolio with tilts. They are accepted: by the behavioural tests they are indistinguishable from an ordinary manager with a view, and excluding them would take a name rule.
@@ -224,7 +224,7 @@ Four synthetic benchmarks are rebuilt weekly from the full screened universe (ev
 
 Membership follows the S&P / Russell convention – size measured on the whole company, with a minimum float. **Weights are proportional to the whole company's market cap** – the size the managers themselves see and size positions against ([§14](#14-design-decisions-and-known-limitations)). In the style benchmarks each company belongs wholly to one side and each side is re-weighted to 100%. There is no International style split: the style reference data is US-only, and about a third of the international benchmark has no reliable style.
 
-Each ETF is linked to its region's blend benchmark.
+Each ETF is linked to its region's blend benchmark – in the US, through it, to the blend's value and growth halves, which its holdings are measured against ([§9](#9-measuring-a-managers-best-ideas)).
 
 ## 8. Value / growth style
 
@@ -248,17 +248,18 @@ reference weight  = the company's weight in the reference (below)
 active weight (Δ) = ETF weight − reference weight
 ```
 
-**Three references.** The same holdings are measured three ways, and every fund chooses one:
+**Two references.** The same holdings are measured two ways, and every fund chooses one:
 
 | Reference | Reference weight | What it captures |
 |-----------|------------------|------------------|
-| **Full universe** (default) | The company's weight in the ETF's regional large-cap blend benchmark (0 if not a member) | Overweight versus the whole market – the conventional definition of active weight. |
-| **Value / growth split** | US companies: the company's weight in the benchmark **of its own style** (value companies against US Large Cap Value, growth against US Large Cap Growth). International: as full universe. | Overweight versus the company's own style peers. A value manager holding a growth mega-cap at below its growth-index weight isn't credited with a conviction it doesn't have, without needing to classify the manager itself. |
+| **Market** (default) | US companies: the company's weight in the benchmark **of its own style** – value companies against US Large Cap Value, growth companies against US Large Cap Growth (the few with no style against the US blend). International companies: their weight in the International Large Cap Blend. 0 if not a member. | Overweight versus the company's own style peers in the market. A value manager holding a growth mega-cap at below its growth-index weight isn't credited with a conviction it doesn't have, as it would be against the whole US market – and the manager itself needs no style label: each holding is compared with its own style's benchmark, and all of the ETF's active weights are ranked together. |
 | **Self** | The company's market cap ÷ the total market cap of the ETF's own holdings – the ETF re-weighted by market cap | Tilt within the manager's own chosen set: which of its stocks it holds more of than size alone would suggest. Independent of any benchmark, and of how the manager chose the names. |
+
+The reference is decided by the **company's** region and style, never by the fund's: a fund's region and style settings only decide what it may buy ([§10](#10-building-a-fund)). Measuring against the whole US large-cap market (the blend) was the earlier default; it was dropped in November 2026 in favour of the style benchmarks, the more meaningful measure of a manager's conviction.
 
 **Selection.** Companies with a positive active weight are ranked from the largest overweight down. An active weight above **20%** is treated as abnormal (a data problem or an extreme concentrated bet) and dropped. A company of **another region than the ETF's** – a US fund's holding in TSMC, Shell or Brookfield – keeps its place in the weights but is never one of that ETF's best ideas: a fund only takes companies of its own region from ETFs of that region ([§10](#10-building-a-fund)), so such an idea could never be bought and would only push a usable one out of the ETF's top 10. Without this rule a US fund's foreign holding, which has no weight in the US benchmark, often ranked #1. The **top 10** per ETF are that manager's best ideas, with their rank (1 = the largest overweight).
 
-**What the full-universe measure implies.** A stock outside the benchmark (below the large-cap line) has a reference weight of zero, so its whole ETF weight is active weight. Large-cap funds therefore apply the size test themselves ([§10](#10-building-a-fund)) so these never enter as new buys.
+**What the market measure implies.** A stock outside the benchmark (below the large-cap line) has a reference weight of zero, so its whole ETF weight is active weight. Large-cap funds therefore apply the size test themselves ([§10](#10-building-a-fund)) so these never enter as new buys.
 
 ## 10. Building a fund
 
@@ -269,7 +270,7 @@ Each fund is defined by a strategy:
 | Parameter | Options |
 |-----------|---------|
 | Number of holdings | e.g. 30, 40, 50 |
-| Reference for best ideas | Full universe, value / growth split, or self ([§9](#9-measuring-a-managers-best-ideas)) |
+| Reference for best ideas | Market or self ([§9](#9-measuring-a-managers-best-ideas)) |
 | Region | US, International, or Global: split by number of holdings – the **market split** (below) or a fixed one (e.g. 70% US / 30% International) |
 | Size | Large (above its region's benchmark line with ≥ 10% float), mid / small (below it), or any |
 | Style | Value, growth, any, or a split by number of holdings – the **market split** (US only) or a fixed one (e.g. 60% growth / 40% value) |
@@ -298,7 +299,7 @@ Every fund draws on **all active ETFs** unless restricted.
 
 So a stock that is the #2 of three managers (768) comes ahead of one that is the #1 of a single manager (512), and a stock ranked #4 to #10 by many managers can outscore one ranked #3 by only one. The ranking deltas within a manager's list, which can be marginal, matter less than how many managers agree.
 
-5. **The ideal portfolio** is built in **buckets**, each ordered on its own: one per region of a region split, and one per style of a style split. Each bucket's ideal holdings are the top of its list, up to its share of the holdings (33 and 17 for a 50-holding fund on the November 2026 market split). With a region split, the International list is built first and those companies are excluded from the US list.
+5. **The ideal portfolio** is built in **buckets**, each ordered on its own: one per region of a region split, and one per style of a style split. Each bucket's ideal holdings are the top of its list, up to its share of the holdings (33 and 17 for a 50-holding fund on the November 2026 market split; with a style split as well, the 33 US positions become 19 growth and 14 value, and the 17 International stay one bucket). With a region split, the International list is built first and those companies are excluded from the US list. With a style split, a company of neither style (rare) is in no bucket.
 
 ### Weighting
 
@@ -355,7 +356,8 @@ A **simulation** replays the same rules week by week over the holdings collected
 - **Managers selected by holdings behaviour.** Funds are kept or excluded by what they hold – derivatives, sector concentration against the benchmarks, country and emerging-market exposure, benchmark coverage – never by their name, at round levels rather than levels fitted to the funds of the day ([§4](#how-the-selection-rules-are-measured-and-set)).
 - **Every manager counts equally**, regardless of assets under management or holdings date – the method aggregates opinions, not money.
 - **The market split from our own benchmarks.** Measuring the split on the benchmarks the best ideas are measured against keeps the fund consistent across region and style, and it follows the market every quarter without a manual input. It's our definition – our large-cap lines, float factors from the index funds and the data vendor – not a published index weight. The float factors are current ones: older splits can't be re-measured on the float of their day.
-- **Style split trade-off.** Under the value / growth reference, a manager holding both styles is measured against two benchmarks in which large companies weigh more than in the blend (×2.3 for value, ×1.75 for growth), so its largest holdings rank somewhat lower than under the blend. Accepted, in exchange for not crediting out-of-style mega-caps as convictions.
+- **US companies measured against their own style.** A manager holding both styles is measured against two benchmarks in which large companies weigh more than in the blend (×2.3 for value, ×1.75 for growth), so its largest holdings rank somewhat lower than against the whole US market. Accepted, in exchange for not crediting out-of-style mega-caps as convictions.
+- **Reference and mandate kept apart.** Which benchmark a company is measured against follows the company's own style; the fund's style setting – a filter or a value / growth split of its holdings – is a separate construction choice. A fund without a style split still measures its US ideas against their style peers; a fund with one fills each style from the ideas measured that way.
 
 **Limitations**
 
