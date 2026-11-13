@@ -194,7 +194,7 @@ Forms every enabled benchmark of the `benchmark` table from the latest stored sc
 | US Large Cap Growth | `US` | `large` | `growth` | 0.93 | the same cutoff: the blend's growth companies |
 | Intl Large Cap Blend | `International` | `large` | `blend` | 0.80 – the mid point of MSCI / FTSE's large (70%) and large + mid (85%) | ~$7.4B |
 
-**The US value / growth split.** US Large Cap Value and Growth have the blend's region, cap type and `market_coverage`, so they hold exactly the blend's companies of each style (a company of neither style – `blend` or unknown, ~0.1% of the weight – is in the blend only), each re-weighted to 100%. Each company goes wholly to one side, by its `ticker.style_type` ([Style](#style-value--growth)). They don't change which benchmark an ETF links to (its region's blend); they're used by its `full_value_growth_split` best ideas ([Best ideas](#7-best-ideas)). International has no split: none of the style reference ETFs is international, and a third of its benchmark has no style.
+**The US value / growth split.** US Large Cap Value and Growth have the blend's region, cap type and `market_coverage`, so they hold exactly the blend's companies of each style (a company of neither style – `blend` or unknown, ~0.1% of the weight – is in the blend only), each re-weighted to 100%. Each company goes wholly to one side, by its `ticker.style_type` ([Style](#style-value--growth)). They don't change which benchmark an ETF links to (its region's blend); they're used by its market best ideas (`full_value_growth_split`, [Best ideas](#7-best-ideas)). International has no split: none of the style reference ETFs is international, and a third of its benchmark has no style.
 
 The large-cap line is **relative to the market**, not a fixed amount: a benchmark's cutoff is its market's breakpoint at its `market_coverage` – the float cap at which the market's largest companies make up that share of its total float cap, per the index funds' latest snapshot ([Index funds and size breakpoints](#index-funds-and-size-breakpoints)). A benchmark holds the screened companies of its `region` whose **whole company cap** reaches the cutoff with at least **10% floating** (`ticker.float_factor`; no factor known passes) – the S&P / Russell way: membership on the whole cap, a minimum float – and of its `style_type` (`blend`/`core`: any style; `value`/`growth`: the company's `ticker.style_type`). Each is weighted by the **whole company's** market cap (`weight = market cap / total`) – the size managers look at. The snapshot is stored in `benchmark_holding`, dated at the companies' screen date – Tuesday's close for a Wednesday generation (a re-run replaces it); the cron email shows each benchmark's cutoff. An empty benchmark fails the run.
 
@@ -236,15 +236,14 @@ A manager's best ideas are the stocks they hold at a **higher weight than the ma
    delta            = etf_weight − benchmark_weight
    ```
 
-   Three reference benchmarks are used, and all three results are stored in `best_idea` with a `benchmark_mode` (a fund picks one – its strategy's `benchmark`):
+   Two references are used, and both results are stored in `best_idea` with a `benchmark_mode` (a fund picks one – its strategy's `benchmark`):
 
    | Mode | benchmark_weight | When |
    |------|------------------|------|
    | `self` | the company's market cap ÷ total market cap of the ETF's own holdings (what the ETF would look like if it were market-cap weighted) | always |
-   | `full_universe` | the company's weight in the ETF's linked benchmark – its region's blend (step 6); 0 if not in it | only when the ETF has a `benchmark_id` |
-   | `full_value_growth_split` | the company's weight in **the benchmark of its own style** where the region is split into value and growth (US): a value company against US Large Cap Value, a growth company against US Large Cap Growth (a company of neither style against the blend), all the ETF's deltas then ranked together. Without a split (International) the same as `full_universe` | only when the ETF has a `benchmark_id` |
+   | `full_value_growth_split` (the market, `best_idea.MODE_MARKET`) | the company's weight in **the benchmark of its own style** where the ETF's region is split into value and growth (US): a value company against US Large Cap Value, a growth company against US Large Cap Growth (a company of neither style against the blend), all the ETF's deltas then ranked together. Without a split (International) its weight in the region's blend (step 6). 0 if not in it | only when the ETF has a `benchmark_id` |
 
-   `full_value_growth_split` needs no style for the ETF itself – a value fund's growth holdings are simply measured against the growth benchmark, where a large company weighs more than in the blend, so a value fund's out-of-style megacap (PVAL's Microsoft) no longer tops its best ideas. Funds that hold a mix are measured against both benchmarks at full strength, which ranks their largest holdings a little lower than against the blend (value ones more, ×2.3 vs ×1.75 the blend weight) – accepted by decision. The split is used when both style snapshots are dated as the blend's (they're formed together); otherwise the blend alone, with a notice.
+   The blend-only mode (`full_universe`) was dropped by decision (Nov 2026): the market is measured one way, and the fund's own style setting (filter or split) only decides what it buys – the company's style picks its benchmark. Its old `best_idea` rows are left in place, unread. The market mode needs no style for the ETF itself – a value fund's growth holdings are simply measured against the growth benchmark, where a large company weighs more than in the blend, so a value fund's out-of-style megacap (PVAL's Microsoft) no longer tops its best ideas. Funds that hold a mix are measured against both benchmarks at full strength, which ranks their largest holdings a little lower than against the blend (value ones more, ×2.3 vs ×1.75 the blend weight) – accepted by decision. The split is used when both style snapshots are dated as the blend's (they're formed together); otherwise the blend alone, with a notice.
 
 5. **Selection** – companies with a positive delta, ranked from highest delta down. A delta above **20%** is treated as abnormal and dropped. A company of **another region than the ETF's** (a US fund's TSMC, Shell or Brookfield – `ticker.region`, [Company market cap and region](#ticker-utilities)) keeps its weights but is never a best idea, in every mode: a fund only takes companies of its region from ETFs of its region ([Fund holdings formation](#8-fund-holdings-formation)), so such an idea could never be bought and would only push a usable one out of the ETF's top 10 (a fund with no region – none today – would lose these ideas). A Global ETF keeps them all. The top **10** per ETF are stored, with their rank.
 
@@ -260,7 +259,7 @@ Each fund is defined by a JSON **strategy**, for example:
 {
   "holdings": 30,
   "allocation": "market_cap",
-  "benchmark": "full_universe",
+  "benchmark": "full_value_growth_split",
   "cap":    { "name": "large" },
   "style":  { "name": "blend", "value": 50, "growth": 50 },
   "region": { "name": "Global", "split": "market" },
@@ -275,7 +274,7 @@ Each fund is defined by a JSON **strategy**, for example:
 |-------|---------|
 | `holdings` | number of stocks in the fund |
 | `allocation` | `market_cap` or equal weighting (any other value) |
-| `benchmark` | which best ideas to use: `full_universe` (default – each ETF's region's blend benchmark), `full_value_growth_split` (US companies against the value or growth benchmark of their own style, International against the blend) or `self` (each ETF's own holdings, market-cap weighted) |
+| `benchmark` | which best ideas to use: `full_value_growth_split` (default – the market: US companies against the value or growth benchmark of their own style, International against the blend) or `self` (each ETF's own holdings, market-cap weighted) |
 | `cap.name` | `large` (the company passes its region's full-universe benchmark cutoff – step 6), `mid_small` (it doesn't), or anything else for no filter |
 | `style` | `value`, `growth`, or `blend`/`core` for no filter. A `blend` with `value`/`growth` percentages fills those shares of every region's holdings from each style separately; `"split": "market"` (instead of the percentages) takes them from the [market split](#the-market-split) – US buckets only, International has no style split. |
 | `region` | `US`, `International`, or `Global` with a `split`: `"market"` (the [market split](#the-market-split): US / International by the float-adjusted totals of our blend benchmarks, recalculated quarterly) or fixed `US`/`International` percentages (exactly these keys — any other key is rejected); omitted = no filter |

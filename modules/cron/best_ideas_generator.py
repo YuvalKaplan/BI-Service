@@ -99,7 +99,7 @@ def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = N
 
 @dataclass
 class UniverseWeights:
-    """The full_universe benchmark weight of each company, and the benchmark it was taken from."""
+    """The market benchmark weight of each company (best_idea.MODE_MARKET), and the benchmark it was taken from."""
     benchmark_id: int                  # the ETF's benchmark (provider_etf.benchmark_id, its region's blend)
     holding_date: date | None          # the snapshot date (blend and style snapshots share it)
     weights: dict[int, float]          # company (master) ticker_id -> benchmark weight
@@ -115,8 +115,8 @@ def compute_active_weights(inputs: EtfInputs, universe: UniverseWeights | None =
     """
     Company-level active weights for every holding of the ETF (not only the positive ones).
     Columns: ticker_id (the ticker used — the master when share classes were consolidated),
-    market_value, market_cap, master_used, etf_weight, benchmark_weight, delta, and with a
-    full_universe benchmark, benchmark_id (the benchmark each company's weight came from).
+    market_value, market_cap, master_used, etf_weight, benchmark_weight, delta, and against the
+    market benchmarks, benchmark_id (the benchmark each company's weight came from).
     """
     master_info = inputs.master_info
     df_holdings = pd.DataFrame(
@@ -173,7 +173,7 @@ def compute_active_weights(inputs: EtfInputs, universe: UniverseWeights | None =
     grouped["etf_weight"] = grouped["market_value"] / total_etf_value
 
     if universe is not None and universe.weights:
-        # full_universe: the benchmark only covers stocks >= the large-cap threshold, so a
+        # market: the benchmarks only cover stocks >= the large-cap threshold, so a
         # holding that has since dropped below it has no real weight to look up. Rather than
         # building a fund-specific benchmark for this rare/borderline case, we assume such a
         # stock's true weight in the large-cap benchmark would be negligible anyway and default
@@ -183,11 +183,11 @@ def compute_active_weights(inputs: EtfInputs, universe: UniverseWeights | None =
         # a below-threshold ticker through a 'large' cap fund's candidate pool when it's already
         # one of that specific fund's existing holdings (held_ticker_ids), so it can still be kept
         # until it genuinely falls out of ranking, without ever surfacing as a fresh buy.
-        # full_universe: each company's weight in the external large-cap universe. Sibling rows
+        # market: each company's weight in the external large-cap benchmarks. Sibling rows
         # are deliberately absent from benchmark_holding (only the master is stored there), so
         # the lookup key here must already be the effective (master) id.
-        # With a style split (get_full_universe_weights), a value company's weight is its weight
-        # in the value benchmark and a growth company's in the growth benchmark — all ranked together.
+        # Where the region has a style split (get_market_weights — US), a value company's weight is its
+        # weight in the value benchmark and a growth company's in the growth benchmark — all ranked together.
         grouped["benchmark_weight"] = grouped["ticker_id"].map(universe.weights).fillna(0.0)
         grouped["benchmark_id"] = grouped["ticker_id"].map(lambda t: universe.source(int(t))).astype(int)
     else:
@@ -259,25 +259,25 @@ def get_benchmark_weights(
     return cache[key]
 
 
-def get_full_universe_weights(benchmark_id: int, as_of_date: date | None, cache: dict, style_split: bool = False) -> UniverseWeights:
+def get_market_weights(benchmark_id: int, as_of_date: date | None, cache: dict) -> UniverseWeights:
     """
-    The external benchmark weights of an ETF's benchmark (its region's blend) as of as_of_date (or
-    now), memoized in `cache`. Without style_split (best_idea.MODE_FULL_UNIVERSE): the blend's
-    weights. With it (best_idea.MODE_SPLIT), where the region has a value / growth split
+    The market benchmark weights (best_idea.MODE_MARKET) of an ETF's benchmark (its region's blend)
+    as of as_of_date (or now), memoized in `cache`. Where the region has a value / growth split
     (benchmark.fetch_style_split — US) each company is measured against the benchmark of its own style: a value company's weight
     is its weight in the value benchmark, a growth company's in the growth benchmark, and a
     company in neither (style blend / unknown, ~0.1% of US weight) keeps its blend weight. The ETF
     itself needs no style: its holdings are each compared with their own style's benchmark and
     ranked together. The split is used only when both style snapshots are dated as the blend's
     (the benchmark generator forms them together); otherwise — e.g. a sim date before the split
-    was backfilled — the blend alone, with a notice.
+    was backfilled — the blend alone, with a notice. A region with no split (International) uses
+    its blend.
     """
-    key = ('universe', benchmark_id, style_split)
+    key = ('universe', benchmark_id)
     if key not in cache:
         weights, holding_date = get_benchmark_weights(benchmark_id, as_of_date, cache)
         universe = UniverseWeights(benchmark_id=benchmark_id, holding_date=holding_date,
                                    weights=dict(weights), benchmark_of={cid: benchmark_id for cid in weights})
-        split = benchmark.fetch_style_split(benchmark_id) if weights and style_split else []
+        split = benchmark.fetch_style_split(benchmark_id) if weights else []
         if split:
             snapshots = [(b, *get_benchmark_weights(b.id, as_of_date, cache)) for b in split]
             styles = {b.style_type for b in split}
@@ -360,8 +360,7 @@ class EtfRunStats:
     priced: int = 0                            # holdings with a market cap ...
     total: int = 0                             # ... of its holdings
     self_ideas: int | None = None              # best ideas stored, self mode (None: not generated)
-    full_ideas: int | None = None              # ... full_universe mode (None: no benchmark)
-    split_ideas: int | None = None             # ... full_value_growth_split mode (None: no benchmark)
+    market_ideas: int | None = None            # ... market mode (None: no benchmark)
     notes: list[str] = field(default_factory=list)
 
 
@@ -382,13 +381,12 @@ def summary(stats: RunStats) -> str:
         f"- {stats.generated:,} with best ideas",
         f"- {sum(1 for e in stats.etfs if e.notes):,} with problems",
         "",
-        table(["ETF", "Date", "Priced", "Self", "Full", "Split", "Notes"], [[
+        table(["ETF", "Date", "Priced", "Self", "Market", "Notes"], [[
             e.etf,
             f"{e.holding_date:%m-%d}" if e.holding_date else "-",
             f"{e.priced}/{e.total}" if e.total else "-",
             "-" if e.self_ideas is None else e.self_ideas,
-            "-" if e.full_ideas is None else e.full_ideas,
-            "-" if e.split_ideas is None else e.split_ideas,
+            "-" if e.market_ideas is None else e.market_ideas,
             "; ".join(e.notes),
         ] for e in sorted(stats.etfs, key=lambda e: e.etf)]),
     ])
@@ -404,7 +402,7 @@ def run(as_of_date: date | None = None) -> RunStats:
     """
     Generates best ideas for every active provider ETF (status 'active' - the selection rules,
     modules/sec/etf_selection.py). When as_of_date is None (live),
-    holdings and the full_universe benchmark are resolved as of "now". When given (sim),
+    holdings and the market benchmarks are resolved as of "now". When given (sim),
     they're resolved as of that historical date instead — both fetches already support
     this natively via their up_to_date param.
     """
@@ -421,7 +419,7 @@ def run(as_of_date: date | None = None) -> RunStats:
 
         stats = RunStats()
 
-        # Benchmark snapshots and full_universe weights, fetched once per benchmark (get_full_universe_weights).
+        # Benchmark snapshots and market weights, fetched once per benchmark (get_market_weights).
         _bm_cache: dict = {}
 
         for p in providers:
@@ -469,21 +467,16 @@ def run(as_of_date: date | None = None) -> RunStats:
                     best_idea.insert_bulk(pe.id, inputs.holding_date, best_idea.MODE_SELF, best_idea.df_to_rows(self_df, provider_etf_id=pe.id, value_date=inputs.holding_date, benchmark_mode=best_idea.MODE_SELF))
                     etf_stats.self_ideas = len(self_df)
 
-                    # 5b. If this ETF has a benchmark configured, also generate the external-benchmark best
-                    #     ideas: full_universe (its region's blend) and full_value_growth_split (each
-                    #     company against its own style's benchmark where the region is split — US; the
-                    #     blend elsewhere, so a split fund still covers International ETFs)
+                    # 5b. If this ETF has a benchmark configured, also generate the market best ideas:
+                    #     each company against its own style's benchmark where the region is split
+                    #     (US), its region's blend elsewhere (International)
                     if pe.benchmark_id:
-                        for mode in best_idea.EXTERNAL_MODES:
-                            universe = get_full_universe_weights(pe.benchmark_id, as_of_date, _bm_cache, style_split=mode == best_idea.MODE_SPLIT)
-                            if not universe.weights:
-                                continue
+                        universe = get_market_weights(pe.benchmark_id, as_of_date, _bm_cache)
+                        if universe.weights:
+                            mode = best_idea.MODE_MARKET
                             universe_df = _find_best_ideas(inputs, MAX_BEST_IDEAS_PER_FUND, universe=universe)
                             best_idea.insert_bulk(pe.id, inputs.holding_date, mode, best_idea.df_to_rows(universe_df, provider_etf_id=pe.id, value_date=inputs.holding_date, benchmark_mode=mode))
-                            if mode == best_idea.MODE_SPLIT:
-                                etf_stats.split_ideas = len(universe_df)
-                            else:
-                                etf_stats.full_ideas = len(universe_df)
+                            etf_stats.market_ideas = len(universe_df)
 
                 except Exception as e:
                     record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"{e}", message=None)

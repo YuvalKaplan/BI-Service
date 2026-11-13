@@ -8,11 +8,11 @@ from modules.core.db import db_pool_instance
 
 # best_idea.benchmark_mode — what each company's benchmark weight is (a fund picks one: strategy.benchmark):
 MODE_SELF = 'self'                          # its market-cap weight among the ETF's own holdings
-MODE_FULL_UNIVERSE = 'full_universe'        # its weight in the ETF's region's blend benchmark
-MODE_SPLIT = 'full_value_growth_split'      # its weight in its own style's benchmark (value / growth) where
-                                            # the region is split (US), else the blend's
-EXTERNAL_MODES = (MODE_FULL_UNIVERSE, MODE_SPLIT)   # against an external benchmark (provider_etf.benchmark_id)
-BENCHMARK_MODES = (MODE_SELF, *EXTERNAL_MODES)
+MODE_MARKET = 'full_value_growth_split'     # its weight in its own style's benchmark (value / growth) where
+                                            # the ETF's region is split (US), else the region's blend.
+                                            # The only external mode (by decision, Nov 2026: the blend-only
+                                            # 'full_universe' mode was dropped); the stored value keeps its old name.
+BENCHMARK_MODES = (MODE_SELF, MODE_MARKET)
 
 @dataclass
 class BestIdea:

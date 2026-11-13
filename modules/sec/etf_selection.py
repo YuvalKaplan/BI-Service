@@ -54,7 +54,7 @@ change.
 
 run() follows every profile run (the monthly SEC list update, by hand) and holdings download (the
 daily run days). It also sets each ETF's benchmark_id - its region's enabled large-cap blend /
-core benchmark, which the full_universe best ideas compare it with - and stores the measures
+core benchmark, which the market best ideas compare it with (with its value / growth split, if any) - and stores the measures
 behind rules 5 and 8 (sector_excess, excess_sector, benchmark_coverage).
 """
 import log

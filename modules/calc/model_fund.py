@@ -71,10 +71,11 @@ class Strategy(BaseModel):
     # list earn none), summed across the ETFs into its score - the selection's order. The halving
     # scale makes rank 1 worth two rank 2s, four rank 3s, ... (consensus over a single conviction).
     rank_points: list[int] = DEFAULT_RANK_POINTS
-    # Which best ideas the fund draws on (best_idea.benchmark_mode): 'full_universe' (its region's blend
-    # benchmark), 'full_value_growth_split' (each company against its own style's benchmark — US value /
-    # growth — else the blend) or 'self' (the ETF's own holdings, market-cap weighted).
-    benchmark: Literal['full_universe', 'full_value_growth_split', 'self'] = 'full_universe'
+    # Which best ideas the fund draws on (best_idea.benchmark_mode): the market — 'full_value_growth_split'
+    # (best_idea.MODE_MARKET: each company against its own style's benchmark, US value / growth, else its
+    # region's blend) — or 'self' (the ETF's own holdings, market-cap weighted). The fund's style setting
+    # (filter / split) only decides what it buys; the company's own style picks its benchmark.
+    benchmark: Literal['full_value_growth_split', 'self'] = 'full_value_growth_split'
     recalc_frequency_days: int = 7
 
     @field_validator('rank_points')
@@ -251,7 +252,7 @@ def _eligibility_masks(
         # below the cutoff — it will still be sold once its ranking genuinely drops out. This
         # only ever widens the pool for a fund that already holds the ticker; funds that don't
         # already hold it still can't pick it up as a fresh buy. See the matching comment in
-        # best_ideas_generator.compute_active_weights for why the full_universe benchmark_weight
+        # best_ideas_generator.compute_active_weights for why the market benchmark_weight
         # defaults to 0.0 for these instead of dropping the row outright.
         masks['cap'] = large_cap_mask(df) | df[key].isin(held_ticker_ids or set())
     elif cap_type == 'mid_small':

@@ -1,6 +1,6 @@
-# Global Large Cap Best Ideas – US / International by Market Weight, Equal Weight, 50 Holdings
+# Global Large Cap Best Ideas – Region and Style by Market Weight, Equal Weight, 50 Holdings
 
-How this fund is populated and maintained: which managers it listens to, where the data comes from, how each manager's "best ideas" are measured, and how those ideas become a 50-stock, equally weighted portfolio of large-cap companies, split between the US and international by their weight in the market. It is written for investment professionals.
+How this fund is populated and maintained: which managers it listens to, where the data comes from, how each manager's "best ideas" are measured, and how those ideas become a 50-stock, equally weighted portfolio of large-cap companies, split between the US and international – and the US part between growth and value – by their weight in the market. It is written for investment professionals.
 
 Figures quoted "as of" a date illustrate the rules at that date; they are not parameters. The parameters are listed in [Appendix A](#appendix-a--parameter-reference).
 
@@ -36,7 +36,7 @@ The fund applies this across the population of US-listed, actively managed, dive
 2. read each one's holdings every week;
 3. for each, measure each holding's **active weight** – its weight in the ETF minus its weight in the relevant large-cap benchmark – and keep the top overweights as that manager's best ideas;
 4. combine the best ideas of all managers in each region into a consensus score – points for each manager's rank, summed – so the stocks that several managers rank highly come first;
-5. split the 50 holdings between the US and international by their float-adjusted weight in the reference benchmarks (33 US and 17 international as of November 2026), hold each region's top large-cap companies at equal weight, and rebalance every two weeks with turnover controls.
+5. split the 50 holdings between the US and international, and the US holdings between growth and value, by their float-adjusted weight in the reference benchmarks (19 US growth, 14 US value and 17 international as of November 2026), hold each part's top large-cap companies at equal weight, and rebalance every two weeks with turnover controls.
 
 Active ETFs are used rather than mutual funds because they publish their holdings far more often (most daily; we read them weekly – [§5](#5-holdings)), so the ideas are recent rather than a quarter old.
 
@@ -49,7 +49,7 @@ Active ETFs are used rather than mutual funds because they publish their holding
 | **Source of ideas** | US companies: qualifying actively managed US equity ETFs. International companies: qualifying actively managed international equity ETFs |
 | **Best ideas measured against** | US companies: the US Large Cap Value benchmark for value companies, the US Large Cap Growth benchmark for growth companies. International companies: the International Large Cap benchmark |
 | **Ideas used** | Each manager's ten best ideas, scored by rank and summed across managers |
-| **Style** | No constraint: value and growth ideas compete on score alone |
+| **Style** | US holdings by number: each style's float-adjusted weight in the US value and growth benchmarks, recalculated quarterly – 57.5% growth / 42.5% value as of November 2026, so 19 and 14 of the 33. International holdings: no style split |
 | **Holdings** | 50 |
 | **Weighting** | Equal (2% each) |
 | **Rebalancing** | Every two weeks, with turnover controls |
@@ -63,7 +63,7 @@ Active ETFs are used rather than mutual funds because they publish their holding
 | Company data | Prices, market caps, share-class consolidation, region, validation ([§6](#6-company-data-and-data-quality)) | Daily |
 | Large-cap lines and benchmarks | Where large cap ends in each region; the reference benchmarks ([§7](#7-large-cap-and-the-reference-benchmarks)) | Weekly |
 | Best ideas | Top 10 active weights per ETF ([§9](#9-measuring-a-managers-best-ideas)) | Weekly |
-| Portfolio | Candidate lists per region → US + international holdings (33 + 17) → buys and sells ([§10](#10-building-the-portfolio), [§11](#11-maintaining-the-portfolio-rebalancing-and-turnover)) | Every two weeks |
+| Portfolio | Candidate lists per part → US growth + US value + international holdings (19 + 14 + 17) → buys and sells ([§10](#10-building-the-portfolio), [§11](#11-maintaining-the-portfolio-rebalancing-and-turnover)) | Every two weeks |
 
 ## 3. Data sources
 
@@ -221,13 +221,13 @@ Within each benchmark, **weights are proportional to the whole company's market 
 
 ## 8. Value / growth style of US companies
 
-Each US company carries one style, **value** or **growth**, which decides the US benchmark it is measured against. In order of preference:
+Each US company carries one style, **value** or **growth**, which decides the US benchmark it is measured against and the part of the fund it competes for (US value or US growth – [§10](#10-building-the-portfolio)). In order of preference:
 
 1. **Index provider classification** – companies held by the style reference ETFs (CRSP via Vanguard, Morningstar via iShares, large / mid / small). Each reference ETF holding a company is one vote for its style; the majority wins, and a tie keeps the existing style (the two families overlap). These are re-read weekly and re-applied daily, so styles follow the index providers' reconstitutions.
 2. **Active managers' classification** – a company not in the reference ETFs but held by active ETFs whose own profile is value or growth (at least 60% of their style-classified holdings) takes that style.
 3. **Statistical classifier** – for the rest, a gradient-boosting model trained on the reference-classified companies' fundamentals (size, sector, industry, growth rates, margins, P/E, P/B, yields) predicts value or growth.
 
-International companies are measured against the whole international large-cap market, without a style split: the index providers' style classifications used above are US-only, and a large part of the international market has no reliable style.
+International companies are measured against the whole international large-cap market, and the international holdings are not split by style: the index providers' style classifications used above are US-only, and a large part of the international market has no reliable style.
 
 ## 9. Measuring a manager's best ideas
 
@@ -252,7 +252,7 @@ All of a manager's active weights are then ranked together.
 
 ## 10. Building the portfolio
 
-The fund is built as two parts – **US holdings and international holdings** – each from its own region's managers.
+The fund is built as three parts – **US growth, US value and international holdings** – the US parts from US managers, the international part from international managers.
 
 ### The US / international split
 
@@ -268,13 +268,27 @@ The split is recalculated **quarterly**, on the first weekly run of each calenda
 | International | $36.4T | 35.0% | 17 |
 | Total | $104.2T | 100.0% | 50 |
 
+### The growth / value split of the US holdings
+
+The US holdings are divided between growth and value the same way: by **the US growth and value benchmarks' float-adjusted values** – the same two benchmarks each US company's active weight is measured against ([§9](#9-measuring-a-managers-best-ideas)). So the allocation between the styles and the measure of a manager's conviction rest on the same benchmarks: a growth company is measured against the growth market and competes for a growth position, and the number of growth positions is the growth market's share.
+
+The style split is recalculated with the region split, each quarter. The growth share of the US holdings is rounded to the nearest whole number (a half rounds up), with value taking the rest. As of November 2026:
+
+| US style | Float-adjusted value | Weight | Holdings |
+|----------|----------------------|--------|----------|
+| Growth | $38.9T | 57.5% | 19 |
+| Value | $28.8T | 42.5% | 14 |
+| Total | $67.7T | 100.0% | 33 |
+
+The international holdings are not split by style ([§8](#8-value--growth-style-of-us-companies)). A US company of neither style – rare – belongs to neither US part and is not held.
+
 ### The candidate lists
 
-For each region:
+For each part:
 
 1. **Collect** the best ideas of that region's active ETFs from the last two weeks (the rebalancing period): US companies from US managers, international companies from international managers.
 2. **Filter**: only companies that are large cap on the rebalancing date – their whole market cap at or above their region's breakpoint, with at least 10% float ([§7](#7-large-cap-and-the-reference-benchmarks)).
-3. **Score each company across managers.** Each of the region's manager gives a company points for its rank on that manager's best-ideas list – all ten ranks count – and the points are summed into the company's **consensus score**:
+3. **Score each company across managers.** Each of the region's managers gives a company points for its rank on that manager's best-ideas list – all ten ranks count – and the points are summed into the company's **consensus score**:
 
    | Rank | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
    |------|---|---|---|---|---|---|---|---|---|----|
@@ -285,11 +299,11 @@ For each region:
 
 So a stock that is the #2 of three managers (768) comes ahead of one that is the #1 of a single manager (512), and a stock ranked #4 to #10 by many managers can outscore one ranked #3 by only one. The ranking deltas within a manager's list, which can be marginal, matter less than how many managers agree.
 
-5. **The ideal portfolio** is the top of each list up to its region's share of the holdings (the top 33 US and top 17 international at the November 2026 split), each region ordered by its own scores. Value and growth companies compete on the same list; there is no style quota. A region with fewer eligible ideas than its target holds fewer; the shortfall is not made up from the other region.
+5. **The ideal portfolio** is the top of each list up to its part's share of the holdings (the top 19 US growth, 14 US value and 17 international companies at the November 2026 split), each part ordered by its own scores: US growth companies against each other, US value companies against each other. A part with fewer eligible ideas than its target holds fewer; the shortfall is not made up from another part.
 
 ### Weighting
 
-Every holding is held at **equal weight**: 1/50, or 2%. So the US / international split by number of holdings is also the split by weight (66% / 34% at 33 / 17 – rounding to whole holdings keeps it within one holding, 2%, of the market split). If fewer than 50 eligible ideas exist on a rebalancing date, the fund holds what there is, still equally weighted.
+Every holding is held at **equal weight**: 1/50, or 2%. So the split by number of holdings is also the split by weight (66% US / 34% international at 33 / 17; 38% US growth / 28% US value at 19 / 14 – rounding to whole holdings keeps each within one holding, 2%, of the market split). If fewer than 50 eligible ideas exist on a rebalancing date, the fund holds what there is, still equally weighted.
 
 ## 11. Maintaining the portfolio: rebalancing and turnover
 
@@ -297,15 +311,15 @@ The fund is rebalanced every two weeks, on the weekly run. Starting from the cur
 
 | Current holding | Action |
 |-----------------|--------|
-| Within the top 1.25 × its region's target by its region's score – the top 42 US, the top 22 international at 33 / 17 – the line moves with the targets | **Keep** – a holding that drifts a few places below its region's cut-off is tolerated, to limit turnover |
+| Within the top 1.25 × its part's target by its part's score – the top 24 US growth, 18 US value and 22 international at 19 / 14 / 17 – the line moves with the targets | **Keep** – a holding that drifts a few places below its part's cut-off is tolerated, to limit turnover |
 | Still scored, but below that line | **Sell** – "below the score buffer" |
 | No longer among any of its region's managers' best ideas | **Sell** – "no longer a best idea" |
 
-Free positions are then filled **region by region** (**buys**): each region's from its own ideal holdings, in score order, up to its target (33 or 17). A sold international holding is replaced by an international idea, a sold US holding by a US idea. A held stock is not replaced merely because a higher-scoring idea has appeared: positions are only freed by sells, so a new idea that scores inside its region's top can wait outside the fund until a position frees up. That delay is the price of the lower turnover. All holdings are then reset to equal weight.
+Free positions are then filled **part by part** (**buys**): each part's from its own ideal holdings, in score order, up to its target (19, 14 or 17). A sold international holding is replaced by an international idea, a sold US value holding by a US value idea. A held stock is not replaced merely because a higher-scoring idea has appeared: positions are only freed by sells, so a new idea that scores inside its part's top can wait outside the fund until a position frees up. That delay is the price of the lower turnover. All holdings are then reset to equal weight.
 
-**The split between rebalances.** Each region buys only up to its target less the holdings it kept, so the fund holds exactly its targets (33 US and 17 international at the November 2026 split). Holdings are never sold to make room. A region short of eligible ideas holds fewer, and the shortfall is not made up from the other region.
+**The split between rebalances.** Each part buys only up to its target less the holdings it kept, so the fund holds exactly its targets (19 US growth, 14 US value and 17 international at the November 2026 split). Holdings are never sold to make room. A part short of eligible ideas holds fewer, and the shortfall is not made up from another part.
 
-**When the quarterly split changes.** A new split can move a holding between the two targets, and the keep lines move with them. No holding is sold to rebalance: the region now above its target makes no buys until its own sells bring it down, and each freed position goes to the region below its target. The fund reaches the new split through normal turnover.
+**When the quarterly split changes.** A new split can move positions between the targets, and the keep lines move with them. No holding is sold to rebalance: the part now above its target makes no buys until its own sells bring it down, and each freed position goes to the part below its target. The fund reaches the new split through normal turnover. A US company whose style changes moves to the other style's part, where it is measured against the other benchmark and kept only while it stays within that part's keep line.
 
 Other maintenance rules:
 
@@ -328,7 +342,8 @@ A **simulation** replays the same rules week by week over the holdings collected
 **Design decisions**
 
 - **US companies against their own style's benchmark.** Out-of-style mega-caps aren't credited as convictions ([§9](#9-measuring-a-managers-best-ideas)). The trade-off: a US manager that holds both styles is measured against two benchmarks in which large companies weigh more than in the whole US large-cap market (×2.3 for value, ×1.75 for growth), so its largest holdings rank somewhat lower. Accepted.
-- **International companies against the whole international large-cap market**, for want of a reliable international style classification.
+- **International companies against the whole international large-cap market**, for want of a reliable international style classification – so the international holdings have no style split either.
+- **The style split on the same benchmarks as the ideas.** US companies are measured against their own style's benchmark and compete for their own style's positions, sized by that benchmark's share of the US market. The fund's growth / value balance follows the market rather than whichever style the managers happen to favour in a given week: the managers decide which companies, the market decides how many of each style.
 - **Each region from its own managers.** US ideas come from US managers and international ideas from international managers, each measured against its own market, so the two parts of the fund don't compete on incomparable active weights.
 - **Whole-company cap, not float-adjusted, for benchmark weights.** Managers size positions against a company's full size; a float-adjusted benchmark would make closely held companies look like overweights for every manager. A float-weighted version was tested and reverted. Float is used only as a minimum (10%) for large-cap membership.
 - **Market-relative large-cap lines** rather than fixed dollar thresholds, so "large cap" means the same thing in every market and every market environment.
@@ -339,12 +354,12 @@ A **simulation** replays the same rules week by week over the holdings collected
 
 **Limitations**
 
-- **The split is kept through buys,** not by forced sales: each region fills only its own free positions, so the split stays exact – and a new quarterly split is reached the same way, through freed positions; a region can only fall below its target when it runs short of eligible ideas ([§11](#11-maintaining-the-portfolio-rebalancing-and-turnover)).
+- **The split is kept through buys,** not by forced sales: each part fills only its own free positions, so the split stays exact – and a new quarterly split is reached the same way, through freed positions; a part can only fall below its target when it runs short of eligible ideas ([§11](#11-maintaining-the-portfolio-rebalancing-and-turnover)).
 - **Holdings lag.** Although active ETFs publish daily, the data vendor refreshes most funds weekly; ideas are typically several days old, and up to two weeks, when used.
 - **New funds join late.** A fund appears on the active list only after its trust's first N-CEN filing after launch (up to a year), and the list is refreshed monthly.
 - **Active ETFs only.** Mutual funds and separately managed accounts, which hold most active assets, are not covered; the manager population is younger and skewed toward sponsors that have launched ETFs, and international managers are fewer than US ones.
 - **Vendor data.** Holdings, prices, share counts and style factors come from one vendor (FMP); the validation in [§6](#6-company-data-and-data-quality) catches known failure modes but cannot rule out every error. Lines that cannot be identified (a small share of weight, mostly emerging-market names) take no part.
-- **Style is a single label.** Each US company is wholly value or wholly growth; companies near the boundary can change side when the index providers reconstitute, which changes the benchmark they are measured against.
+- **Style is a single label.** Each US company is wholly value or wholly growth; companies near the boundary can change side when the index providers reconstitute, which changes the benchmark they are measured against and the part of the fund they compete for.
 - **No risk model.** Equal weighting is a rule, not an optimisation; no sector or country limits, currency hedging, risk model, transaction costs or liquidity constraints are applied.
 - **No performance claim.** This document describes how the fund is constructed; it makes no claim about its future performance.
 
@@ -359,7 +374,8 @@ A **simulation** replays the same rules week by week over the holdings collected
 | **Consensus score** | The sum of the rank points a company earns from every manager ranking it. |
 | **Company market cap** | The whole company's equity value, all share classes, in USD. |
 | **Float factor** | The investable share of a company's equity, from the index funds' holdings or free float. |
-| **Market split** | The fund's division of its holdings between the US and international by the reference benchmarks' float-adjusted values, recalculated quarterly. |
+| **Market split** | The fund's division of its holdings between the US and international, and of the US holdings between growth and value, by the reference benchmarks' float-adjusted values, recalculated quarterly. |
+| **Part** | US growth, US value or international: a share of the fund's holdings, filled from its own ordered list of ideas. |
 | **Primary listing** | The listing that represents a company: its home-market ordinary shares. |
 | **Rank** | A company's position in a manager's best-ideas list (1 = largest overweight). |
 | **Region** | US or international: the index providers' country assignment, else the head-office country, else the country of incorporation, else the listing exchange. |
@@ -392,8 +408,9 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Best ideas: maximum active weight | 20% |
 | Best ideas: per ETF | 10 |
 | Fund: holdings | 50 – US / international by the market split: the reference benchmarks' float-adjusted totals, recalculated quarterly (65.0% / 35.0% → 33 / 17, November 2026) |
+| Fund: US growth / value | By the US growth and value benchmarks' float-adjusted totals, recalculated quarterly (57.5% / 42.5% → 19 / 14, November 2026); international not split |
 | Fund: rank points, ranks 1–10 | 512, 256, 128, 64, 32, 16, 8, 4, 2, 1 |
 | Fund: weighting | Equal (2%) |
 | Fund: rebalancing | Every two weeks |
-| Fund: keep buffer | Top 1.25 × each region's target by score (top 42 US / 22 international at 33 / 17) |
+| Fund: keep buffer | Top 1.25 × each part's target by score (top 24 US growth / 18 US value / 22 international at 19 / 14 / 17) |
 | Weekly run | Wednesday on Tuesday's close (moved around NYSE holidays) |
