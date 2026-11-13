@@ -84,7 +84,7 @@ FMP screener ──► screener_listing ─────────────�
 |-----|-------|
 | Daily run days – Tue–Sat | Holdings collection from FMP (step 2), then the selection rules (step 1) → large-cap screener (step 3) → ticker maintenance (step 4): profiles → values → companies → style |
 | Weekly day – Sun | Ticker maintenance, weekly part (step 4): style reference ETFs → ESG |
-| Generation day – Wed | *after that day's daily run, whose screener also stores the screen that day:* [index funds and size breakpoints](#index-funds-and-size-breakpoints) → [free floats and float factors](#free-float) → screened companies (step 5) → benchmark generation (step 6) → best ideas (step 7) → fund updates (steps 8–9) |
+| Generation day – Wed | *after that day's daily run, whose screener also stores the screen that day:* [index funds and size breakpoints](#index-funds-and-size-breakpoints) → [free floats and float factors](#free-float) → screened companies (step 5) → benchmark generation (step 6) → [market split](#the-market-split) (quarterly) → best ideas (step 7) → fund updates (steps 8–9) |
 | Mon | Nothing |
 | 1st of the month (any weekday) | *before that day's steps:* an email of its own reminding the admins to update the [SEC active ETF list](#sec-active-etf-list) by hand – the N-CEN filings, then the funds' FMP profiles and the selection rules (step 1); a new ETF is downloaded from the next daily run – with the command and the date of the last update |
 
@@ -196,6 +196,27 @@ Forms every enabled benchmark of the `benchmark` table from the latest stored sc
 
 The large-cap line is **relative to the market**, not a fixed amount: a benchmark's cutoff is its market's breakpoint at its `market_coverage` – the float cap at which the market's largest companies make up that share of its total float cap, per the index funds' latest snapshot ([Index funds and size breakpoints](#index-funds-and-size-breakpoints)). A benchmark holds the screened companies of its `region` whose **whole company cap** reaches the cutoff with at least **10% floating** (`ticker.float_factor`; no factor known passes) – the S&P / Russell way: membership on the whole cap, a minimum float – and of its `style_type` (`blend`/`core`: any style; `value`/`growth`: the company's `ticker.style_type`). Each is weighted by the **whole company's** market cap (`weight = market cap / total`) – the size managers look at. The snapshot is stored in `benchmark_holding`, dated at the companies' screen date – Tuesday's close for a Wednesday generation (a re-run replaces it); the cron email shows each benchmark's cutoff. An empty benchmark fails the run.
 
+#### The market split
+
+`modules/cron/market_split.py` – the generation day, after the benchmarks; quarterly
+
+A fund whose strategy says `"split": "market"` (region, style, or both) divides its holdings by the market's own weights, measured on **these benchmarks** – the same ones its best ideas are measured against:
+
+| Split | Parts | Measured on |
+|-------|-------|-------------|
+| `region` | US / International | US Large Cap Blend vs Intl Large Cap Blend |
+| `style` | growth / value (US only) | US Large Cap Growth vs US Large Cap Value |
+
+Each part's share is its benchmark's **float-adjusted** total – each company's whole cap × its float factor (capped at 1, unknown counts in full, read through the company's current master), summed – over the split's total. Float-adjusted, as the index providers weight their indexes: on the whole caps the benchmarks are weighted by, International counts its state-, family- and cross-held shares in full (US 57.9% whole vs 65.0% float, 10 Nov 2026); value / growth barely moves (57.5% growth either way). The float factors are today's (no history is kept).
+
+It's **recalculated quarterly**: the cron calls it on every generation day, and only the first one of a calendar quarter with no split stored for it recalculates (from that day's snapshots); the others keep it. Stored in `benchmark_split` (one row per date, split and part: benchmark, companies, float-adjusted total, weight). A fund reads the split in force on its rebalancing date – the latest on or before it, else the earliest (the simulation and the replay before the first). The cron email shows the split in force and whether it was recalculated; a failure keeps the split in force. `scripts/current_market_split.py` recalculates it by hand when none is stored for the latest snapshot's quarter (`--force`: always).
+
+| Date | US / International | Growth / value (US) |
+|------|--------------------|---------------------|
+| 10 Nov 2026 (production, the first) | 65.0% / 35.0% | 57.5% / 42.5% |
+
+How a fund uses it, and how a new split is reached without forced sales: [Fund holdings formation](#8-fund-holdings-formation).
+
 ### 7. Best ideas
 
 `modules/cron/best_ideas_generator.py` – the generation day
@@ -240,7 +261,7 @@ Each fund is defined by a JSON **strategy**, for example:
   "benchmark": "full_universe",
   "cap":    { "name": "large" },
   "style":  { "name": "blend", "value": 50, "growth": 50 },
-  "region": { "name": "Global", "split": { "US": 70, "International": 30 } },
+  "region": { "name": "Global", "split": "market" },
   "provider_etfs": [12, 15, 87],
   "esg_only": false,
   "rank_points": [512, 256, 128, 64, 32, 16, 8, 4, 2, 1],
@@ -254,8 +275,8 @@ Each fund is defined by a JSON **strategy**, for example:
 | `allocation` | `market_cap` or equal weighting (any other value) |
 | `benchmark` | which best ideas to use: `full_universe` (default – each ETF's region's blend benchmark), `full_value_growth_split` (US companies against the value or growth benchmark of their own style, International against the blend) or `self` (each ETF's own holdings, market-cap weighted) |
 | `cap.name` | `large` (the company passes its region's full-universe benchmark cutoff – step 6), `mid_small` (it doesn't), or anything else for no filter |
-| `style` | `value`, `growth`, or `blend`/`core` for no filter. A `blend` with `value`/`growth` percentages fills those shares of the fund from each style separately. |
-| `region` | `US`, `International`, or a `split` with `US`/`International` percentages (exactly these keys — any other key is rejected); omitted = no filter |
+| `style` | `value`, `growth`, or `blend`/`core` for no filter. A `blend` with `value`/`growth` percentages fills those shares of every region's holdings from each style separately; `"split": "market"` (instead of the percentages) takes them from the [market split](#the-market-split) – US buckets only, International has no style split. |
+| `region` | `US`, `International`, or `Global` with a `split`: `"market"` (the [market split](#the-market-split): US / International by the float-adjusted totals of our blend benchmarks, recalculated quarterly) or fixed `US`/`International` percentages (exactly these keys — any other key is rejected); omitted = no filter |
 | `provider_etfs` | limit to these ETFs' ideas (empty = all ETFs) |
 | `exchanges` | limit to stocks on these exchanges |
 | `esg_only` | only ESG-qualified companies |
@@ -264,17 +285,17 @@ Each fund is defined by a JSON **strategy**, for example:
 
 **Building the candidate list.** Each ETF's latest best ideas within the fund's look-back (`recalc_frequency_days`) are filtered by the strategy. Every ETF counts equally whatever the date of its holdings file – a newer file doesn't override another ETF's view of a company:
 
-- **Region** – `US` takes ideas from US ETFs in companies whose `ticker.region` is `US`; `International` takes ideas from international ETFs in companies whose region is `International` (region = primary listing, see [Share-class consolidation](#share-class-consolidation-master-tickers)). With a split, the international list is built first and those companies are excluded from the US list.
+- **Region** – `US` takes ideas from US ETFs in companies whose `ticker.region` is `US`; `International` takes ideas from international ETFs in companies whose region is `International` (region = primary listing, see [Share-class consolidation](#share-class-consolidation-master-tickers)). With a split, the international list is built first and those companies are excluded from the US list. With `"split": "market"` the percentages are the [market split](#the-market-split) in force on the rebalancing date. With a style split, each region (US only for the market split) is divided again into a growth and a value bucket, each with its own target and keep buffer.
 - **Cap** – large is the benchmark's rule (step 6): the company's cap on the date against its region's cutoff for that date, with at least 10% floating. For a `large` fund, a stock that has fallen below the cutoff is still allowed *only if the fund already holds it*, so it isn't sold for that reason alone; it can never be a new buy.
 - **Style, exchanges, ESG** as configured.
 
-The candidates are then combined per company into a **score** (`model_fund._filter_and_aggregate`): each ETF gives it the `rank_points` of its rank there (each ETF once, at its best rank), summed across the ETFs – rank 1 with one manager (512) equals rank 2 with two (2 × 256) or rank 4 with eight, so breadth of agreement counts as much as the strength of one manager's view, and marginal delta differences between ranks matter less. Alongside: its best rank, the number of ETFs scoring it (**appearances**), its highest delta and the ETF with it (the **source ETF**). Companies scoring 0 are left out. They're ordered by score, then appearances, then delta. Each **bucket** – a region of a split, and a style of a `blend` with percentages – is ordered on its own, and its **ideal** holdings are its top N, N being its share of the holdings (35 / 15 for a 50-holding 70/30 fund).
+The candidates are then combined per company into a **score** (`model_fund._filter_and_aggregate`): each ETF gives it the `rank_points` of its rank there (each ETF once, at its best rank), summed across the ETFs – rank 1 with one manager (512) equals rank 2 with two (2 × 256) or rank 4 with eight, so breadth of agreement counts as much as the strength of one manager's view, and marginal delta differences between ranks matter less. Alongside: its best rank, the number of ETFs scoring it (**appearances**), its highest delta and the ETF with it (the **source ETF**). Companies scoring 0 are left out. They're ordered by score, then appearances, then delta. Each **bucket** – a region of a split, and a style of a `blend` with percentages – is ordered on its own, and its **ideal** holdings are its top N, N being its share of the holdings (33 / 17 for a 50-holding Global fund on the market split of Nov 2026: 65.0% of 50 = 32.5, rounded half up).
 
 **Changes to the previous holdings** (per bucket, `model_fund.KEEP_BUFFER` = 1.25):
 
-- A current holding is **kept** while it's within the top `ceil(N × 1.25)` of its bucket by score (top 63 of a single 50-holding bucket; 44 US / 19 International for the 70/30 fund) – a company drifting between 45th and 60th stays held.
+- A current holding is **kept** while it's within the top `ceil(N × 1.25)` of its bucket by score (top 63 of a single 50-holding bucket; 42 US / 22 International at 33 / 17) – a company drifting between 45th and 60th stays held.
 - A current holding no longer scored at all is **sold** ("No longer a best idea"); one scored but below that line is **sold** ("Below the score buffer").
-- Free places are filled from the bucket's ideal list in score order (**buys**), each bucket's from its own list (`model_fund._select_region_buckets`): its target less the holdings it kept, so a sold International holding is replaced by an International idea and the split stays exact. A kept holding is never sold to make room for a higher score: a newcomer scoring inside the top N waits until a place frees up (the price of the lower turnover). A bucket short of ideas isn't made up from another.
+- Free places are filled from the bucket's ideal list in score order (**buys**), each bucket's from its own list (`model_fund._select_region_buckets`): its target less the holdings it kept, so a sold International holding is replaced by an International idea and the split stays exact. A kept holding is never sold to make room for a higher score: a newcomer scoring inside the top N waits until a place frees up (the price of the lower turnover). A bucket short of ideas isn't made up from another. When a new quarterly [market split](#the-market-split) moves the targets, nothing is sold to rebalance: the bucket above its new target buys nothing until its own sells bring it down, and freed places go to the one below – the keep buffer moves with the targets.
 - Kept holdings carry the day's score, best rank, max delta and source ETF.
 - If no ideal holdings can be found, the previous holdings are carried over unchanged.
 
@@ -551,7 +572,7 @@ After a simulation, `scripts/report_fund_methodology.py` can explain any of the 
 
 `scripts/funds_replay.py` rebuilds the live funds' history with the current code and data – after a methodology fix or a data correction, or to give a new fund a history – so the cron carries on from it. Unlike the simulation it works from what the live pipeline stored each week, replays every active fund together, and runs on production (after typing a confirmation). Edit `INCEPTION_DATE` at the top; the replay covers every generation day from it to the day before it's run, so run it on a day the cron doesn't generate, or before that day's run.
 
-1. **Companies and benchmarks** (`REBUILD_BENCHMARKS`, on by default) – every stored weekly screen a generation day uses (the latest on or before the day before it, as live) is rebuilt: the screened companies (step 5 – today's companies, regions and validated values) and every enabled benchmark (step 6 – that date's breakpoints, today's float factors and styles). So each week gets every benchmark enabled since – the US value / growth split.
+1. **Companies and benchmarks** (`REBUILD_BENCHMARKS`, on by default) – every stored weekly screen a generation day uses (the latest on or before the day before it, as live) is rebuilt: the screened companies (step 5 – today's companies, regions and validated values) and every enabled benchmark (step 6 – that date's breakpoints, today's float factors and styles). So each week gets every benchmark enabled since – the US value / growth split. The [market split](#the-market-split) isn't recalculated: every day uses the stored split in force (the earliest before the first).
 2. **Erase** – the active funds' `fund_holding`, `fund_holding_change` and `fund_analysis`, and every best idea from the first generation day's look-back (14 days) on.
 3. **Replay** – on every generation day, best ideas for all active ETFs (step 7) and every active fund (steps 8–9), recalculated when its `recalc_frequency_days` have passed – the cron's own steps.
 
@@ -593,6 +614,7 @@ All scripts are run from the project root with the virtual environment active. C
 | `scripts/current_float_factors.py` | Refreshes every listing's free float and every company's float factor ([Free float](#free-float)), as the cron does on the generation day before the company builder, and reports the large-cap market caps below the index funds' float cap (too low – worth checking), the screened companies without a factor, the lowest factors, and the listings found with no equity float. Report: `.output/float_factors_report.md`. |
 | `scripts/current_company_builder.py` | Builds the screened companies (one row per company) from the latest stored screen (step 5) and lists the duplicates dropped and foreign lines admitted. Run the master sync first. |
 | `scripts/current_benchmark_generator.py` | Forms every enabled benchmark from the latest stored screened companies (step 6). |
+| `scripts/current_market_split.py` | The [market split](#the-market-split) from the latest benchmark snapshots, when none is stored for their quarter (`--force`: always). |
 | `scripts/current_best_ideas.py` | Generates best ideas for all ETFs as of now (step 7) and prints the problems. |
 | `scripts/current_model_fund.py` | Recalculates all funds as of today (steps 8–9). |
 
@@ -756,6 +778,7 @@ The authoritative schema is `modules/object/_db_schema.sql` (live) and `modules/
 | `screener_listing` | The weekly FMP large-cap screen: every line with its type, quote and (once registered) ticker |
 | `screener_company` | The weekly screen by company (built by the company builder): one row per company with its region and USD market cap |
 | `benchmark`, `benchmark_holding` | Benchmark definitions (region, cap, style, minimum market cap) and their weekly weights |
+| `benchmark_split` | The quarterly [market split](#the-market-split): each part's float-adjusted benchmark total and share |
 | `best_idea` | Top 10 active-weight ideas per ETF, date and benchmark mode |
 | `fund`, `fund_holding`, `fund_holding_change`, `fund_analysis` | Model funds, their holdings, buys/sells and the calculation snapshot |
 | `universe_etf`, `universe_etf_holding`, `market_breakpoint` | The index funds (VTI, VEA, VWO), their weekly holdings snapshots with each company's float cap, and the market's size breakpoints per date and coverage |

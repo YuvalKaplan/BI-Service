@@ -4,9 +4,9 @@ from datetime import date, timedelta
 from typing import Any, List, Literal, Optional, cast
 from dataclasses import dataclass
 import math
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from modules.core.text_format import table
-from modules.object import best_idea, ticker
+from modules.object import benchmark_split, best_idea, ticker
 from modules.ticker import company, index_funds
 
 
@@ -22,10 +22,25 @@ KEEP_BUFFER = 1.25
 class Cap(BaseModel):
     name: str
 
+# A split taken from the market: each bucket's share of the float-adjusted total of our own
+# benchmarks, recalculated quarterly (modules/cron/market_split.py, benchmark_split).
+MARKET = 'market'
+
 class Style(BaseModel):
     name: str
     value: Optional[int] = None
     growth: Optional[int] = None
+    # 'market': a blend split into growth / value by the US style benchmarks' float-adjusted
+    # shares (US buckets only - International has no style split). Exclusive with value / growth.
+    split: Optional[Literal['market']] = None
+
+    @model_validator(mode='after')
+    def _one_split(self) -> 'Style':
+        if self.split is not None and (self.value is not None or self.growth is not None):
+            raise ValueError("style: give either value / growth percentages or split 'market', not both")
+        if self.split is not None and self.name not in ('blend', 'core'):
+            raise ValueError(f"style: split 'market' needs a blend style, not {self.name!r}")
+        return self
 
 class RegionSplit(BaseModel):
     # Percent of the fund's holdings per region, keyed by ticker.region value. Unknown keys are
@@ -36,7 +51,9 @@ class RegionSplit(BaseModel):
 
 class Region(BaseModel):
     name: str
-    split: Optional[RegionSplit] = None
+    # Fixed US / International percentages, or 'market': the US and International benchmarks'
+    # float-adjusted shares in force on the rebalancing date (modules/cron/market_split.py).
+    split: Optional[RegionSplit | Literal['market']] = None
 
 class Strategy(BaseModel):
     allocation: str
@@ -340,20 +357,43 @@ def _df_to_ranked(df: pd.DataFrame) -> list[best_idea.BestIdeaRanked]:
     ]
 
 
+def _share(n: int, percent: float) -> int:
+    """A bucket's number of holdings: its percentage of n, rounded half up."""
+    return math.floor(n * percent / 100 + 0.5)
+
+
+@dataclass
+class Bucket:
+    """One part of a fund, filled from its own list: a region (US / International with a region
+    split, else the fund's region or 'all') and, with a style split, a style. Its ideal holdings (in
+    score order, at most `target`), the ids of every idea scored for it, the ids a holding is kept at
+    (within the keep buffer), and its number of holdings."""
+    region: str
+    style: str | None
+    ideal: list
+    fetched_ids: set[int]
+    keep_ids: set[int]
+    target: int
+
+    @property
+    def label(self) -> str:
+        return f"{self.region} / {self.style}" if self.style else self.region
+
+
 def _fetch_and_select_by_style(
     n_holdings: int,
     strategy: Strategy,
     all_best_ideas_df: pd.DataFrame,
+    as_of: date,
     country_type: str = 'all',
     exclude_ticker_ids: set[int] | None = None,
     held_ticker_ids: set[int] | None = None,
-) -> tuple[list, list, set[int]]:
+) -> tuple[list[Bucket], list]:
     """
-    Returns (ideal, fetched, keep_ids), each list in score order.
-    `ideal`    — the top n_holdings by score, respecting the style blend split.
-    `fetched`  — every scored idea.
-    `keep_ids` — the ideas within the top ceil(target x KEEP_BUFFER) of their list (per style
-                 with a blend split, against that style's count): a holding among them is kept.
+    Returns (buckets, fetched): one bucket per style with a style split (style_split_percents for
+    this region on as_of), else one; `fetched` is every scored idea, in score order per bucket.
+    Each bucket's keep_ids are its ideas within the top ceil(target x KEEP_BUFFER): a holding among
+    them is kept. A growth bucket short of ideas leaves its places to value.
     """
     etf_ids = strategy.provider_etfs or []
     exchanges = strategy.exchanges or []
@@ -368,87 +408,101 @@ def _fetch_and_select_by_style(
     def keep(ideas: list[best_idea.BestIdeaRanked], target: int) -> set[int]:
         return {i.ticker_id for i in ideas[:math.ceil(target * KEEP_BUFFER)]}
 
-    if (
-        strategy.style.name == "blend"
-        and strategy.style.value is not None
-        and strategy.style.growth is not None
-    ):
+    def ids(ideas: list[best_idea.BestIdeaRanked]) -> set[int]:
+        return {i.ticker_id for i in ideas}
+
+    percents = style_split_percents(strategy, as_of, country_type)
+    if percents is not None:
         fetched_growth = scored('growth')
         fetched_value = scored('value')
-        growth_target = round(n_holdings * strategy.style.growth / 100)
+        growth_target = _share(n_holdings, percents[0])
         value_target = n_holdings - growth_target
-
-        fetched = fetched_growth + fetched_value
         growth_count = min(len(fetched_growth), growth_target)
-        value_count  = min(len(fetched_value),  n_holdings - growth_count)
-        ideal = fetched_growth[:growth_count] + fetched_value[:value_count]
-        keep_ids = keep(fetched_growth, growth_target) | keep(fetched_value, value_target)
-    else:
-        fetched = scored(strategy.style.name)
-        ideal = fetched[:n_holdings]
-        keep_ids = keep(fetched, n_holdings)
+        value_room = n_holdings - growth_count
+        return [
+            Bucket(country_type, 'growth', fetched_growth[:growth_count], ids(fetched_growth), keep(fetched_growth, growth_target), growth_count),
+            Bucket(country_type, 'value', fetched_value[:value_room], ids(fetched_value), keep(fetched_value, value_target), value_room),
+        ], fetched_growth + fetched_value
 
-    return ideal, fetched, keep_ids
-
-
-@dataclass
-class RegionBucket:
-    """One region's share of a fund: its ideal holdings (in score order, at most `target`), the
-    ids of every idea scored for it, the ids a holding is kept at (within the keep buffer), and
-    its number of holdings."""
-    ideal: list
-    fetched_ids: set[int]
-    keep_ids: set[int]
-    target: int
+    fetched = scored(strategy.style.name)
+    return [Bucket(country_type, None, fetched[:n_holdings], ids(fetched), keep(fetched, n_holdings), n_holdings)], fetched
 
 
 def _select_region_buckets(
     strategy: Strategy,
     all_best_ideas_df: pd.DataFrame,
+    as_of: date,
     held_ticker_ids: set[int] | None = None,
-) -> tuple[list[RegionBucket], list]:
+) -> tuple[list[Bucket], list]:
     """
     Returns (buckets, fetched).
-    - Split region (US + International both set): one bucket per region, each filtered
-      independently, with its percentage of the holdings as its target.
-    - Name-only region ("US" or "International"): one bucket, filtered to that region.
-    - No region or unrecognised name: one bucket, no region filter.
-    A region's buckets are disjoint: the US one excludes every company fetched for International.
+    - Split region (fixed US / International percentages, or the market split in force on as_of):
+      each region filtered independently, with its percentage of the holdings as its target.
+    - Name-only region ("US" or "International"): filtered to that region.
+    - No region or unrecognised name: no region filter.
+    Each region is then divided by style when the strategy splits it (_fetch_and_select_by_style).
+    A region's buckets are disjoint: the US ones exclude every company fetched for International.
     """
-    region_split = strategy.region.split if strategy.region is not None else None
+    percents = region_split_percents(strategy, as_of)
 
-    if (
-        region_split is not None
-        and region_split.US is not None
-        and region_split.International is not None
-    ):
-        us_n_target   = round(strategy.holdings * region_split.US / 100)
+    if percents is not None:
+        us_n_target   = _share(strategy.holdings, percents[0])
         intl_n_target = strategy.holdings - us_n_target
 
-        intl_ideal, intl_fetched, intl_keep = _fetch_and_select_by_style(intl_n_target, strategy, all_best_ideas_df, country_type=company.INTERNATIONAL, held_ticker_ids=held_ticker_ids)
+        intl_buckets, intl_fetched = _fetch_and_select_by_style(intl_n_target, strategy, all_best_ideas_df, as_of, country_type=company.INTERNATIONAL, held_ticker_ids=held_ticker_ids)
         intl_ticker_ids = {i.ticker_id for i in intl_fetched}
-        us_ideal,   us_fetched,   us_keep   = _fetch_and_select_by_style(us_n_target, strategy, all_best_ideas_df, country_type=company.US, exclude_ticker_ids=intl_ticker_ids, held_ticker_ids=held_ticker_ids)
-
-        return [
-            RegionBucket(us_ideal, {i.ticker_id for i in us_fetched}, us_keep, us_n_target),
-            RegionBucket(intl_ideal, intl_ticker_ids, intl_keep, intl_n_target),
-        ], us_fetched + intl_fetched
+        us_buckets, us_fetched = _fetch_and_select_by_style(us_n_target, strategy, all_best_ideas_df, as_of, country_type=company.US, exclude_ticker_ids=intl_ticker_ids, held_ticker_ids=held_ticker_ids)
+        return us_buckets + intl_buckets, us_fetched + intl_fetched
 
     country_type = strategy_country_types(strategy)[0]
-    ideal, fetched, keep_ids = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type=country_type, held_ticker_ids=held_ticker_ids)
-    return [RegionBucket(ideal, {i.ticker_id for i in fetched}, keep_ids, strategy.holdings)], fetched
+    return _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, as_of, country_type=country_type, held_ticker_ids=held_ticker_ids)
+
+
+def region_split_percents(strategy: Strategy, as_of: date) -> tuple[float, float] | None:
+    """(US %, International %) of the strategy's region split on as_of: its fixed percentages, or
+    the market split in force; None without a split."""
+    region = strategy.region
+    split = region.split if region is not None else None
+    if split == MARKET:
+        _, w = benchmark_split.weights_in_force(benchmark_split.REGION, as_of)
+        return w[company.US] * 100, w[company.INTERNATIONAL] * 100
+    if isinstance(split, RegionSplit) and split.US is not None and split.International is not None:
+        return split.US, split.International
+    return None
+
+
+def style_split_percents(strategy: Strategy, as_of: date, country_type: str) -> tuple[float, float] | None:
+    """(growth %, value %) of the strategy's style split for a region's bucket on as_of: a blend's
+    fixed percentages (every region), or the market split in force (US buckets only - International
+    has no style split); None without a split."""
+    style = strategy.style
+    if style.split == MARKET:
+        if country_type != company.US:
+            return None
+        _, w = benchmark_split.weights_in_force(benchmark_split.STYLE, as_of)
+        return w['growth'] * 100, w['value'] * 100
+    if style.name == 'blend' and style.value is not None and style.growth is not None:
+        return style.growth, style.value
+    return None
+
+
+def bucket_styles(strategy: Strategy, as_of: date, country_type: str) -> list[str]:
+    """The style filters a region's buckets select with: growth and value with a style split, else
+    the strategy's style."""
+    return ['growth', 'value'] if style_split_percents(strategy, as_of, country_type) else [strategy.style.name]
 
 
 def strategy_country_types(strategy: Strategy) -> list[str]:
     """
     The country_type buckets _select_region_buckets selects from: both regions for a
-    US/International split, the region's name when it's one of them, else ['all'] (no filter).
+    US/International split (fixed or market), the region's name when it's one of them, else
+    ['all'] (no filter).
     """
     region = strategy.region
     if region is None:
         return ['all']
     split = region.split
-    if split is not None and split.US is not None and split.International is not None:
+    if split == MARKET or (isinstance(split, RegionSplit) and split.US is not None and split.International is not None):
         return [company.US, company.INTERNATIONAL]
     if region.name in (company.US, company.INTERNATIONAL):
         return [region.name]
@@ -489,7 +543,7 @@ def generate(
     # _eligibility_masks) so one dropping below the large-cap threshold isn't force-sold
     # for that reason alone — it's still evaluated on its score like any other candidate.
     held_ticker_ids = {ph.ticker_id for ph in previous_holdings}
-    buckets, fetched = _select_region_buckets(strategy, all_best_ideas_df, held_ticker_ids)
+    buckets, fetched = _select_region_buckets(strategy, all_best_ideas_df, today, held_ticker_ids)
     ideal_holdings = [i for b in buckets for i in b.ideal]
     keep_ids = {t for b in buckets for t in b.keep_ids}
     fetched_by_id = {i.ticker_id: i for i in fetched}
@@ -523,11 +577,13 @@ def generate(
             ph.score, ph.ranking, ph.max_delta, ph.source_etf_id = now.score, now.ranking, now.max_delta, now.source_etf_id
             todays_holdings.append(ph)
 
-        # Free places are filled region by region: each region's from its own ideal holdings, up
-        # to its target less the holdings it kept (every kept holding is among its region's
-        # scored ideas). A sold International holding is replaced by an International idea, not by
-        # the next US one; a region short of ideas isn't made up from the other. Kept holdings are
-        # never sold to make room for a higher score.
+        # Free places are filled bucket by bucket (region, and style with a style split): each
+        # bucket's from its own ideal holdings, up to its target less the holdings it kept (every
+        # kept holding is among its bucket's scored ideas). A sold International holding is
+        # replaced by an International idea, not by the next US one; a region short of ideas isn't
+        # made up from the other. Kept holdings are never sold to make room for a higher score -
+        # so when a split's targets move, the bucket above its new target stops buying and freed
+        # places go to the bucket below its target.
         missing = strategy.holdings - len(todays_holdings)
         existing_ids = {th.ticker_id for th in todays_holdings}
         for bucket in buckets:
