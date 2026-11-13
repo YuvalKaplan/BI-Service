@@ -104,7 +104,7 @@ Each equity fund is profiled from its holdings against our company data and the 
 
 | Measure | How |
 |---------|-----|
-| **US share** | Share of the fund in US companies (by each company's primary listing – [§6](#6-company-data-and-data-quality)). |
+| **US share** | Share of the fund in US companies (by the US-company rule – [§6](#6-company-data-and-data-quality)). |
 | **Size** | Each stock large above the US market's 70% breakpoint, small below the 90% one, mid between (Morningstar's approach). The fund is *large* with ≥ 70% large stocks, *small* with ≥ 50% small, *mid* with ≥ 50% mid, *smid* with ≥ 70% mid + small, otherwise *all-cap*. |
 | **Stock count** | Lines matching a stock the total-market index fund holds. |
 | **Sector concentration** | FMP's sector weights (else our companies' sectors): the largest sector. |
@@ -148,7 +148,14 @@ A company can trade as several listings – share classes (Alphabet GOOGL / GOOG
 
 **Primary listing** – the listing that represents the company: an active, ordinary-share line (not preferred, note, unit, depositary or thinly traded line), on its home exchange, then a US listing, then other markets.
 
-**US company** – a company whose primary listing is on NYSE / NASDAQ / AMEX. Eaton, Medtronic, Linde and Arm are US companies; TSMC, ASML, SAP, Shell and Shopify, whose home listings are abroad, are not, even though US managers often hold their US-listed shares. The same rule is used everywhere: manager profiles, the benchmarks and the fund.
+**US company** – decided by the first of these that applies:
+
+1. **The index providers' own country assignment** – a company held by the US total-market index fund (CRSP) is a US company; one held by the developed or emerging ex-US index funds (FTSE) is not. Held by both, the market holding it at least twice the other's float-adjusted value decides (the data vendor occasionally files a foreign stock under a US company's identifiers); a genuine dual holding (Waste Connections, James Hardie) goes to the next rule.
+2. **The company's head-office country**, unless it is a tax haven (Bermuda, Cayman Islands, British Virgin Islands, the Channel Islands and similar). This settles the companies the indexes leave out: foreign companies listed only in the US (Arm, Spotify, MercadoLibre, NXP, Nu, Sea are not US companies) and some US ones (partnerships, business development companies, very low-float companies, new listings – US).
+3. **The country of incorporation** of an ordinary listing, unless a tax haven.
+4. **The listing exchange** – a US company when its main listing is on a US exchange.
+
+So Accenture, Medtronic, Linde and Chubb – incorporated abroad, run from the US and held by the US index – are US companies; TSMC, ASML, Shell, Shopify, PDD, Arm and Spotify are not, even though US managers often hold their US-listed shares. The same rule is used everywhere: manager profiles, the benchmarks and the fund.
 
 ### Validated prices and market caps
 
@@ -315,6 +322,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Active ETF: SEC list window | Last filing within 15 months |
 | Equity fund: minimum stock share | 75% |
 | Manager: minimum US share | 80% |
+| US company: held by both index markets | One market's float-adjusted holding ≥ 2× the other's decides |
 | Manager: size | Large or all-cap |
 | Manager: number of stocks | 20–200 |
 | Manager: top sector | ≤ 50% |

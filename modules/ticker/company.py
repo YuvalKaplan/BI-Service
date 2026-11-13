@@ -272,18 +272,65 @@ def company_caps_as_of(master_ids: list[int], target: date, window: int) -> dict
     return out
 
 
+INDEX_MARKET_DOMINANCE = 2.0  # held by both markets' index funds: one market's float cap must be this
+                              # many times the other's to decide (FMP files some foreign lines under a
+                              # US company's symbol and ISIN: PLDT as TE Connectivity, Electrica as
+                              # Estée Lauder); a real dual holding (Waste Connections, RB Global) is
+                              # near 1 and falls through to the company's country.
+
+
+def _country_region(country: str | None) -> str | None:
+    if not country or country in tu.TAX_HAVEN_COUNTRIES:
+        return None
+    return US if country == US else INTERNATIONAL
+
+
 def region(
     members: list[Ticker],
     master_id: int | None,
     latest_dates: dict[int, date] | None = None,
-) -> str:
-    """'US' when the primary listing trades on a US exchange — or when a US company's primary
-    listing is on a venue with no country of its own (OTC, LSE's order book) — else
-    'International'. A US company whose best listing is on a foreign exchange is either an
-    unlinked foreign line or a wrong FMP domicile (CVC Capital Partners), never a US listing."""
-    primary = primary_listing(members, master_id, latest_dates=latest_dates)
-    if primary.exchange in tu.US_LISTING_EXCHANGES and not tu.is_iob_line(primary.symbol, primary.exchange):
-        return US
-    if tu.listing_country(primary.symbol, primary.exchange) is None and _company_country(members, master_id) == US:
-        return US
-    return INTERNATIONAL
+    index_markets: dict[str, float] | None = None,
+) -> tuple[str, str]:
+    """(region, how it was decided): 'US' | 'International', the first rule that decides:
+
+      1. 'index' - the index funds holding the company (index_markets, {market: float cap} from
+         index_funds.market_holdings: VTI = US, VEA / VWO = International), the index families'
+         own country assignment (CRSP, FTSE). Held by both: the market with INDEX_MARKET_DOMINANCE
+         times the other's float cap, else the next rule. This keeps the US-run companies
+         incorporated abroad US (Accenture, Linde, Medtronic, Chubb) and makes the foreign ones
+         listed only in the US International (PDD, Trip.com, SQM).
+      2. 'country' - FMP's country (ticker.country: the headquarters' country) unless a tax haven
+         (util.TAX_HAVEN_COUNTRIES). Decides the companies no index fund holds: CRSP leaves out
+         foreign companies listed only in the US (ARM, Spotify, MercadoLibre, NXP) - and some US
+         ones (partnerships, BDCs, low-float companies, new listings), which FMP files as US.
+      3. 'isin' - the country of incorporation in an ordinary listing's ISIN (depositary lines
+         carry the depositary's), unless a tax haven.
+      4. 'exchange' - the master listing on a US exchange, or a US company's master on a venue
+         with no country of its own (OTC, LSE's order book). The stored master (realigned to the
+         primary listing with master.REALIGN_ACTIVE_DAYS) rather than primary_listing's 30 days:
+         a home line not valued for a month (Banco de Chile in Santiago) mustn't hand the region
+         to its ADR while it stays the master."""
+    held = {m: cap for m, cap in (index_markets or {}).items()}
+    if len(held) == 1:
+        return next(iter(held)), 'index'
+    if held:
+        us, intl = held.get(US, 0.0), max((c for m, c in held.items() if m != US), default=0.0)
+        if us >= INDEX_MARKET_DOMINANCE * intl and us > 0:
+            return US, 'index'
+        if intl >= INDEX_MARKET_DOMINANCE * us and intl > 0:
+            return INTERNATIONAL, 'index'
+
+    by_country = _country_region(_company_country(members, master_id))
+    if by_country:
+        return by_country, 'country'
+
+    for t in ordered_listings(members, master_id, latest_dates=latest_dates):
+        if not is_secondary_line(t) and (by_isin := _country_region(tu.isin_country(t.isin))):
+            return by_isin, 'isin'
+
+    master = next((t for t in members if t.id == master_id), None) or primary_listing(members, master_id, latest_dates=latest_dates)
+    if master.exchange in tu.US_LISTING_EXCHANGES and not tu.is_iob_line(master.symbol, master.exchange):
+        return US, 'exchange'
+    if tu.listing_country(master.symbol, master.exchange) is None and _company_country(members, master_id) == US:
+        return US, 'exchange'
+    return INTERNATIONAL, 'exchange'

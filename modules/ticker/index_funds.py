@@ -237,11 +237,12 @@ def refresh(as_of: date | None = None) -> RefreshStats:
     return stats
 
 
-def snapshot(as_of: date | None = None) -> dict[str, tuple[str, list[dict]]]:
+def snapshot(as_of: date | None = None, refresh_stale: bool = True) -> dict[str, tuple[str, list[dict]]]:
     """{fund: (market, lines)}: each enabled index fund's stored holdings from the latest date on or
     before as_of, as FMP-shaped lines (asset, isin, securityCusip, sharesNumber, marketValue,
     weightPercentage) with their float_cap and ticker_id. A fund with no snapshot, or one older
-    than SNAPSHOT_MAX_AGE_DAYS, is downloaded first (refresh)."""
+    than SNAPSHOT_MAX_AGE_DAYS, is downloaded first (refresh) - unless refresh_stale is False
+    (the daily company region refresh reads whatever is stored)."""
     as_of = as_of or date.today()
 
     def read() -> tuple[dict, bool]:
@@ -259,9 +260,28 @@ def snapshot(as_of: date | None = None) -> dict[str, tuple[str, list[dict]]]:
         return out, stale
 
     out, stale = read()
-    if stale and as_of >= date.today() - timedelta(days=1):
+    if refresh_stale and stale and as_of >= date.today() - timedelta(days=1):
         refresh()
         out, _ = read()
+    return out
+
+
+def market_holdings(as_of: date | None = None) -> dict[int, dict[str, float]]:
+    """{company id (company.company_id): {market: float cap}}: the markets whose index funds hold
+    each company in the stored snapshot (no download), by any of its listings (matched_listings:
+    FMP full symbol, then ISIN, then CUSIP), at the largest float cap a fund of that market gives
+    it. The float caps are recomputed from the stored lines with today's company grouping
+    (company_float_caps), not read from the snapshot: valued while Macy's was wrongly grouped under
+    Mahindra, VWO's line FMP files under Macy's symbol carried Mahindra's whole float cap."""
+    ls = our_listings()
+    out: dict[int, dict[str, float]] = defaultdict(dict)
+    for _fund, (market, lines) in snapshot(as_of, refresh_stale=False).items():
+        if not lines:
+            continue
+        caps, _keys, _scale = company_float_caps(lines, ls)
+        for key, cap in caps.items():
+            if key[0] == 'c':
+                out[key[1]][market] = max(out[key[1]].get(market, 0.0), cap)
     return out
 
 

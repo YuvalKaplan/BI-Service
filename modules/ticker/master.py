@@ -2,7 +2,7 @@ import log
 from datetime import date, datetime, timedelta
 from modules.object import ticker, ticker_value
 from modules.object.ticker import Ticker
-from modules.ticker import company, identity
+from modules.ticker import company, identity, index_funds
 from modules.ticker import util as tu
 
 # A master is realigned to a better primary listing only when that listing has a market cap
@@ -381,7 +381,9 @@ def refresh_company_data() -> int:
     For every company, finds its primary listing (modules.ticker.company) and persists:
       - company_market_cap on the master: the primary listing's latest market cap. FMP reports
         the whole company's cap on every listing, so listings are never summed.
-      - region on every listing (standalone tickers included): 'US' | 'International'.
+      - region on every listing (standalone tickers included): 'US' | 'International'
+        (company.region: the index funds holding it, else its country, else its ISIN, else its
+        master's exchange; the index funds' stored snapshot, nothing downloaded).
     Returns the number of masters whose company cap was set.
     """
     all_tickers = ticker.fetch_all()
@@ -394,20 +396,29 @@ def refresh_company_data() -> int:
     latest = ticker_value.fetch_latest_values(grouped_ids) if grouped_ids else {}
     caps = {tid: cap for tid, (_d, cap) in latest.items()}
     latest_dates = {tid: d for tid, (d, _cap) in latest.items()}
+    held = index_funds.market_holdings()
 
     cap_updates: list[tuple[int, float | None]] = []
     region_updates: list[tuple[int, str]] = []
+    decided_by: dict[str, int] = {}
+    changed: list[str] = []
     for root, members in members_of.items():
-        region = company.region(members, root, latest_dates if len(members) > 1 else None)
+        region, how = company.region(members, root, latest_dates if len(members) > 1 else None, held.get(root))
+        decided_by[how] = decided_by.get(how, 0) + 1
         region_updates.extend((t.id, region) for t in members)
+        if root in by_id and by_id[root].region and by_id[root].region != region and not by_id[root].invalid:
+            changed.append(f"{by_id[root].symbol}:{by_id[root].exchange} {by_id[root].region} -> {region} ({how})")
         if len(members) > 1:
             cap_updates.append((root, company.company_market_cap(members, root, caps, latest_dates)))
 
     ticker.update_company_market_cap_bulk(cap_updates)
     ticker.update_region_bulk(region_updates)
     cleared = ticker.clear_stale_company_market_caps()
+    if changed:
+        log.record_notice(f"Company region changed for {len(changed)} companies: " + "; ".join(changed[:50]))
     log.record_status(
-        f"Company data refresh: {len(cap_updates)} company cap(s), region checked on {len(region_updates)} ticker(s), {cleared} stale cap(s) cleared."
+        f"Company data refresh: {len(cap_updates)} company cap(s), region checked on {len(region_updates)} ticker(s) "
+        f"(companies by {', '.join(f'{k} {v:,}' for k, v in sorted(decided_by.items()))}), {cleared} stale cap(s) cleared."
     )
     return len(cap_updates)
 
@@ -472,7 +483,7 @@ def build_master_groups_report(masters_updated: int = 0, caps_updated: int = 0, 
     for master_id, sibling_ids in sorted(groups, key=lambda g: g[0]):
         master_ticker = tickers_by_id.get(master_id)
 
-        if master_ticker and master_ticker.exchange in ticker.US_EXCHANGES:
+        if master_ticker and master_ticker.region == company.US:
             us_companies += 1
         else:
             intl_companies += 1
