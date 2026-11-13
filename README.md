@@ -243,8 +243,7 @@ Each fund is defined by a JSON **strategy**, for example:
   "region": { "name": "Global", "split": { "US": 70, "International": 30 } },
   "provider_etfs": [12, 15, 87],
   "esg_only": false,
-  "ranking_from": 1,
-  "ranking_to": 3,
+  "rank_points": [512, 256, 128, 64, 32, 16, 8, 4, 2, 1],
   "recalc_frequency_days": 7
 }
 ```
@@ -260,7 +259,7 @@ Each fund is defined by a JSON **strategy**, for example:
 | `provider_etfs` | limit to these ETFs' ideas (empty = all ETFs) |
 | `exchanges` | limit to stocks on these exchanges |
 | `esg_only` | only ESG-qualified companies |
-| `ranking_from` / `ranking_to` | which ranks of each ETF's best ideas count (e.g. 1–3 = each manager's top three) |
+| `rank_points` | the points a company earns from each ETF for its rank there (rank 1 first; ranks beyond the list earn none), positive and non-increasing; default `[512, 256, 128, 64, 32, 16, 8, 4, 2, 1]` – each rank half the one above, over all ten best ideas |
 | `recalc_frequency_days` | the fund is skipped until this many days have passed since its last recalculation, counted from week to week (Monday to Monday – a generation moved around a holiday mustn't make a weekly fund skip the next week: Thursday to the next Wednesday is 6 days); also its look-back: each ETF's latest best ideas within that many days, every ETF counting equally |
 
 **Building the candidate list.** Each ETF's latest best ideas within the fund's look-back (`recalc_frequency_days`) are filtered by the strategy. Every ETF counts equally whatever the date of its holdings file – a newer file doesn't override another ETF's view of a company:
@@ -269,14 +268,14 @@ Each fund is defined by a JSON **strategy**, for example:
 - **Cap** – large is the benchmark's rule (step 6): the company's cap on the date against its region's cutoff for that date, with at least 10% floating. For a `large` fund, a stock that has fallen below the cutoff is still allowed *only if the fund already holds it*, so it isn't sold for that reason alone; it can never be a new buy.
 - **Style, exchanges, ESG** as configured.
 
-The candidates are then combined per company: its best (lowest) rank across the ETFs, the number of ETFs ranking it there (**appearances**), its highest delta, and the ETF with that highest delta (the **source ETF**). They're ordered by rank, then appearances, then delta. The ideal fund is the top of this list within `ranking_to` (split by style and region percentages where configured).
+The candidates are then combined per company into a **score** (`model_fund._filter_and_aggregate`): each ETF gives it the `rank_points` of its rank there (each ETF once, at its best rank), summed across the ETFs – rank 1 with one manager (512) equals rank 2 with two (2 × 256) or rank 4 with eight, so breadth of agreement counts as much as the strength of one manager's view, and marginal delta differences between ranks matter less. Alongside: its best rank, the number of ETFs scoring it (**appearances**), its highest delta and the ETF with it (the **source ETF**). Companies scoring 0 are left out. They're ordered by score, then appearances, then delta. Each **bucket** – a region of a split, and a style of a `blend` with percentages – is ordered on its own, and its **ideal** holdings are its top N, N being its share of the holdings (35 / 15 for a 50-holding 70/30 fund).
 
-**Changes to the previous holdings.**
+**Changes to the previous holdings** (per bucket, `model_fund.KEEP_BUFFER` = 1.25):
 
-- A current holding that is still in the ideal list is kept.
-- A current holding that is no longer among the best ideas at all is **sold** ("Not in best ideas top levels").
-- A current holding that is still a best idea but whose rank has worsened by 5 or more (market-cap funds) or 2 or more (equal-weight funds) is **sold** ("Dropped below min ranking"). A smaller slip is tolerated – it keeps turnover down.
-- Free slots are filled from the ideal list in order (**buys**). With a region split, region by region (`model_fund._select_region_buckets`): each region's free slots – its target less the holdings it kept, ideal or tolerated – from its own ideal list, so a sold International holding is replaced by an International idea. Kept holdings are never sold to restore the split (a region kept above its target gets no buys until they go), and a region short of ideas isn't made up from the other.
+- A current holding is **kept** while it's within the top `ceil(N × 1.25)` of its bucket by score (top 63 of a single 50-holding bucket; 44 US / 19 International for the 70/30 fund) – a company drifting between 45th and 60th stays held.
+- A current holding no longer scored at all is **sold** ("No longer a best idea"); one scored but below that line is **sold** ("Below the score buffer").
+- Free places are filled from the bucket's ideal list in score order (**buys**), each bucket's from its own list (`model_fund._select_region_buckets`): its target less the holdings it kept, so a sold International holding is replaced by an International idea and the split stays exact. A kept holding is never sold to make room for a higher score: a newcomer scoring inside the top N waits until a place frees up (the price of the lower turnover). A bucket short of ideas isn't made up from another.
+- Kept holdings carry the day's score, best rank, max delta and source ETF.
 - If no ideal holdings can be found, the previous holdings are carried over unchanged.
 
 **Weighting.**
@@ -284,7 +283,7 @@ The candidates are then combined per company: its best (lowest) rank across the 
 - **Equal**: `1 / number of holdings`.
 - **Market cap**: weights are proportional to the *square root* of market cap, so a company 100× bigger gets 10× the weight rather than 100×. Each holding is then capped at **10%** and floored at **1%**, with the difference spread across the other holdings in proportion to their weights.
 
-The result is stored in `fund_holding` (the holdings, with rank, source ETF, max delta and weight) and `fund_holding_change` (the buys and sells, with reasons, appearances and contributing ETFs).
+The result is stored in `fund_holding` (the holdings, with best rank, score, source ETF, max delta and weight) and `fund_holding_change` (the buys and sells, with score, reasons, appearances and contributing ETFs).
 
 ### 9. Fund analysis snapshot
 
@@ -296,7 +295,7 @@ Every time a fund is recalculated, `fund_analysis` stores the full calculation b
 
 - **`log`** table – status, notice and error messages from every stage.
 - **`batch_run`** / **`batch_run_log`** – one row per stage run (start/end time) and the problems found during it.
-- **Email** (Mailgun) – a summary to the admins when the cron completes, and an alert when a stage fails, naming the stage and the error. The summary is written to be read on a phone (`modules/core/text_format.py`): one section per step – a title line, then one short `- ` bullet per fact, and tables – with a line between the sections and a lighter one between the funds. It's sent as HTML, with the same text as the plain-text part (where those lines are `=============` and `-------------`): a phone shows plain text in a proportional font, where a table's columns don't line up. The index funds section gives only the breakpoints the benchmarks use; best ideas a table of the ETFs; each fund a table of its buys, of its sells (rank, appearances, symbol, name) and of its holdings (percent, symbol, name). The free float isn't in it (`scripts/current_float_factors.py` reports it). On the first of each month a separate email reminds the admins to update the [SEC active ETF list](#sec-active-etf-list) by hand.
+- **Email** (Mailgun) – a summary to the admins when the cron completes, and an alert when a stage fails, naming the stage and the error. The summary is written to be read on a phone (`modules/core/text_format.py`): one section per step – a title line, then one short `- ` bullet per fact, and tables – with a line between the sections and a lighter one between the funds. It's sent as HTML, with the same text as the plain-text part (where those lines are `=============` and `-------------`): a phone shows plain text in a proportional font, where a table's columns don't line up. The index funds section gives only the breakpoints the benchmarks use; best ideas a table of the ETFs; each fund a table of its buys, of its sells (score, rank, appearances, symbol, name) and of its holdings (percent, symbol, name). The free float isn't in it (`scripts/current_float_factors.py` reports it). On the first of each month a separate email reminds the admins to update the [SEC active ETF list](#sec-active-etf-list) by hand.
 
 ---
 

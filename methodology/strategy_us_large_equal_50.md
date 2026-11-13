@@ -16,11 +16,11 @@ The configuration of a strategy-specific methodology document. Claude generates 
 |---------|-------|
 | Region | US |
 | Size | Large |
-| Style | Any – no style filter; value and growth companies compete on rank alone |
+| Style | Any – no style filter; value and growth companies compete on score alone |
 | Holdings | 50 |
 | Weighting | Equal |
 | Best ideas measured against | Value / growth split – each company against its own style's US large-cap benchmark |
-| Rank depth | 1–3 (each manager's top three best ideas) |
+| Rank points | 512, 256, 128, 64, 32, 16, 8, 4, 2, 1 for ranks 1–10 (the default) – every manager's ten best ideas count, each rank half the one above |
 | Rebalancing | Every two weeks |
 | ESG | Not applied |
 | ETF restrictions | None – all active US ETFs |
@@ -33,7 +33,7 @@ Anything this strategy doesn't use, so the reader isn't left wondering which opt
 - the other best-ideas references (self, full universe) and the existence of a choice between references;
 - International: international ETFs, benchmarks, breakpoints, emerging-market rules, VEA / VWO;
 - other regions, sizes, styles, weightings and splits the fund could have been configured with;
-- market-cap weighting (square root, 10% cap, 1% floor) and its rank buffer of 5;
+- market-cap weighting (square root, 10% cap, 1% floor);
 - the ESG screen;
 - ETF and exchange restrictions;
 - operational fallbacks that don't change the method (e.g. the blend used when a style snapshot is missing).

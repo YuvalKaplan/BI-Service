@@ -114,7 +114,7 @@ class _Context:
             previous_holdings=[model_fund.FundHolding(**vars(p)) for p in self.previous],
             all_best_ideas_df=self.ideas_df, mc_map=self.mc_map,
         )
-        _ideal, self.candidates = model_fund._fetch_and_select_by_region(self.strategy, self.ideas_df, self.held_ids)
+        self.buckets, self.candidates = model_fund._select_region_buckets(self.strategy, self.ideas_df, self.held_ids)
 
         # ETFs, keyed by id, with the holdings date the fund used
         self.etf_dates = {a.provider_etf_id: a.holding_date for a in self.analysis}
@@ -297,10 +297,10 @@ def _write_benchmark_file(ctx: _Context, out_dir: str) -> str:
 
 def _eligibility(ctx: _Context, df: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
     """(eligible, excluded_reason) per best-idea row: eligible in any of the fund's region/style
-    buckets under the same masks and ranking cut the selection applies."""
+    buckets under the same masks the selection applies, with a rank that earns points
+    (strategy.rank_points)."""
     s = ctx.strategy
     styles = ['growth', 'value'] if (s.style.name == 'blend' and s.style.value is not None and s.style.growth is not None) else [s.style.name]
-    ranking_level = s.ranking_to + (5 if s.allocation == 'market_cap' else 2)
     labels = {'etf': 'not one of the fund ETFs', 'style': 'style', 'cap': 'market cap', 'region': 'region (primary listing)',
               'exchange': 'exchange', 'esg': 'not ESG-qualified'}
 
@@ -320,9 +320,9 @@ def _eligibility(ctx: _Context, df: pd.DataFrame) -> tuple[pd.Series, pd.Series]
             # keep the explanation with the fewest failed filters
             better = reasons.isna() | (failed.str.count(',') < reasons.fillna('').str.count(','))
             reasons = reasons.where(~(better & ~eligible), failed)
-    rank_ok = (df['ranking'] <= ranking_level) & (df['ranking'] >= s.ranking_from)
+    rank_ok = model_fund.rank_points_of(df['ranking'], s.rank_points) > 0
     reasons = reasons.where(~eligible, None)
-    reasons = reasons.where(~(eligible & ~rank_ok), f"rank outside {s.ranking_from}..{ranking_level}")
+    reasons = reasons.where(~(eligible & ~rank_ok), f"rank beyond {len(s.rank_points)}: no points")
     return eligible & rank_ok, reasons
 
 
@@ -331,6 +331,7 @@ def _write_best_ideas_file(ctx: _Context, out_dir: str) -> str:
     df = ctx.ideas_df[ctx.ideas_df['provider_etf_id'].isin(set(ctx.etf_dates))].copy()
     stored = {(b.provider_etf_id, b.ticker_id): b for b in best_idea.fetch_for_etfs(ctx.etf_dates, ctx.mode)}
     eligible, reason = _eligibility(ctx, df)
+    rank_points = ctx.strategy.rank_points
     df['eligible'] = eligible
     df['excluded_reason'] = reason
     out = pd.DataFrame([{
@@ -338,6 +339,7 @@ def _write_best_ideas_file(ctx: _Context, out_dir: str) -> str:
         'ETF': ctx.etf_label(r['provider_etf_id']),
         'Holdings date': r['value_date'],
         'Rank': r['ranking'],
+        'Points': rank_points[int(r['ranking']) - 1] if 1 <= int(r['ranking']) <= len(rank_points) else 0,
         'Symbol': ctx.sym(r['ticker_id']),
         'Name': ctx.tname(r['ticker_id']),
         'Company (master)': ctx.sym(r['canonical_ticker_id']) if r['canonical_ticker_id'] != r['ticker_id'] else '',
@@ -373,7 +375,7 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
 
     def matches(h) -> bool:
         r = recomputed.get(h.ticker_id)
-        return bool(r and r.ranking == h.ranking and r.source_etf_id == h.source_etf_id
+        return bool(r and r.score == h.score and r.ranking == h.ranking and r.source_etf_id == h.source_etf_id
                     and abs((r.weight or 0) - (h.weight or 0)) < 1e-9)
 
     def bucket(ticker_id: int) -> str:
@@ -385,7 +387,8 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
         'Symbol': ctx.sym(h.ticker_id),
         'Name': ctx.tname(h.ticker_id),
         'Weight': h.weight,
-        'Ranking': h.ranking,
+        'Score': h.score,
+        'Best rank': h.ranking,
         'Appearances': (ctx.buys[h.ticker_id].appearances if h.ticker_id in ctx.buys else (cand[h.ticker_id].appearances if h.ticker_id in cand else None)),
         'Max delta': h.max_delta,
         'Source ETF (top delta)': ctx.etf_label(h.source_etf_id),
@@ -398,13 +401,27 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
         'Matches stored': 'Y' if matches(h) else 'N',
     } for h in ctx.stored_holdings])
     # Stored holdings come back in no particular order: weight first, then the selection's own
-    # order (rank, appearances, delta) - with equal weights, the weight alone orders nothing.
-    holdings = holdings.sort_values(['Weight', 'Ranking', 'Appearances', 'Max delta'],
-                                    ascending=[False, True, False, False], na_position='last', ignore_index=True)
+    # order (score, appearances, delta) - with equal weights, the weight alone orders nothing.
+    holdings = holdings.sort_values(['Weight', 'Score', 'Appearances', 'Max delta'],
+                                    ascending=[False, False, False, False], na_position='last', ignore_index=True)
 
     selected = {h.ticker_id for h in ctx.stored_holdings}
+    # Each candidate's position in its own list (region bucket, and style with a blend split),
+    # in the selection's score order - the position the keep buffer is measured at.
+    bucket_of = {t: i for i, b in enumerate(ctx.buckets) for t in b.fetched_ids}
+    split_style = s.style.name == 'blend' and s.style.value is not None and s.style.growth is not None
+    keep_ids = {t for b in ctx.buckets for t in b.keep_ids}
+    counters: dict[tuple, int] = {}
+    positioned = []
+    for c in ctx.candidates:
+        t = ctx.tickers.get(c.ticker_id)
+        k = (bucket_of.get(c.ticker_id), t.style_type if split_style and t else None)
+        counters[k] = counters.get(k, 0) + 1
+        positioned.append((counters[k], c))
     candidates = pd.DataFrame([{
-        'Ranking': c.ranking,
+        'Position': pos,
+        'Score': c.score,
+        'Best rank': c.ranking,
         'Appearances': c.appearances,
         'Max delta': c.max_delta,
         'Symbol': ctx.sym(c.ticker_id),
@@ -413,10 +430,10 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
         'Source ETF (top delta)': ctx.etf_label(c.source_etf_id),
         'All contributing ETFs': ", ".join(ctx.etf_label(e) for e in c.all_provider_ids),
         'Selected': 'Y' if c.ticker_id in selected else 'N',
-        'Why not selected': '' if c.ticker_id in selected else (
-            f"ranking beyond ranking_to ({s.ranking_to})" if c.ranking > s.ranking_to
-            else "bucket / holding count already filled by better-ranked candidates"),
-    } for c in sorted(ctx.candidates, key=lambda c: (c.ranking, -c.appearances, -c.max_delta))])
+        'Within keep buffer': 'Y' if c.ticker_id in keep_ids else 'N',
+        'Why not selected': '' if c.ticker_id in selected else
+            "bucket filled by higher scores and held companies within the keep buffer",
+    } for pos, c in positioned])
 
     strategy_rows = [(k, json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in s.model_dump().items()]
     summary = pd.DataFrame(
@@ -424,9 +441,10 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
          ('Holdings', len(ctx.stored_holdings)), ('Weights sum', sum(h.weight or 0 for h in ctx.stored_holdings)),
          ('All rows match stored', all(holdings['Matches stored'] == 'Y') if not holdings.empty else False),
          ('', '')] + [(f"strategy.{k}", v) for k, v in strategy_rows] + [('', '')] + [
-            ('Candidate ranking level', s.ranking_to + (5 if s.allocation == 'market_cap' else 2)),
-            ('Ranking = ', f"a company's best rank in any fund ETF (each ETF's latest best ideas from the last {s.recalc_frequency_days} days)"),
-            ('Order', 'ranking asc, appearances desc, max delta desc'),
+            ('Score = ', f"the points each fund ETF gives a company for its rank there (rank 1..{len(s.rank_points)}: "
+                         f"{', '.join(map(str, s.rank_points))}), summed (each ETF's latest best ideas from the last {s.recalc_frequency_days} days)"),
+            ('Order', 'score desc, appearances desc, max delta desc (per region / style bucket)'),
+            ('Keep buffer', f"a holding is kept while within the top {model_fund.KEEP_BUFFER} x its bucket's target by score"),
             ('MC weight alpha / cap / floor', f"{model_fund.MC_WEIGHT_ALPHA} / {model_fund.MC_WEIGHT_CAP:.0%} / {model_fund.MC_WEIGHT_FLOOR:.0%}"),
         ],
         columns=['Item', 'Value'],
@@ -473,10 +491,12 @@ def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
         f"{big.MAX_BEST_IDEAS_PER_FUND} companies with 0 < delta <= {big.HOLDING_DELTA_LIMIT_DROP_OFF:.0%} are the ETF's "
         "best ideas, ranked 1..N by delta. Every company and why it did or didn't qualify is in the ETF workbook (*Note*).",
         "4. **Best ideas** — `best_ideas.xlsx` lists all ETFs' best ideas, and whether each passes the fund's filters "
-        f"(ETF list, style `{s.style.name}`, cap `{s.cap.name}`, region, exchange, ESG) and ranking cut.",
-        "5. **Fund selection** — eligible ideas are combined per company: its best rank across the fund's ETFs, the "
-        "number of ETFs ranking it there (appearances) and its largest delta. Companies are ordered by rank, then appearances, "
-        f"then delta, and the top {s.holdings} are taken (split by region/style where the strategy says so). "
+        f"(ETF list, style `{s.style.name}`, cap `{s.cap.name}`, region, exchange, ESG), and the points its rank earns.",
+        "5. **Fund selection** — eligible ideas are combined per company into a score: each ETF gives it points for its "
+        f"rank there ({', '.join(map(str, s.rank_points))} for ranks 1..{len(s.rank_points)}), summed across the fund's ETFs. "
+        "Companies are ordered by score, then the number of ETFs scoring it (appearances), then its largest delta, and each "
+        f"region / style bucket takes its top share of the {s.holdings} holdings. A current holding is kept while it stays within "
+        f"the top {model_fund.KEEP_BUFFER}x its bucket's target; sold places are filled from the same bucket. "
         f"Weights: {'market-cap based (square-root compressed, capped and floored)' if s.allocation == 'market_cap' else 'equal'}. "
         "See `fund.xlsx` — *Holdings* shows the justification per holding, *Candidates* shows who wasn't selected and why.",
         "",

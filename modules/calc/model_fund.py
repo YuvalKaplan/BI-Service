@@ -3,10 +3,18 @@ import pandas as pd
 from datetime import date, timedelta
 from typing import Any, List, Literal, Optional, cast
 from dataclasses import dataclass
-from pydantic import BaseModel
+import math
+from pydantic import BaseModel, field_validator
 from modules.core.text_format import table
 from modules.object import best_idea, ticker
 from modules.ticker import company, index_funds
+
+
+# rank 1 = 512, 2 = 256, ... 10 = 1: each ETF's best ideas run to rank 10
+# (best_ideas_generator.MAX_BEST_IDEAS_PER_FUND).
+DEFAULT_RANK_POINTS = [2 ** (10 - r) for r in range(1, 11)]
+# A holding is kept while it's within the top ceil(target x KEEP_BUFFER) of its bucket by score.
+KEEP_BUFFER = 1.25
 
 
 # ── Shared strategy models ──────────────────────────────────────────────────
@@ -42,13 +50,22 @@ class Strategy(BaseModel):
     provider_etfs: Optional[list[int]] = None
     exchanges: Optional[list[str]] = None
     esg_only: bool = False
-    ranking_from: int = 1
-    ranking_to: int = 1
+    # Points a company earns from each ETF by its rank there (index = rank - 1; ranks beyond the
+    # list earn none), summed across the ETFs into its score - the selection's order. The halving
+    # scale makes rank 1 worth two rank 2s, four rank 3s, ... (consensus over a single conviction).
+    rank_points: list[int] = DEFAULT_RANK_POINTS
     # Which best ideas the fund draws on (best_idea.benchmark_mode): 'full_universe' (its region's blend
     # benchmark), 'full_value_growth_split' (each company against its own style's benchmark — US value /
     # growth — else the blend) or 'self' (the ETF's own holdings, market-cap weighted).
     benchmark: Literal['full_universe', 'full_value_growth_split', 'self'] = 'full_universe'
     recalc_frequency_days: int = 7
+
+    @field_validator('rank_points')
+    @classmethod
+    def _points_decrease(cls, v: list[int]) -> list[int]:
+        if not v or any(p <= 0 for p in v) or any(a < b for a, b in zip(v, v[1:])):
+            raise ValueError(f"rank_points must be positive and non-increasing: {v}")
+        return v
 
 def getStrategyFromJson(data: dict) -> Strategy:
     return Strategy.model_validate(data)
@@ -72,10 +89,11 @@ class FundHolding:
     fund_id: int
     ticker_id: int
     holding_date: date
-    ranking: int
+    ranking: int                    # the company's best rank in any ETF on the holding date
     source_etf_id: int
     max_delta: float | None
     weight: float | None = None
+    score: int | None = None        # its consensus score (Strategy.rank_points) on the holding date
 
 
 @dataclass
@@ -85,6 +103,7 @@ class FundHoldingChange:
     change_date: date
     direction: str
     ranking: int | None = None
+    score: int | None = None
     appearances: int | None = None
     max_delta: float | None = None
     top_delta_provider_etf_id: int | None = None
@@ -130,15 +149,14 @@ def results_to_string(results: FundChangesResult, include_header: bool = True, i
             blocks.append(f"{direction.capitalize()}: none")
             continue
         blocks.append(f"{direction.capitalize()} ({len(changes)})\n" + table(
-            ["Rank", "Appearances", "Symbol", "Name"],
-            [[ch.ranking or "-", ch.appearances or "-", *symbol_name(ch.ticker_id)] for ch in changes],
+            ["Score", "Rank", "Appearances", "Symbol", "Name"],
+            [[ch.score or "-", ch.ranking or "-", ch.appearances or "-", *symbol_name(ch.ticker_id)] for ch in changes],
         ))
 
     if include_holdings:
-        # Weight, then the selection's order (rank, appearances - known for this run's buys -
-        # delta): with equal weights the weight alone leaves the holdings in storage order.
-        appearances = {ch.ticker_id: ch.appearances or 0 for ch in results.changes if ch.direction == 'buy'}
-        holdings = sorted(results.holdings, key=lambda h: (-(h.weight or 0), h.ranking, -appearances.get(h.ticker_id, 0), -(h.max_delta or 0)))
+        # Weight, then the selection's order (score, then delta): with equal weights the weight
+        # alone leaves the holdings in storage order.
+        holdings = sorted(results.holdings, key=lambda h: (-(h.weight or 0), -(h.score or 0), -(h.max_delta or 0)))
         blocks.append(f"Holdings ({len(holdings)})\n" + table(
             ["Percent", "Symbol", "Name"],
             [[f"{h.weight * 100:.2f}%" if h.weight is not None else "-", *symbol_name(h.ticker_id)] for h in holdings],
@@ -246,15 +264,16 @@ def _filter_and_aggregate(
     country_type: str,
     exchanges: list[str],
     esg_only: bool,
-    ranking_level: int,
+    rank_points: list[int],
     exclude_ticker_ids: set[int] | None = None,
     held_ticker_ids: set[int] | None = None,
 ) -> pd.DataFrame:
     """
     Filter the fund's best-ideas DataFrame (fund_best_ideas: one date per ETF) for a specific
-    fund configuration and aggregate per ticker: its best ranking across the ETFs, and
-    appearances/max_delta/source_etf_id among the ETFs ranking it there, all relative to this
-    fund's ETF list.
+    fund configuration and aggregate per company: its score (the rank_points each ETF gives it,
+    summed), best rank, appearances (the ETFs scoring it), max delta and source ETF (the ETF
+    with that delta). Companies scoring 0 are left out; the rest are ordered by score, then
+    appearances, then max delta - the selection's order.
     """
     key = 'canonical_ticker_id'
 
@@ -269,16 +288,14 @@ def _filter_and_aggregate(
     # Printout full list to CSV for debugging
     # filtered.sort_values(['provider_etf_id', 'ranking']).to_csv('debug_filtered.csv', index=False)
 
-    empty = pd.DataFrame(columns=['ticker_id', 'ranking', 'appearances', 'max_delta', 'source_etf_id', 'all_provider_ids'])
+    empty = pd.DataFrame(columns=['ticker_id', 'score', 'ranking', 'appearances', 'max_delta', 'source_etf_id', 'all_provider_ids'])
     if filtered.empty:
         return empty
 
-    # Per company: keep only its best ranking across the ETFs
-    ticker_best_rank = filtered.groupby(key)['ranking'].transform('min')
-    filtered = filtered[filtered['ranking'] == ticker_best_rank]
-
-    # Cap at ranking_level
-    filtered = filtered[filtered['ranking'] <= ranking_level]
+    # Each ETF scores a company once, at its best rank there (two listings of one company)
+    filtered = filtered.loc[filtered.groupby([key, 'provider_etf_id'])['ranking'].idxmin()]
+    filtered['points'] = rank_points_of(filtered['ranking'], rank_points)
+    filtered = filtered[filtered['points'] > 0]
     if filtered.empty:
         return empty
 
@@ -287,25 +304,32 @@ def _filter_and_aggregate(
     source_etf = filtered.loc[source_idx].set_index(key)['provider_etf_id']
 
     agg = filtered.groupby(key).agg(
-        ranking=('ranking', 'first'),
+        score=('points', 'sum'),
+        ranking=('ranking', 'min'),
         appearances=('provider_etf_id', 'nunique'),
         max_delta=('delta', 'max'),
-        all_provider_ids=('provider_etf_id', list),
+        all_provider_ids=('provider_etf_id', lambda s: sorted(set(s))),
     ).reset_index()
 
     agg['source_etf_id'] = agg[key].map(source_etf).astype(int)
 
     return (
         agg.rename(columns={key: 'ticker_id'})
-           .sort_values(['ranking', 'appearances', 'max_delta'], ascending=[True, False, False])
+           .sort_values(['score', 'appearances', 'max_delta'], ascending=[False, False, False])
            .reset_index(drop=True)
     )
+
+
+def rank_points_of(ranking: pd.Series, rank_points: list[int]) -> pd.Series:
+    """The points each best-idea row's rank earns (rank_points[rank - 1]; 0 beyond the list)."""
+    return ranking.map(lambda r: rank_points[int(r) - 1] if 1 <= int(r) <= len(rank_points) else 0)
 
 
 def _df_to_ranked(df: pd.DataFrame) -> list[best_idea.BestIdeaRanked]:
     return [
         best_idea.BestIdeaRanked(
             ticker_id=int(row['ticker_id']),
+            score=int(row['score']),
             ranking=int(row['ranking']),
             appearances=int(row['appearances']),
             max_delta=float(row['max_delta']),
@@ -323,65 +347,58 @@ def _fetch_and_select_by_style(
     country_type: str = 'all',
     exclude_ticker_ids: set[int] | None = None,
     held_ticker_ids: set[int] | None = None,
-) -> tuple[list, list]:
+) -> tuple[list, list, set[int]]:
     """
-    Returns (ideal, fetched).
-    `ideal`   — top-ranked ideas capped at n_holdings, respecting style blend split.
-    `fetched` — all retrieved ideas (used by caller for ranking-drop detection).
+    Returns (ideal, fetched, keep_ids), each list in score order.
+    `ideal`    — the top n_holdings by score, respecting the style blend split.
+    `fetched`  — every scored idea.
+    `keep_ids` — the ideas within the top ceil(target x KEEP_BUFFER) of their list (per style
+                 with a blend split, against that style's count): a holding among them is kept.
     """
     etf_ids = strategy.provider_etfs or []
     exchanges = strategy.exchanges or []
-    ranking_level = strategy.ranking_to + (5 if strategy.allocation == 'market_cap' else 2)
+
+    def scored(style: str) -> list[best_idea.BestIdeaRanked]:
+        return _df_to_ranked(_filter_and_aggregate(
+            all_best_ideas_df, etf_ids, style, strategy.cap.name,
+            country_type, exchanges, strategy.esg_only, strategy.rank_points, exclude_ticker_ids,
+            held_ticker_ids,
+        ))
+
+    def keep(ideas: list[best_idea.BestIdeaRanked], target: int) -> set[int]:
+        return {i.ticker_id for i in ideas[:math.ceil(target * KEEP_BUFFER)]}
 
     if (
         strategy.style.name == "blend"
         and strategy.style.value is not None
         and strategy.style.growth is not None
     ):
-        fetched_growth = _df_to_ranked(_filter_and_aggregate(
-            all_best_ideas_df, etf_ids, 'growth', strategy.cap.name,
-            country_type, exchanges, strategy.esg_only, ranking_level, exclude_ticker_ids,
-            held_ticker_ids,
-        ))
-        fetched_value = _df_to_ranked(_filter_and_aggregate(
-            all_best_ideas_df, etf_ids, 'value', strategy.cap.name,
-            country_type, exchanges, strategy.esg_only, ranking_level, exclude_ticker_ids,
-            held_ticker_ids,
-        ))
-
-        if strategy.ranking_from != 1:
-            fetched_growth = [i for i in fetched_growth if strategy.ranking_from <= i.ranking]
-            fetched_value  = [i for i in fetched_value  if strategy.ranking_from <= i.ranking]
+        fetched_growth = scored('growth')
+        fetched_value = scored('value')
+        growth_target = round(n_holdings * strategy.style.growth / 100)
+        value_target = n_holdings - growth_target
 
         fetched = fetched_growth + fetched_value
-        growth_in_range = [i for i in fetched_growth if i.ranking <= strategy.ranking_to]
-        value_in_range  = [i for i in fetched_value  if i.ranking <= strategy.ranking_to]
-
-        growth_count = min(len(growth_in_range), round(n_holdings * strategy.style.growth / 100))
-        value_count  = min(len(value_in_range),  n_holdings - growth_count)
-        ideal = growth_in_range[:growth_count] + value_in_range[:value_count]
+        growth_count = min(len(fetched_growth), growth_target)
+        value_count  = min(len(fetched_value),  n_holdings - growth_count)
+        ideal = fetched_growth[:growth_count] + fetched_value[:value_count]
+        keep_ids = keep(fetched_growth, growth_target) | keep(fetched_value, value_target)
     else:
-        fetched = _df_to_ranked(_filter_and_aggregate(
-            all_best_ideas_df, etf_ids, strategy.style.name, strategy.cap.name,
-            country_type, exchanges, strategy.esg_only, ranking_level, exclude_ticker_ids,
-            held_ticker_ids,
-        ))
+        fetched = scored(strategy.style.name)
+        ideal = fetched[:n_holdings]
+        keep_ids = keep(fetched, n_holdings)
 
-        if strategy.ranking_from != 1:
-            fetched = [i for i in fetched if strategy.ranking_from <= i.ranking]
-
-        in_range = [i for i in fetched if i.ranking <= strategy.ranking_to]
-        ideal = in_range[:n_holdings]
-
-    return ideal, fetched
+    return ideal, fetched, keep_ids
 
 
 @dataclass
 class RegionBucket:
-    """One region's share of a fund: its ideal holdings (in order, at most `target`), the ids of
-    every idea fetched for it (ideal and tolerated ranks), and its number of holdings."""
+    """One region's share of a fund: its ideal holdings (in score order, at most `target`), the
+    ids of every idea scored for it, the ids a holding is kept at (within the keep buffer), and
+    its number of holdings."""
     ideal: list
     fetched_ids: set[int]
+    keep_ids: set[int]
     target: int
 
 
@@ -405,37 +422,26 @@ def _select_region_buckets(
         and region_split.US is not None
         and region_split.International is not None
     ):
-        intl_ideal, intl_fetched = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type=company.INTERNATIONAL, held_ticker_ids=held_ticker_ids)
-        intl_ticker_ids = {i.ticker_id for i in intl_fetched}
-        us_ideal,   us_fetched   = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type=company.US, exclude_ticker_ids=intl_ticker_ids, held_ticker_ids=held_ticker_ids)
-
         us_n_target   = round(strategy.holdings * region_split.US / 100)
         intl_n_target = strategy.holdings - us_n_target
 
+        intl_ideal, intl_fetched, intl_keep = _fetch_and_select_by_style(intl_n_target, strategy, all_best_ideas_df, country_type=company.INTERNATIONAL, held_ticker_ids=held_ticker_ids)
+        intl_ticker_ids = {i.ticker_id for i in intl_fetched}
+        us_ideal,   us_fetched,   us_keep   = _fetch_and_select_by_style(us_n_target, strategy, all_best_ideas_df, country_type=company.US, exclude_ticker_ids=intl_ticker_ids, held_ticker_ids=held_ticker_ids)
+
         return [
-            RegionBucket(us_ideal[:us_n_target], {i.ticker_id for i in us_fetched}, us_n_target),
-            RegionBucket(intl_ideal[:intl_n_target], intl_ticker_ids, intl_n_target),
+            RegionBucket(us_ideal, {i.ticker_id for i in us_fetched}, us_keep, us_n_target),
+            RegionBucket(intl_ideal, intl_ticker_ids, intl_keep, intl_n_target),
         ], us_fetched + intl_fetched
 
     country_type = strategy_country_types(strategy)[0]
-    ideal, fetched = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type=country_type, held_ticker_ids=held_ticker_ids)
-    return [RegionBucket(ideal, {i.ticker_id for i in fetched}, strategy.holdings)], fetched
-
-
-def _fetch_and_select_by_region(
-    strategy: Strategy,
-    all_best_ideas_df: pd.DataFrame,
-    held_ticker_ids: set[int] | None = None,
-) -> tuple[list, list]:
-    """Returns (ideal, fetched): every region's ideal holdings (US first with a split), and all
-    the ideas fetched. See _select_region_buckets."""
-    buckets, fetched = _select_region_buckets(strategy, all_best_ideas_df, held_ticker_ids)
-    return [i for b in buckets for i in b.ideal], fetched
+    ideal, fetched, keep_ids = _fetch_and_select_by_style(strategy.holdings, strategy, all_best_ideas_df, country_type=country_type, held_ticker_ids=held_ticker_ids)
+    return [RegionBucket(ideal, {i.ticker_id for i in fetched}, keep_ids, strategy.holdings)], fetched
 
 
 def strategy_country_types(strategy: Strategy) -> list[str]:
     """
-    The country_type buckets _fetch_and_select_by_region selects from: both regions for a
+    The country_type buckets _select_region_buckets selects from: both regions for a
     US/International split, the region's name when it's one of them, else ['all'] (no filter).
     """
     region = strategy.region
@@ -478,14 +484,15 @@ def generate(
     and saving the results.
     """
     strategy = getStrategyFromJson(fund.strategy)
-    ranking_gap_drop = 5 if strategy.allocation == "market_cap" else 2
 
     # Pass this fund's current holdings through the 'large' cap filter (see the comment in
-    # _filter_and_aggregate) so one dropping below the large-cap threshold isn't force-sold
-    # for that reason alone — it's still evaluated on ranking like any other candidate.
+    # _eligibility_masks) so one dropping below the large-cap threshold isn't force-sold
+    # for that reason alone — it's still evaluated on its score like any other candidate.
     held_ticker_ids = {ph.ticker_id for ph in previous_holdings}
     buckets, fetched = _select_region_buckets(strategy, all_best_ideas_df, held_ticker_ids)
     ideal_holdings = [i for b in buckets for i in b.ideal]
+    keep_ids = {t for b in buckets for t in b.keep_ids}
+    fetched_by_id = {i.ticker_id: i for i in fetched}
 
     holdings_changed: List[FundHoldingChange] = []
     todays_holdings: List[FundHolding] = []
@@ -499,32 +506,28 @@ def generate(
             f"Carried over {len(todays_holdings)} holdings."
         )
     else:
+        # A holding is kept while it's within its bucket's keep buffer (the top
+        # ceil(target x KEEP_BUFFER) by score), else sold. Kept holdings carry today's score.
         for ph in previous_holdings:
-            found_in_ideal = next((x for x in ideal_holdings if x.ticker_id == ph.ticker_id), None)
-            if found_in_ideal is None:
-                found_in_fetched = next((x for x in fetched if x.ticker_id == ph.ticker_id), None)
-                if found_in_fetched is None:
-                    holdings_changed.append(FundHoldingChange(
-                        fund_id=fund.id, ticker_id=ph.ticker_id, change_date=today,
-                        direction="sell", reason="Not in best ideas top levels",
-                    ))
-                    continue
-                if found_in_fetched.ranking - ph.ranking >= ranking_gap_drop:
-                    holdings_changed.append(FundHoldingChange(
-                        fund_id=fund.id, ticker_id=ph.ticker_id, change_date=today,
-                        direction="sell", reason="Dropped below min ranking",
-                    ))
-                    continue
+            now = fetched_by_id.get(ph.ticker_id)
+            if now is None or ph.ticker_id not in keep_ids:
+                holdings_changed.append(FundHoldingChange(
+                    fund_id=fund.id, ticker_id=ph.ticker_id, change_date=today, direction="sell",
+                    score=now.score if now else None, ranking=now.ranking if now else None,
+                    appearances=now.appearances if now else None,
+                    reason="No longer a best idea" if now is None else "Below the score buffer",
+                ))
+                continue
 
             ph.holding_date = today
+            ph.score, ph.ranking, ph.max_delta, ph.source_etf_id = now.score, now.ranking, now.max_delta, now.source_etf_id
             todays_holdings.append(ph)
 
         # Free places are filled region by region: each region's from its own ideal holdings, up
-        # to its target less the holdings it kept (in its ideal or tolerated - every kept holding
-        # is among its region's fetched ideas). A sold International holding is replaced by an
-        # International idea, not by the next US one; a region short of ideas isn't made up from
-        # the other. Kept holdings are never sold to restore the split: a region kept above its
-        # target (tolerated holdings) just leaves no room for buys until they're sold.
+        # to its target less the holdings it kept (every kept holding is among its region's
+        # scored ideas). A sold International holding is replaced by an International idea, not by
+        # the next US one; a region short of ideas isn't made up from the other. Kept holdings are
+        # never sold to make room for a higher score.
         missing = strategy.holdings - len(todays_holdings)
         existing_ids = {th.ticker_id for th in todays_holdings}
         for bucket in buckets:
@@ -537,10 +540,11 @@ def generate(
                 todays_holdings.append(FundHolding(
                     fund_id=fund.id, holding_date=today, ticker_id=fi.ticker_id,
                     ranking=fi.ranking, source_etf_id=fi.source_etf_id, max_delta=fi.max_delta,
+                    score=fi.score,
                 ))
                 holdings_changed.append(FundHoldingChange(
                     fund_id=fund.id, ticker_id=fi.ticker_id, change_date=today, direction="buy",
-                    ranking=fi.ranking, appearances=fi.appearances, max_delta=fi.max_delta,
+                    ranking=fi.ranking, score=fi.score, appearances=fi.appearances, max_delta=fi.max_delta,
                     top_delta_provider_etf_id=fi.source_etf_id, all_provider_etf_ids=fi.all_provider_ids,
                 ))
                 existing_ids.add(fi.ticker_id)

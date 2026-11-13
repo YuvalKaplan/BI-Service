@@ -447,6 +447,7 @@ CREATE TABLE public.fund_holding (
     ticker_id integer NOT NULL,
     holding_date date NOT NULL,
     ranking integer NOT NULL,
+    score integer,
     source_etf_id integer,
     max_delta double precision,
     weight double precision
@@ -466,6 +467,7 @@ CREATE TABLE public.fund_holding_change (
     change_date date NOT NULL,
     direction character varying(5) NOT NULL,
     ranking integer,
+    score integer,
     appearances integer,
     max_delta double precision,
     top_delta_provider_etf_id integer,
