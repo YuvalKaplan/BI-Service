@@ -36,6 +36,8 @@ from modules.ticker.pricing import closest_value_for_date
 
 US = 'US'
 INTERNATIONAL = 'International'
+GLOBAL = 'Global'                   # a provider ETF's region when it's neither mostly US nor mostly International
+REGIONS = (US, INTERNATIONAL)       # a company's regions - and the parts a Global ETF is measured in
 
 
 # Lines that aren't the company's common equity. FMP reports the parent company's full market

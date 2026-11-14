@@ -237,11 +237,11 @@ def fetch_latest_dates() -> dict[int, date]:
         raise Exception(f"Error fetching the provider ETFs' latest holdings dates: {e}")
 
 
-def fetch_latest_company_weights() -> list[tuple[int, str | None, int, float, str | None]]:
-    """(provider_etf_id, ETF region, company id, weight, sector) of every resolved line with a
-    positive weight in each ETF's latest stored holdings - the selection's holdings measures. The
-    company is the line's ticker through its current master, the sector the master's (else the
-    line's)."""
+def fetch_latest_company_weights() -> list[tuple[int, str | None, int, float, str | None, str | None]]:
+    """(provider_etf_id, ETF region, company id, weight, sector, company region) of every resolved
+    line with a positive weight in each ETF's latest stored holdings - the selection's holdings
+    measures. The company is the line's ticker through its current master, the sector and region
+    the master's (else the line's)."""
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor() as cur:
@@ -250,7 +250,7 @@ def fetch_latest_company_weights() -> list[tuple[int, str | None, int, float, st
                         SELECT provider_etf_id, MAX(holding_date) AS holding_date FROM provider_etf_holding GROUP BY provider_etf_id
                     )
                     SELECT h.provider_etf_id, e.region, COALESCE(t.master_ticker_id, t.id), h.weight,
-                           COALESCE(m.sector, t.sector)
+                           COALESCE(m.sector, t.sector), COALESCE(m.region, t.region)
                     FROM latest l
                     JOIN provider_etf_holding h ON h.provider_etf_id = l.provider_etf_id AND h.holding_date = l.holding_date
                     JOIN provider_etf e ON e.id = h.provider_etf_id
@@ -258,7 +258,7 @@ def fetch_latest_company_weights() -> list[tuple[int, str | None, int, float, st
                     LEFT JOIN ticker m ON m.id = t.master_ticker_id
                     WHERE h.weight > 0;
                 """)
-                return [(r[0], r[1], r[2], float(r[3]), r[4]) for r in cur.fetchall()]
+                return [(r[0], r[1], r[2], float(r[3]), r[4], r[5]) for r in cur.fetchall()]
     except Error as e:
         raise Exception(f"Error fetching the provider ETFs' latest company weights: {e}")
 

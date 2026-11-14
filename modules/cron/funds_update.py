@@ -7,6 +7,7 @@ from modules.object import batch_run
 from modules.object import best_idea, fund, fund_analysis, fund_holding, fund_holding_change, provider_etf, ticker
 from modules.calc import model_fund
 from modules.cron import best_ideas_generator, schedule
+from modules.sec import etf_selection
 from modules.ticker import company, index_funds
 
 
@@ -136,6 +137,7 @@ def _record_fund_analysis(
     """
     try:
         bm_cache: dict = {}
+        blend_ids = etf_selection.benchmark_ids()
         rows: list[fund_analysis.FundAnalysis] = []
         for etf_id, value_date in model_fund.etfs_used(strategy, fund_ideas_df).items():
             pe = provider_etf.fetch_by_id(etf_id)
@@ -144,29 +146,34 @@ def _record_fund_analysis(
                 log.record_notice(f"[fund_analysis] fund_id={fund_id}: no holdings for ETF {etf_id} on {value_date} — skipped.")
                 continue
 
-            benchmark_id = benchmark_date = None
-            universe = None
-            if strategy.benchmark == best_idea.MODE_MARKET:
-                if not pe.benchmark_id:
+            # A Global ETF's parts the fund draws on (each measured as an ETF of its region)
+            for part in best_ideas_generator.parts_of(inputs, blend_ids):
+                if not model_fund.accepts_region(strategy, part.etf.region):
                     continue
-                universe = best_ideas_generator.get_market_weights(pe.benchmark_id, as_of_date, bm_cache)
-                if not universe.weights:
-                    continue
-                benchmark_id, benchmark_date = pe.benchmark_id, universe.holding_date
+                benchmark_id = benchmark_date = None
+                universe = None
+                if strategy.benchmark == best_idea.MODE_MARKET:
+                    if not part.etf.benchmark_id:
+                        continue
+                    universe = best_ideas_generator.get_market_weights(part.etf.benchmark_id, as_of_date, bm_cache)
+                    if not universe.weights:
+                        continue
+                    benchmark_id, benchmark_date = part.etf.benchmark_id, universe.holding_date
 
-            weights = best_ideas_generator.compute_active_weights(inputs, universe)
-            selected = best_ideas_generator.select_best_ideas(weights, config.BestIdeas.MAX_BEST_IDEAS_PER_FUND)
+                weights = best_ideas_generator.compute_active_weights(part, universe)
+                selected = best_ideas_generator.select_best_ideas(weights, config.BestIdeas.MAX_BEST_IDEAS_PER_FUND)
 
-            stored = best_idea.fetch_for_etf_date(etf_id, value_date, strategy.benchmark)
-            if [s.ticker_id for s in stored] != [int(t) for t in selected['ticker_id']] or any(
-                abs((s.delta or 0) - d) > 1e-9 for s, d in zip(stored, selected['delta'])
-            ):
-                log.record_notice(
-                    f"[fund_analysis] fund_id={fund_id}: recomputed best ideas for ETF {etf_id} on {value_date} "
-                    f"differ from stored best_idea ({strategy.benchmark}) — stored snapshot reflects the recomputation."
-                )
+                stored = best_idea.fetch_for_etf_date(etf_id, value_date, strategy.benchmark, part.part)
+                if [s.ticker_id for s in stored] != [int(t) for t in selected['ticker_id']] or any(
+                    abs((s.delta or 0) - d) > 1e-9 for s, d in zip(stored, selected['delta'])
+                ):
+                    log.record_notice(
+                        f"[fund_analysis] fund_id={fund_id}: recomputed best ideas for ETF {etf_id}"
+                        f"{f' ({part.part} part)' if part.part else ''} on {value_date} "
+                        f"differ from stored best_idea ({strategy.benchmark}) — stored snapshot reflects the recomputation."
+                    )
 
-            rows += best_ideas_generator.build_analysis_rows(fund_id, as_of_date, inputs, weights, selected, benchmark_id, benchmark_date)
+                rows += best_ideas_generator.build_analysis_rows(fund_id, as_of_date, part, weights, selected, benchmark_id, benchmark_date)
 
         fund_analysis.replace_for_fund_date(fund_id, as_of_date, rows)
     except Exception as e:

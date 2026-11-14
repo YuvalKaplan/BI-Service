@@ -25,32 +25,34 @@ class BestIdea:
     delta: float | None
     ranking: int | None
     benchmark_mode: str = 'self'
+    part: str | None = None     # a Global ETF's part (US / International), ranked on its own; None for a regional ETF
 
 def df_to_rows(
     best_ideas: pd.DataFrame,
     provider_etf_id: int,
     value_date: date,
     benchmark_mode: str = 'self',
+    part: str | None = None,
 ) -> list[tuple]:
     rows = []
     for rank, (_, row) in enumerate(best_ideas.iterrows(), start=1):
         rows.append((
             provider_etf_id, int(row["ticker_id"]), value_date,
             float(row["etf_weight"]), float(row["benchmark_weight"]), float(row["delta"]),
-            rank, benchmark_mode,
+            rank, benchmark_mode, part,
         ))
     return rows
 
 def insert_bulk(provider_etf_id: int, value_date: date, benchmark_mode: str, rows: list[tuple]) -> None:
     """
-    Replaces all best_idea rows for (provider_etf_id, value_date, benchmark_mode) with `rows`.
-    Deletes first (even if `rows` is empty) so a rerun never leaves stale tickers behind
-    that no longer qualify under the current ranking/eligibility logic.
+    Replaces all best_idea rows for (provider_etf_id, value_date, benchmark_mode) - a Global ETF's
+    every part - with `rows`. Deletes first (even if `rows` is empty) so a rerun never leaves stale
+    tickers behind that no longer qualify under the current ranking/eligibility logic.
     """
     query = """
         INSERT INTO best_idea
-            (provider_etf_id, ticker_id, value_date, etf_weight, benchmark_weight, delta, ranking, benchmark_mode)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (provider_etf_id, ticker_id, value_date, etf_weight, benchmark_weight, delta, ranking, benchmark_mode, part)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
 
     try:
@@ -78,13 +80,15 @@ def delete_from(value_date: date) -> int:
         raise Exception(f"Error deleting Best Ideas from {value_date}: {e}")
 
 
-def fetch_for_etf_date(provider_etf_id: int, value_date: date, benchmark_mode: str) -> List[BestIdea]:
+def fetch_for_etf_date(provider_etf_id: int, value_date: date, benchmark_mode: str, part: str | None = None) -> List[BestIdea]:
+    """An ETF's best ideas of one date and mode in rank order - of a Global ETF, one part's."""
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(BestIdea)) as cur:
                 cur.execute(
-                    'SELECT * FROM best_idea WHERE provider_etf_id = %s AND value_date = %s AND benchmark_mode = %s ORDER BY ranking;',
-                    (provider_etf_id, value_date, benchmark_mode),
+                    'SELECT * FROM best_idea WHERE provider_etf_id = %s AND value_date = %s AND benchmark_mode = %s '
+                    'AND part IS NOT DISTINCT FROM %s ORDER BY ranking;',
+                    (provider_etf_id, value_date, benchmark_mode, part),
                 )
                 return cur.fetchall()
     except Error as e:
@@ -104,7 +108,7 @@ def fetch_for_etfs(etf_value_dates: dict[int, date], benchmark_mode: str) -> Lis
                     JOIN unnest(%s::int[], %s::date[]) AS e(provider_etf_id, value_date)
                       ON e.provider_etf_id = bi.provider_etf_id AND e.value_date = bi.value_date
                     WHERE bi.benchmark_mode = %s
-                    ORDER BY bi.provider_etf_id, bi.ranking;
+                    ORDER BY bi.provider_etf_id, bi.part NULLS FIRST, bi.ranking;
                     """,
                     (list(etf_value_dates.keys()), list(etf_value_dates.values()), benchmark_mode),
                 )
@@ -134,7 +138,9 @@ def fetch_all_as_df(as_of_date: date, look_back_days: int) -> pd.DataFrame:
     own look-back.
     Returned DataFrame columns: provider_etf_id, ticker_id, value_date, ranking,
     delta, benchmark_mode, style_type, exchange, country, region, esg_qualified, name,
-    master_ticker_id, market_cap, etf_region.
+    master_ticker_id, market_cap, part, etf_region. etf_region is the region the idea was measured
+    in: the ETF's, a Global ETF's part's (so the funds' region buckets take each part as an ETF of
+    its region).
     market_cap is the listing's own latest cap within 10 days; funds_update.build_shared_context
     replaces it with the company's cap as of the date for multi-listing companies' masters.
     """
@@ -154,7 +160,8 @@ def fetch_all_as_df(as_of_date: date, look_back_days: int) -> pd.DataFrame:
             t.name,
             t.master_ticker_id,
             tv.market_cap,
-            pe.region AS etf_region
+            bi.part,
+            COALESCE(bi.part, pe.region) AS etf_region
         FROM best_idea bi
         JOIN ticker t ON t.id = bi.ticker_id
         JOIN provider_etf pe ON pe.id = bi.provider_etf_id AND pe.status = 'active'
@@ -168,7 +175,7 @@ def fetch_all_as_df(as_of_date: date, look_back_days: int) -> pd.DataFrame:
         ) tv ON TRUE
         WHERE bi.value_date BETWEEN %(date)s - %(look_back_days)s * INTERVAL '1 day' AND %(date)s
           AND t.invalid IS NULL
-        ORDER BY bi.provider_etf_id, bi.value_date, bi.ranking ASC
+        ORDER BY bi.provider_etf_id, bi.value_date, bi.part NULLS FIRST, bi.ranking ASC
     """
     try:
         with db_pool_instance.get_connection() as conn:

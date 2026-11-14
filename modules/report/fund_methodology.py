@@ -24,7 +24,7 @@ from modules.object import (
     provider, provider_etf, ticker,
 )
 from modules.object.provider_etf_holding import aggregate_holdings, fetch_latest_holdings_for_etf, implied_price
-from modules.ticker import index_funds
+from modules.ticker import company as company_rules, index_funds
 
 
 def _num(value) -> float | None:
@@ -197,7 +197,9 @@ def _write_etf_files(ctx: _Context, out_dir: str) -> list[str]:
             shares=('Shares', 'sum'), market_value=('Market value', 'sum'),
         ) if not listings.empty else pd.DataFrame()
 
+        global_etf = pe.region == company_rules.GLOBAL
         company = pd.DataFrame([{
+            **({'Part': a.part} if global_etf else {}),
             'Rank': a.ranking,
             'Symbol': ctx.sym(a.ticker_id),
             'Name': ctx.tname(a.ticker_id),
@@ -213,7 +215,8 @@ def _write_etf_files(ctx: _Context, out_dir: str) -> list[str]:
             'Delta': a.delta,
             'Note': a.note,
         } for a in rows])
-        company = company.sort_values(['Rank', 'Delta'], ascending=[True, False], na_position='last')
+        order = (['Part'] if global_etf else []) + ['Rank', 'Delta']
+        company = company.sort_values(order, ascending=[True] * (len(order) - 1) + [False], na_position='last')
 
         # With a style split each company row names its own benchmark (value / growth, else the blend).
         used = sorted({a.benchmark_id for a in rows if a.benchmark_id in ctx.benchmarks})
@@ -224,7 +227,9 @@ def _write_etf_files(ctx: _Context, out_dir: str) -> list[str]:
         header = [
             ('ETF', f"{pe.name} ({pe.id})"),
             ('Provider', p.name if p else pe.provider_id),
-            ('Region', pe.region),
+            ('Region', f"{pe.region} — measured as two parts, its US companies and its International ones, each as an ETF "
+                       f"of that region holding only them (weights within the part) and ranked on its own (column Part)"
+                       if global_etf else pe.region),
             ('Holdings date', ctx.etf_dates[etf_id]),
             ('Benchmark', bm_text),
             ('Best ideas', f"top {config.BestIdeas.MAX_BEST_IDEAS_PER_FUND} by delta = ETF weight - benchmark weight, delta > 0 and <= {config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF:.0%}"),
@@ -281,12 +286,14 @@ def _write_benchmark_file(ctx: _Context, out_dir: str) -> str:
             for etf_id in sorted(ctx.etf_dates):
                 rows = [a for a in ctx.analysis if a.provider_etf_id == etf_id and a.benchmark_weight is not None]
                 df = pd.DataFrame([{
+                    **({'Part': a.part} if a.part else {}),
                     'Symbol': ctx.sym(a.ticker_id), 'Name': ctx.tname(a.ticker_id),
                     'Exchange': ctx.exchange(a.ticker_id),
                     'Market cap used': a.market_cap, 'Weight': a.benchmark_weight,
                 } for a in rows]).sort_values('Weight', ascending=False)
                 _write_sheet(w, _sheet_name(ctx.etfs[etf_id].name or str(etf_id), used), df, {'Market cap used': MONEY, 'Weight': PCT}, [
-                    ('Benchmark', f"self — {ctx.etf_label(etf_id)} holdings, market-cap weighted"),
+                    ('Benchmark', f"self — {ctx.etf_label(etf_id)} holdings, market-cap weighted"
+                                  + (" within each part (column Part)" if any(a.part for a in rows) else "")),
                     ('Holdings date', ctx.etf_dates[etf_id]),
                 ])
     return path
@@ -336,6 +343,7 @@ def _write_best_ideas_file(ctx: _Context, out_dir: str) -> str:
         'Provider': ctx.provider_name(r['provider_etf_id']),
         'ETF': ctx.etf_label(r['provider_etf_id']),
         'Holdings date': r['value_date'],
+        'Part': r['part'] or '',
         'Rank': r['ranking'],
         'Points': rank_points[int(r['ranking']) - 1] if 1 <= int(r['ranking']) <= len(rank_points) else 0,
         'Symbol': ctx.sym(r['ticker_id']),
@@ -353,11 +361,12 @@ def _write_best_ideas_file(ctx: _Context, out_dir: str) -> str:
         'ESG': 'Y' if r['esg_qualified'] else 'N',
         'Eligible for fund': 'Y' if r['eligible'] else 'N',
         'Excluded because': r['excluded_reason'] or '',
-    } for r in df.sort_values(['provider_etf_id', 'ranking']).to_dict('records')])
+    } for r in df.sort_values(['provider_etf_id', 'part', 'ranking'], na_position='first').to_dict('records')])
     with pd.ExcelWriter(path, engine='openpyxl') as w:
         _write_sheet(w, 'Best ideas', out, {'ETF weight': PCT, 'Benchmark weight': PCT, 'Delta': PCT, 'Market cap': MONEY}, [
             ('Benchmark mode', ctx.mode),
-            ('Per ETF', f"top {config.BestIdeas.MAX_BEST_IDEAS_PER_FUND} companies by delta (0 < delta <= {config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF:.0%})"),
+            ('Per ETF', f"top {config.BestIdeas.MAX_BEST_IDEAS_PER_FUND} companies by delta (0 < delta <= {config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF:.0%}); "
+                        f"a Global ETF's per part (column Part: its US companies, its International ones)"),
             ('ETFs', len(ctx.etf_dates)),
         ])
     return path
@@ -508,7 +517,10 @@ def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
         f"2. **Benchmark** — mode `{ctx.mode}`: {bm_text}.",
         f"3. **Active weight** — for each company, ETF weight minus benchmark weight (delta). The top "
         f"{config.BestIdeas.MAX_BEST_IDEAS_PER_FUND} companies with 0 < delta <= {config.BestIdeas.HOLDING_DELTA_LIMIT_DROP_OFF:.0%} are the ETF's "
-        "best ideas, ranked 1..N by delta. Every company and why it did or didn't qualify is in the ETF workbook (*Note*).",
+        "best ideas, ranked 1..N by delta. A Global ETF (neither mostly US nor mostly International) is measured as two "
+        "parts, its US companies and its International ones, each as an ETF of that region holding only them (weights within "
+        "the part), against that region's benchmark, with its own top N (*Part*). "
+        "Every company and why it did or didn't qualify is in the ETF workbook (*Note*).",
         "4. **Best ideas** — `best_ideas.xlsx` lists all ETFs' best ideas, and whether each passes the fund's filters "
         f"(ETF list, style `{s.style.name}`, cap `{s.cap.name}`, region, exchange, ESG), and the points its rank earns.",
         "5. **Fund selection** — eligible ideas are combined per company into a score: each ETF gives it points for its "
