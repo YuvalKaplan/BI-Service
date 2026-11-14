@@ -67,6 +67,7 @@ class ProviderEtf:
     sector_excess: float | None = None        # the selection's: its sector most above that sector's benchmark reference
     excess_sector: str | None = None
     benchmark_coverage: float | None = None   # the selection's: stock weight in its region's blend benchmark companies
+    weight_spread: float | None = None        # the selection's: 90th percentile company weight over the 10th (1 = equal)
 
 
 # Written by each profile; status, last_downloaded, benchmark_id and the selection's measures are not.
@@ -167,6 +168,7 @@ class SelectionUpdate:
     sector_excess: float | None
     excess_sector: str | None
     benchmark_coverage: float | None
+    weight_spread: float | None
 
 
 def update_selection(changes: list[SelectionUpdate]) -> None:
@@ -178,8 +180,9 @@ def update_selection(changes: list[SelectionUpdate]) -> None:
             with conn.cursor() as cur:
                 cur.executemany(
                     "UPDATE provider_etf SET status = %s, benchmark_id = %s, sector_excess = %s, excess_sector = %s, "
-                    "benchmark_coverage = %s, updated_at = (now() AT TIME ZONE 'utc') WHERE id = %s;",
-                    [(c.status, c.benchmark_id, c.sector_excess, c.excess_sector, c.benchmark_coverage, c.id)
+                    "benchmark_coverage = %s, weight_spread = %s, updated_at = (now() AT TIME ZONE 'utc') WHERE id = %s;",
+                    [(c.status, c.benchmark_id, c.sector_excess, c.excess_sector, c.benchmark_coverage, c.weight_spread,
+                      c.id)
                      for c in changes],
                 )
             conn.commit()

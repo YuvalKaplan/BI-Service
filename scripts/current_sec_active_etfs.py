@@ -42,7 +42,7 @@ PROFILE_COLUMNS = ['region', 'cap_type', 'style_type', 'aum', 'stock_holdings', 
                    'avg_float_cap', 'large_weight', 'mid_weight', 'small_weight', 'value_weight', 'growth_weight',
                    'top_sector', 'top_sector_weight', 'top_country', 'top_country_weight', 'emerging_weight',
                    'contracts_found', 'website']
-MEASURE_COLUMNS = ['sector_excess', 'excess_sector', 'benchmark_coverage']   # the selection's, on the latest holdings
+MEASURE_COLUMNS = ['sector_excess', 'excess_sector', 'benchmark_coverage', 'weight_spread']   # the selection's, on the latest holdings
 OLD_COLUMNS = ['old_provider_etf_id', 'old_enabled', 'old_cap_type', 'old_style_type', 'old_region']
 
 if __name__ == '__main__':

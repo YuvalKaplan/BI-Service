@@ -113,7 +113,7 @@ Each equity fund is profiled from its holdings against our company data and the 
 
 ### Selection rules
 
-A profiled equity fund is one of the fund's managers (**active**) when it passes every rule. The rules keep out funds whose overweights would reflect a mandate rather than stock selection within a broad large-cap market: derivative strategies, funds that follow an index, sector and thematic funds, single-country and emerging-market funds, and funds investing mostly outside large caps. They are applied every time holdings are read, so a manager that drifts out of its mandate drops out on its own and returns when it comes back – except one that has used derivatives:
+A profiled equity fund is one of the fund's managers (**active**) when it passes every rule. The rules keep out funds whose overweights would reflect a mandate rather than stock selection within a broad large-cap market: derivative strategies, funds that follow an index, equal-weighted funds, sector and thematic funds, single-country and emerging-market funds, and funds investing mostly outside large caps. They are applied every time holdings are read, so a manager that drifts out of its mandate drops out on its own and returns when it comes back – except one that has used derivatives:
 
 | Rule | Passes when | Why |
 |------|-------------|-----|
@@ -126,10 +126,11 @@ A profiled equity fund is one of the fund's managers (**active**) when it passes
 | Top country | ≤ 35% of an international fund, or of a global fund's international holdings | Single-country funds (Japan, India, China) – same reason. |
 | Emerging markets | ≤ 35% of an international fund, or of a global fund's international holdings | International managers are diversified, developed-market managers. |
 | Benchmark coverage | ≥ 70% of the fund's stock weight in large-cap companies of its own region ([§7](#7-large-cap-and-the-reference-benchmarks)) to enter; ≥ 65% to stay – a global fund in each region | Holdings outside large cap have no benchmark weight, so they would all count as overweights. |
+| Equal weighting | Not an equal-weighted fund: the fund says it weights its holdings equally (in its name or description) **and** its holdings are flat – its 90th-percentile position under **2×** its 10th-percentile one | An equal-weighted fund's weights come from its method, not the manager's view of each stock: its overweights would simply be its smallest companies. Both signals are needed – descriptions can be wrong, and many concentrated managers size their picks alike by choice. |
 | Holdings freshness | Latest holdings ≤ 14 days old | Ideas must be current. |
 | Duplicate | Only one row per fund | A fund moved to a new trust is briefly listed twice under one ticker; it must count once. |
 
-Anything unknown fails its rule; the sector, coverage and global stock-count rules are measured on the fund's holdings, so a new fund waits for its first holdings. A fund enters the coverage rule at 70% and stays while at 65%, so a manager near the line doesn't drop in and out. Funds are judged by what they hold, never by their name – except a fund named after an index, which follows it – and the levels are round numbers rather than ones fitted to the funds of the day. US managers supply the fund's US ideas, international managers its international ideas, and global managers both – each region's from its holdings in that region.
+Anything unknown fails its rule; the sector, coverage, global stock-count and equal-weighting rules are measured on the fund's holdings, so a new fund waits for its first holdings. A fund enters the coverage rule at 70% and stays while at 65%, so a manager near the line doesn't drop in and out. Funds are judged by what they hold, never by their name – except a fund named after an index, which follows it, and an equal-weighted fund, which says so and whose holdings show it – and the levels are round numbers rather than ones fitted to the funds of the day. US managers supply the fund's US ideas, international managers its international ideas, and global managers both – each region's from its holdings in that region.
 
 ## 5. Holdings
 
@@ -356,7 +357,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 - **Whole-company cap, not float-adjusted, for benchmark weights.** Managers size positions against a company's full size; a float-adjusted benchmark would make closely held companies look like overweights for every manager. A float-weighted version was tested and reverted. Float is used only as a minimum (10%) for large-cap membership.
 - **Market-relative large-cap lines** rather than fixed dollar thresholds, so "large cap" means the same thing in every market and every market environment.
 - **Consensus before single conviction.** A company's score adds up every manager that ranks it, each rank worth half the one above, so agreement across managers weighs as much as the strength of one manager's view, and marginal differences between neighbouring ranks matter less. Ranking by best rank alone (the earlier rule) let one manager's #1 outrank ten managers' #2 and turned small active-weight differences into portfolio changes.
-- **Managers selected by holdings behaviour.** Funds are kept or excluded by what they hold – derivatives, sector concentration against the benchmarks, country and emerging-market exposure, benchmark coverage – never by their name, except a fund named after an index (it follows that index), at round levels rather than levels fitted to the funds of the day.
+- **Managers selected by holdings behaviour.** Funds are kept or excluded by what they hold – derivatives, sector concentration against the benchmarks, country and emerging-market exposure, benchmark coverage – never by their name, except a fund named after an index (it follows that index) and an equal-weighted fund (it says so and its holdings show it), at round levels rather than levels fitted to the funds of the day.
 - **Every manager counts equally**, regardless of assets under management or holdings date – the method aggregates opinions, not money.
 - **Equal weight.** Each idea gets the same conviction in the fund, whatever the company's size; the fund carries no market-cap tilt.
 
@@ -407,6 +408,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Manager: sector concentration | No sector > 20 points above its highest benchmark weight |
 | International manager (global: its international holdings): top country / emerging markets | ≤ 35% / ≤ 35% |
 | Manager: benchmark coverage | ≥ 70% to enter / ≥ 65% to stay (global: in each region) |
+| Manager: equal weighting | Excluded when the fund says it weights equally and its 90th-percentile position is under 2× its 10th-percentile one |
 | Manager style (for US company style, step 2) | ≥ 60% of style-classified holdings |
 | Holdings: maximum age | 14 days |
 | Market cap: validation window | 21 days; excluded after 5 days without a good value |
