@@ -13,11 +13,13 @@ class FundAnalysis:
     One company in one of a fund's constituent ETFs, as the fund saw it on a recalculation
     date: the inputs and result of the active-weight calculation, whether or not the company
     became a best idea. ticker_id is the ticker the calculation used — the master when
-    share-class listings were consolidated (master_used).
+    share-class listings were consolidated (master_used). A Global ETF's companies are measured
+    and ranked in its parts (part: the company's region - best_ideas_generator.parts_of).
     """
     fund_id: int
     as_of_date: date
     provider_etf_id: int
+    part: str | None
     holding_date: date
     ticker_id: int
     benchmark_id: int | None
@@ -32,7 +34,7 @@ class FundAnalysis:
 
 
 _COLUMNS = (
-    'fund_id', 'as_of_date', 'provider_etf_id', 'holding_date', 'ticker_id', 'benchmark_id', 'benchmark_date',
+    'fund_id', 'as_of_date', 'provider_etf_id', 'part', 'holding_date', 'ticker_id', 'benchmark_id', 'benchmark_date',
     'market_cap', 'master_used', 'etf_weight', 'benchmark_weight', 'delta', 'ranking', 'note',
 )
 _INSERT_SQL = sql.SQL("INSERT INTO fund_analysis ({columns}) VALUES ({placeholders});").format(
@@ -60,7 +62,7 @@ def fetch_for_fund_date(fund_id: int, as_of_date: date) -> List[FundAnalysis]:
             with conn.cursor(row_factory=class_row(FundAnalysis)) as cur:
                 cur.execute(
                     f"SELECT {', '.join(_COLUMNS)} FROM fund_analysis WHERE fund_id = %s AND as_of_date = %s "
-                    "ORDER BY provider_etf_id, ranking NULLS LAST, delta DESC NULLS LAST;",
+                    "ORDER BY provider_etf_id, part NULLS FIRST, ranking NULLS LAST, delta DESC NULLS LAST;",
                     (fund_id, as_of_date),
                 )
                 return cur.fetchall()

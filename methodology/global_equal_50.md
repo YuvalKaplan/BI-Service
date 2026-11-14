@@ -30,11 +30,11 @@ Figures quoted "as of" a date illustrate the rules at that date; they are not pa
 
 An active manager's portfolio mixes two things: positions held because the manager has a view, and positions held to stay close to a benchmark, control risk or stay diversified. The positions the manager holds **well above their market weight** are the ones they are most willing to be wrong about – their highest-conviction calls, their *best ideas*. Academic work on mutual funds (Cohen, Polk and Silli, *Best Ideas*, updated 2021) found that managers' largest overweights outperformed, while the rest of the portfolio largely did not.
 
-The fund applies this across the population of US-listed, actively managed, diversified equity ETFs – those investing in US companies and those investing internationally:
+The fund applies this across the population of US-listed, actively managed, diversified equity ETFs – those investing in US companies, those investing internationally and those investing globally:
 
-1. identify every actively managed equity ETF with a broad, diversified US or international mandate;
+1. identify every actively managed equity ETF with a broad, diversified US, international or global mandate;
 2. read each one's holdings every week;
-3. for each, measure each holding's **active weight** – its weight in the ETF minus its weight in the relevant large-cap benchmark – and keep the top overweights as that manager's best ideas;
+3. for each, measure each holding's **active weight** – its weight in the ETF minus its weight in the relevant large-cap benchmark – and keep the top overweights as that manager's best ideas (a global manager's US and international holdings separately);
 4. combine the best ideas of all managers in each region into a consensus score – points for each manager's rank, summed – so the stocks that several managers rank highly come first;
 5. split the 50 holdings between the US and international, and the US holdings between growth and value, by their float-adjusted weight in the reference benchmarks (19 US growth, 14 US value and 17 international as of November 2026), hold each part's top large-cap companies at equal weight, and rebalance every two weeks with turnover controls.
 
@@ -46,7 +46,7 @@ Active ETFs are used rather than mutual funds because they publish their holding
 |---|---|
 | **Universe** | Large-cap companies worldwide |
 | **Regions** | By number of holdings: each region's float-adjusted weight in the reference benchmarks, recalculated quarterly – 65.0% US / 35.0% international as of November 2026, so 33 and 17 |
-| **Source of ideas** | US companies: qualifying actively managed US equity ETFs. International companies: qualifying actively managed international equity ETFs |
+| **Source of ideas** | US companies: qualifying actively managed US equity ETFs and the US holdings of global ones. International companies: qualifying actively managed international equity ETFs and the international holdings of global ones |
 | **Best ideas measured against** | US companies: the US Large Cap Value benchmark for value companies, the US Large Cap Growth benchmark for growth companies. International companies: the International Large Cap benchmark |
 | **Ideas used** | Each manager's ten best ideas, scored by rank and summed across managers |
 | **Style** | US holdings by number: each style's float-adjusted weight in the US value and growth benchmarks, recalculated quarterly – 57.5% growth / 42.5% value as of November 2026, so 19 and 14 of the 33. International holdings: no style split |
@@ -105,7 +105,7 @@ Each equity fund is profiled from its holdings against our company data and the 
 
 | Measure | How |
 |---------|-----|
-| **Region** | Share of the fund in US companies (by each company's region – [§6](#6-company-data-and-data-quality)). ≥ 80% US → a US fund; ≤ 20% → an international fund; in between, neither. |
+| **Region** | Share of the fund in US companies (by each company's region – [§6](#6-company-data-and-data-quality)). ≥ 80% US → a US fund; ≤ 20% → an international fund; in between, a global fund. |
 | **Size** | Each stock large above its market's 70% breakpoint, small below the 90% one, mid between (Morningstar's approach). The fund is *large* with ≥ 70% large stocks, *small* with ≥ 50% small, *mid* with ≥ 50% mid, *smid* with ≥ 70% mid + small, otherwise *all-cap*. |
 | **Stock count** | Lines matching a stock the total-market index funds hold. |
 | **Country concentration** | Our companies' country of domicile: the largest country. |
@@ -118,18 +118,18 @@ A profiled equity fund is one of the fund's managers (**active**) when it passes
 | Rule | Passes when | Why |
 |------|-------------|-----|
 | Index name | No index provider's brand (Dow Jones, S&P, MSCI, FTSE, Russell, STOXX, Nasdaq and the like) or the word "index" in the fund's name – the fund company's own name aside | A fund named after an index follows it, even when it reports to the SEC as actively managed: its overweights are the index's screen, not a manager's choices. |
-| Region | A US fund (≥ 80% US) or an international fund (≤ 20% US) | Each manager's overweights are measured against one market. |
+| Region | A US fund (≥ 80% US), an international fund (≤ 20% US) or a global fund (in between) | Each manager's overweights are measured against one market – a global fund's in two parts, its US companies and its international ones ([§9](#9-measuring-a-managers-best-ideas)). |
 | Size | Large or all-cap | Small- and mid-cap managers' overweights are measured against a different opportunity set. |
-| Number of stocks | 20 to 200 (US), 20 to 250 (international) | Fewer than 20 is a concentrated fund where every holding is an overweight; above the maximum the fund is close to an index and its tilts are small. International managers spread over more markets and names. |
+| Number of stocks | 20 to 200 (US), 20 to 250 (international); a global fund 20 to 200 US **and** 20 to 250 international companies | Fewer than 20 is a concentrated fund where every holding is an overweight; above the maximum the fund is close to an index and its tilts are small. International managers spread over more markets and names. A global fund's part of a few stocks would make nearly all of them best ideas, so a fund short in either region is excluded. |
 | Derivatives | The fund's holdings have **never** shown an option contract or an equity-linked note | Covered-call and option-income funds hold ordinary-looking stocks, but their weights follow the option book; once seen, the fund is excluded for good. |
 | Sector concentration | No sector more than **20 points** above its reference weight: the highest weight the sector has in the US large value, US large growth or international large-cap benchmark | A sector or thematic fund's overweights reflect its mandate, not stock selection; measuring each sector against the market lets a growth manager hold as much technology as the growth market does. |
-| Top country | ≤ 35% of an international fund | Single-country funds (Japan, India, China) – same reason. |
-| Emerging markets | ≤ 35% of an international fund | International managers are diversified, developed-market managers. |
-| Benchmark coverage | ≥ 70% of the fund's stock weight in large-cap companies of its own region ([§7](#7-large-cap-and-the-reference-benchmarks)) to enter; ≥ 65% to stay | Holdings outside large cap have no benchmark weight, so they would all count as overweights. |
+| Top country | ≤ 35% of an international fund, or of a global fund's international holdings | Single-country funds (Japan, India, China) – same reason. |
+| Emerging markets | ≤ 35% of an international fund, or of a global fund's international holdings | International managers are diversified, developed-market managers. |
+| Benchmark coverage | ≥ 70% of the fund's stock weight in large-cap companies of its own region ([§7](#7-large-cap-and-the-reference-benchmarks)) to enter; ≥ 65% to stay – a global fund in each region | Holdings outside large cap have no benchmark weight, so they would all count as overweights. |
 | Holdings freshness | Latest holdings ≤ 14 days old | Ideas must be current. |
 | Duplicate | Only one row per fund | A fund moved to a new trust is briefly listed twice under one ticker; it must count once. |
 
-Anything unknown fails its rule; the sector and coverage rules are measured on the fund's holdings, so a new fund waits for its first holdings. A fund enters the coverage rule at 70% and stays while at 65%, so a manager near the line doesn't drop in and out. Funds are judged by what they hold, never by their name – except a fund named after an index, which follows it – and the levels are round numbers rather than ones fitted to the funds of the day. US managers supply the fund's US ideas, international managers its international ideas.
+Anything unknown fails its rule; the sector, coverage and global stock-count rules are measured on the fund's holdings, so a new fund waits for its first holdings. A fund enters the coverage rule at 70% and stays while at 65%, so a manager near the line doesn't drop in and out. Funds are judged by what they hold, never by their name – except a fund named after an index, which follows it – and the levels are round numbers rather than ones fitted to the funds of the day. US managers supply the fund's US ideas, international managers its international ideas, and global managers both – each region's from its holdings in that region.
 
 ## 5. Holdings
 
@@ -249,11 +249,17 @@ All of a manager's active weights are then ranked together.
 
 **Selection.** Companies with a positive active weight are ranked from the largest overweight down. An active weight above **20%** is treated as abnormal (a data problem or an extreme concentrated bet) and dropped. A company from **the other region** – a US manager's holding in TSMC or Shell, an international manager's holding in a US company – counts in the manager's total, but is never one of its best ideas: each part of the fund takes only its own region's companies from its own region's managers, so such an idea could never be bought and would only push a usable one out of the manager's list. The **top 10** per ETF are that manager's best ideas, with their rank (1 = the largest overweight).
 
+**Global managers: two parts.** A global fund is measured as two managers: its **US holdings** and its **international holdings**, each re-weighted to 100% of that part – the manager's weight in the company within the region – and measured exactly as a US or an international fund's holdings are, with its own top 10. For example, a global fund 60% in the US with 3% in Microsoft has 5% of its US holdings in it; 2% in Nestlé is 5% of its 40% international holdings. Its US list then competes in the fund's US parts and its international list in the international part. Measuring the whole fund against one combined world benchmark would skew its ideas three ways:
+
+- **Its region allocation would leak into every stock.** A global manager five points underweight the US would show every US holding a little less overweight and every international one a little more – a call on regions, not on stocks. Within each region the weight is the manager's own, so only its stock selection is measured.
+- **The style benchmarks would favour international companies.** US companies are measured against their own style's benchmark, where a large company weighs 1.75× (growth) to 2.3× (value) its weight in the whole US market; international companies against the whole international market. Ranked together, the US holdings would show smaller overweights and the international ones would crowd the top 10.
+- **Its ranks would not compare with the regional managers'.** One top 10 across both regions spreads a global manager's ideas over the two regions at lower ranks (2, 5, 9 rather than 1, 2, 3), so its ideas would earn fewer points than a regional manager's. With a list per region, it scores in each region like a manager of that region.
+
 **Companies below the large-cap line.** Such a company has no benchmark weight, so its whole ETF weight is active weight. The fund applies the large-cap test itself ([§10](#10-building-the-portfolio)), so these never enter as new buys.
 
 ## 10. Building the portfolio
 
-The fund is built as three parts – **US growth, US value and international holdings** – the US parts from US managers, the international part from international managers.
+The fund is built as three parts – **US growth, US value and international holdings** – the US parts from US managers and global managers' US lists, the international part from international managers and global managers' international lists.
 
 ### The US / international split
 
@@ -287,7 +293,7 @@ The international holdings are not split by style ([§8](#8-value--growth-style-
 
 For each part:
 
-1. **Collect** the best ideas of that region's active ETFs from the last two weeks (the rebalancing period): US companies from US managers, international companies from international managers.
+1. **Collect** the best ideas of that region's active ETFs from the last two weeks (the rebalancing period): US companies from US managers and global managers' US lists, international companies from international managers and global managers' international lists. A global manager counts once in each region.
 2. **Filter**: only companies that are large cap on the rebalancing date – their whole market cap at or above their region's breakpoint, with at least 10% float ([§7](#7-large-cap-and-the-reference-benchmarks)).
 3. **Score each company across managers.** Each of the region's managers gives a company points for its rank on that manager's best-ideas list – all ten ranks count – and the points are summed into the company's **consensus score**:
 
@@ -332,7 +338,7 @@ Every buy and sell is recorded with its reason, score, best rank, number of mana
 
 ## 12. Audit trail
 
-Every rebalance stores its full calculation: for every ETF the fund could draw on, every company held, its market cap, ETF weight, benchmark weight (and which benchmark it came from, on which date), active weight, rank, and why it did or didn't become a best idea (selected; the other region; not overweight; above the 20% limit; beyond the top 10; no validated market cap; quarantined). This is recomputed independently and cross-checked against the stored best ideas.
+Every rebalance stores its full calculation: for every ETF the fund could draw on, every company held, its market cap, ETF weight, benchmark weight (and which benchmark it came from, on which date), active weight, rank (a global ETF's within its US or international part), and why it did or didn't become a best idea (selected; the other region; not overweight; above the 20% limit; beyond the top 10; no validated market cap; quarantined). This is recomputed independently and cross-checked against the stored best ideas.
 
 For any rebalancing date, a **methodology export** produces a set of spreadsheets tracing the fund from the ground up: each ETF's holdings and active weights, the benchmarks, the combined best ideas, and the fund's holdings, buys and sells.
 
@@ -346,6 +352,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 - **International companies against the whole international large-cap market**, for want of a reliable international style classification – so the international holdings have no style split either.
 - **The style split on the same benchmarks as the ideas.** US companies are measured against their own style's benchmark and compete for their own style's positions, sized by that benchmark's share of the US market. The fund's growth / value balance follows the market rather than whichever style the managers happen to favour in a given week: the managers decide which companies, the market decides how many of each style.
 - **Each region from its own managers.** US ideas come from US managers and international ideas from international managers, each measured against its own market, so the two parts of the fund don't compete on incomparable active weights.
+- **Global managers as two regional managers.** A global fund's US and international holdings are each measured as a fund of that region, at the manager's weights within the region, so its region allocation doesn't move its stock ideas and its lists compare with the regional managers'. Each part must hold the 20 stocks a regional fund needs.
 - **Whole-company cap, not float-adjusted, for benchmark weights.** Managers size positions against a company's full size; a float-adjusted benchmark would make closely held companies look like overweights for every manager. A float-weighted version was tested and reverted. Float is used only as a minimum (10%) for large-cap membership.
 - **Market-relative large-cap lines** rather than fixed dollar thresholds, so "large cap" means the same thing in every market and every market environment.
 - **Consensus before single conviction.** A company's score adds up every manager that ranks it, each rank worth half the one above, so agreement across managers weighs as much as the strength of one manager's view, and marginal differences between neighbouring ranks matter less. Ranking by best rank alone (the earlier rule) let one manager's #1 outrank ten managers' #2 and turned small active-weight differences into portfolio changes.
@@ -359,6 +366,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 - **Holdings lag.** Although active ETFs publish daily, the data vendor refreshes most funds weekly; ideas are typically several days old, and up to two weeks, when used.
 - **New funds join late.** A fund appears on the active list only after its trust's first N-CEN filing after launch (up to a year), and the list is refreshed monthly.
 - **Active ETFs only.** Mutual funds and separately managed accounts, which hold most active assets, are not covered; the manager population is younger and skewed toward sponsors that have launched ETFs, and international managers are fewer than US ones.
+- **One firm, several managers.** Funds from the same firm – a global, a US and an international fund drawing on one research team – each count as a manager, so a firm with several qualifying funds has several voices.
 - **Vendor data.** Holdings, prices, share counts and style factors come from one vendor (FMP); the validation in [§6](#6-company-data-and-data-quality) catches known failure modes but cannot rule out every error. Lines that cannot be identified (a small share of weight, mostly emerging-market names) take no part.
 - **Style is a single label.** Each US company is wholly value or wholly growth; companies near the boundary can change side when the index providers reconstitute, which changes the benchmark they are measured against and the part of the fund they compete for.
 - **No risk model.** Equal weighting is a rule, not an optimisation; no sector or country limits, currency hedging, risk model, transaction costs or liquidity constraints are applied.
@@ -376,7 +384,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 | **Company market cap** | The whole company's equity value, all share classes, in USD. |
 | **Float factor** | The investable share of a company's equity, from the index funds' holdings or free float. |
 | **Market split** | The fund's division of its holdings between the US and international, and of the US holdings between growth and value, by the reference benchmarks' float-adjusted values, recalculated quarterly. |
-| **Part** | US growth, US value or international: a share of the fund's holdings, filled from its own ordered list of ideas. |
+| **Part** | US growth, US value or international: a share of the fund's holdings, filled from its own ordered list of ideas. A global manager's US and international holdings are also measured as two parts, one per region. |
 | **Primary listing** | The listing that represents a company: its home-market ordinary shares. |
 | **Rank** | A company's position in a manager's best-ideas list (1 = largest overweight). |
 | **Region** | US or international: the index providers' country assignment, else the head-office country, else the country of incorporation, else the listing exchange. |
@@ -390,15 +398,15 @@ A **simulation** replays the same rules week by week over the holdings collected
 |-----------|-------|
 | Active ETF: SEC list window | Last filing within 15 months |
 | Equity fund: minimum stock share | 75% |
-| Manager: region | ≥ 80% US (US) / ≤ 20% US (international) |
+| Manager: region | ≥ 80% US (US) / ≤ 20% US (international) / in between (global, measured per region) |
 | Company region: held by both index markets | One market's float-adjusted holding ≥ 2× the other's decides |
 | Manager: index name | No index provider's brand or "index" in the fund's name (the fund company's name aside) |
 | Manager: size | Large or all-cap |
-| Manager: number of stocks | 20–200 (US) / 20–250 (international) |
+| Manager: number of stocks | 20–200 (US) / 20–250 (international); global: both, per region |
 | Manager: derivatives | Excluded for good once holdings show an option or an equity-linked note |
 | Manager: sector concentration | No sector > 20 points above its highest benchmark weight |
-| International manager: top country / emerging markets | ≤ 35% / ≤ 35% |
-| Manager: benchmark coverage | ≥ 70% to enter / ≥ 65% to stay |
+| International manager (global: its international holdings): top country / emerging markets | ≤ 35% / ≤ 35% |
+| Manager: benchmark coverage | ≥ 70% to enter / ≥ 65% to stay (global: in each region) |
 | Manager style (for US company style, step 2) | ≥ 60% of style-classified holdings |
 | Holdings: maximum age | 14 days |
 | Market cap: validation window | 21 days; excluded after 5 days without a good value |

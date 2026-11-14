@@ -254,7 +254,8 @@ def _eligibility_masks(
     # country_type is a region ('US' | 'International') or 'all'. A company's region is its
     # primary listing's (ticker.region, see modules/ticker/company.py): US-listed
     # foreign-domiciled companies (Eaton, Medtronic) are US; ADRs of companies with a home-market
-    # listing (TSM, ASML) are International — the same rule the benchmarks use.
+    # listing (TSM, ASML) are International — the same rule the benchmarks use. etf_region is the
+    # region the idea was measured in: the ETF's, or a Global ETF part's (best_idea.fetch_all_as_df).
     if country_type == 'all':
         masks['region'] = all_true
     else:
@@ -500,11 +501,19 @@ def strategy_country_types(strategy: Strategy) -> list[str]:
     return ['all']
 
 
+def accepts_region(strategy: Strategy, etf_region: str | None) -> bool:
+    """Whether the fund's country buckets take best ideas measured in this region (an ETF's, or a
+    Global ETF part's) - the ETF-level condition of _eligibility_masks."""
+    country_types = strategy_country_types(strategy)
+    return 'all' in country_types or etf_region in country_types
+
+
 def etfs_used(strategy: Strategy, all_best_ideas_df: pd.DataFrame) -> dict[int, date]:
     """
     {provider_etf_id: value_date} of the ETFs whose best ideas this fund's selection can draw
     on: the strategy's ETF list (all ETFs when empty), limited to the ETF regions its country
-    buckets accept (same ETF-level conditions as _eligibility_masks).
+    buckets accept (same ETF-level conditions as _eligibility_masks; etf_region is a Global ETF
+    part's, so a Global ETF is used when one of its parts is - accepts_region).
     """
     df = all_best_ideas_df
     if strategy.provider_etfs:

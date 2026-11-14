@@ -15,11 +15,14 @@ the current SEC list, its profile still finds it an equity fund, and:
      coupon). Covered-call and other option-income funds hold the stocks of an ordinary fund, but
      their weights follow the option book. Once seen (provider_etf.contracts_found - in a holdings
      download or a profile's holdings) the fund is out for good;
-  2. its region is US or International (config.EtfSelection.REGIONS) - a Global fund has no benchmark and no fund
-     region to feed;
+  2. its region is US, International or Global (config.EtfSelection.REGIONS). A Global fund (neither
+     mostly US nor mostly International - etf_profile) is measured as two parts, its US companies
+     and its International ones, each like an ETF of that region (best_ideas_generator.parts_of):
+     its region bet, and the US benchmarks' style split, would skew one ranking of both;
   3. its cap size is large or all (config.EtfSelection.CAP_TYPES);
   4. it holds config.EtfSelection.MIN_STOCK_HOLDINGS to config.EtfSelection.MAX_STOCK_HOLDINGS[region] stocks (lines matched to the index
-     funds' stocks) - international managers spread over more names;
+     funds' stocks) - international managers spread over more names; a Global fund its two parts'
+     limits together (holdings_range);
   5. no sector is more than config.EtfSelection.MAX_SECTOR_EXCESS above its reference weight: the highest weight that
      sector has in our most specific benchmarks - each region's blend, or its value and growth
      benchmarks where it's split (sector_reference). A growth fund may hold as much technology
@@ -28,16 +31,18 @@ the current SEC list, its profile still finds it an equity fund, and:
      sectors;
   6. its top country is at most config.EtfSelection.MAX_TOP_COUNTRY_WEIGHT of the fund - a single-country fund - unless
      it's a US fund whose top country is the US (our companies' domicile, a US-region company
-     counting as US);
+     counting as US); a Global fund's top country outside the US at most that share of its
+     International part (international_top_country);
   7. an International fund has at most config.EtfSelection.MAX_EMERGING_WEIGHT in emerging markets (stocks the
      emerging index fund holds - config.IndexFunds.EMERGING_FUNDS): the funds are developed
-     international;
+     international; a Global fund's International part likewise (international_emerging);
   8. at least config.EtfSelection.MIN_COVERAGE_ENTRY of its stock weight is in companies of its region's blend
      benchmark (coverage) - a fund mostly in mid and small caps, or outside the benchmarks' universe,
      has best ideas the benchmark can't measure. An active fund stays while at config.EtfSelection.MIN_COVERAGE_STAY,
      so it doesn't drop in and out around one level; a fund not yet active, or never measured
      while active, needs the entry level. Measured on the fund's latest stored holdings, every
-     company through its current master;
+     company through its current master; a Global fund each part against its region's blend, the
+     lower of the two stored;
   9. its latest stored holdings (provider_etf_holding) are at most config.EtfSelection.MAX_HOLDINGS_AGE_DAYS old. FMP
      refreshes most funds' holdings weekly (dated Sunday), some on other weekdays; two weeks
      covers the longest fund look-back (recalc_frequency_days, at most 14), so every active ETF
@@ -48,21 +53,25 @@ the current SEC list, its profile still finds it an equity fund, and:
      still fail). A fund named after an index tracks it, even when its N-CEN doesn't call it an
      index fund: UMMA, "Wahed Dow Jones Islamic World", mirrors the Dow Jones Islamic Market
      International Titans 100 - its overweights are the index's screen, not a manager's picks. Not
-     the FMP description: it paraphrases ("does not endeavor to mirror ... any index" matched).
+     the FMP description: it paraphrases ("does not endeavor to mirror ... any index" matched);
+ 11. a Global fund's parts each hold as many companies as an ETF of their region must (parts -
+     rule 4's limits, counted on the latest stored holdings by company region): a part of a few
+     stocks would make nearly all of them best ideas. A fund short in either region is out.
 A fund that moved to another trust is on the list twice under one ticker until its old series
 drops off (BRIF, TGLR): only the one with the latest filing can be active - the other fails
 'duplicate' (they'd download the same holdings and count twice in the funds).
 Otherwise it's inactive - except a fund that passes everything but has no holdings stored yet,
-which stays pending until its first download (the holdings rules - sector, coverage - wait for
-it). The holdings download (modules/cron/etf_downloader.py) fetches the active and pending funds,
+which stays pending until its first download (the holdings rules - sector, coverage, parts - wait
+for it). The holdings download (modules/cron/etf_downloader.py) fetches the active and pending funds,
 and those failing only the rules its holdings decide (HOLDINGS_RULES: freshness, sector,
-coverage - download_targets), so a fund comes back as soon as FMP refreshes it or its holdings
-change.
+coverage, parts - download_targets), so a fund comes back as soon as FMP refreshes it or its
+holdings change.
 
 run() follows every profile run (the monthly SEC list update, by hand) and holdings download (the
 daily run days). It also sets each ETF's benchmark_id - its region's enabled large-cap blend /
-core benchmark, which the market best ideas compare it with (with its value / growth split, if any) - and stores the measures
-behind rules 5 and 8 (sector_excess, excess_sector, benchmark_coverage).
+core benchmark, which the market best ideas compare it with (with its value / growth split, if
+any); none for a Global fund, whose parts each take their region's (benchmark_ids) - and stores
+the measures behind rules 5 and 8 (sector_excess, excess_sector, benchmark_coverage).
 """
 import log
 import re
@@ -73,13 +82,13 @@ from modules import config
 from modules.object import benchmark, provider, provider_etf, provider_etf_holding, sec_active_etf
 from modules.object.provider_etf import ProviderEtf, ACTIVE, INACTIVE, PENDING
 from modules.sec import ncen
-from modules.ticker import index_funds
+from modules.ticker import company, index_funds
 
 
 EQUITY = 'equity'   # the profile's strategy for an actively managed equity fund (etf_profile.classify)
-RULES = ('sec', 'duplicate', 'equity', 'index', 'contracts', 'region', 'cap', 'holdings', 'sector', 'country',
-         'emerging', 'coverage', 'fresh')
-HOLDINGS_RULES = {'fresh', 'sector', 'coverage'}    # decided by the stored holdings: checked again on each download
+RULES = ('sec', 'duplicate', 'equity', 'index', 'contracts', 'region', 'cap', 'holdings', 'parts', 'sector',
+         'country', 'emerging', 'coverage', 'fresh')
+HOLDINGS_RULES = {'fresh', 'sector', 'coverage', 'parts'}    # decided by the stored holdings: checked again on each download
 
 _MONTH = r'(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)'
 _DATE = r'(?:\b\d{1,2}/\d{1,2}/\d{2,4}\b|\b' + _MONTH + r'\d{2}\b)'
@@ -122,10 +131,12 @@ def has_contract_lines(lines: list[dict]) -> bool:
 
 @dataclass
 class HoldingsMeasures:
-    """Rules 5 and 8 on an ETF's latest stored holdings."""
+    """Rules 5, 8 and 11 on an ETF's latest stored holdings."""
     sector_excess: float | None = None        # its sector's weight most above that sector's reference weight
     excess_sector: str | None = None
-    benchmark_coverage: float | None = None   # stock weight in its region's blend benchmark companies
+    benchmark_coverage: float | None = None   # stock weight in its region's blend benchmark companies (a
+                                              # Global ETF: the lower of its two parts')
+    part_holdings: dict[str, int] = field(default_factory=dict)   # a Global ETF's companies per part
 
 
 @dataclass
@@ -175,21 +186,64 @@ def failed_rules(etf: ProviderEtf, current_series: set[str], latest: date | None
         failed.append('region')
     if etf.cap_type not in config.EtfSelection.CAP_TYPES:
         failed.append('cap')
-    max_holdings = config.EtfSelection.MAX_STOCK_HOLDINGS.get(etf.region or '')
-    if etf.stock_holdings is None or max_holdings is None or not config.EtfSelection.MIN_STOCK_HOLDINGS <= etf.stock_holdings <= max_holdings:
+    limits = holdings_range(etf.region)
+    if etf.stock_holdings is None or limits is None or not limits[0] <= etf.stock_holdings <= limits[1]:
         failed.append('holdings')
+    if etf.region == company.GLOBAL and latest is not None and not parts_pass(m.part_holdings):
+        failed.append('parts')
     if latest is not None and (m.sector_excess is None or m.sector_excess > config.EtfSelection.MAX_SECTOR_EXCESS):
         failed.append('sector')
-    single_country = etf.top_country_weight is None or etf.top_country_weight > config.EtfSelection.MAX_TOP_COUNTRY_WEIGHT
-    if single_country and not (etf.region == 'US' and etf.top_country == 'US'):
-        failed.append('country')
-    if etf.region == 'International' and (etf.emerging_weight is None or etf.emerging_weight > config.EtfSelection.MAX_EMERGING_WEIGHT):
-        failed.append('emerging')
+    if etf.region == company.GLOBAL:
+        top = international_top_country(etf)
+        if top is None or top > config.EtfSelection.MAX_TOP_COUNTRY_WEIGHT:
+            failed.append('country')
+    else:
+        single_country = etf.top_country_weight is None or etf.top_country_weight > config.EtfSelection.MAX_TOP_COUNTRY_WEIGHT
+        if single_country and not (etf.region == company.US and etf.top_country == company.US):
+            failed.append('country')
+    if etf.region in (company.INTERNATIONAL, company.GLOBAL):
+        emerging = international_emerging(etf)
+        if emerging is None or emerging > config.EtfSelection.MAX_EMERGING_WEIGHT:
+            failed.append('emerging')
     if latest is not None and (m.benchmark_coverage is None or m.benchmark_coverage < coverage_level(etf)):
         failed.append('coverage')
     if latest is None or latest < as_of - timedelta(days=config.EtfSelection.MAX_HOLDINGS_AGE_DAYS):
         failed.append('fresh')
     return failed
+
+
+def holdings_range(region: str | None) -> tuple[int, int] | None:
+    """(fewest, most) stocks an ETF of the region may hold (rule 4): a Global ETF's are its two
+    parts' (rule 11) together. None for an unknown region."""
+    if region == company.GLOBAL:
+        return (len(company.REGIONS) * config.EtfSelection.MIN_STOCK_HOLDINGS,
+                sum(config.EtfSelection.MAX_STOCK_HOLDINGS[r] for r in company.REGIONS))
+    most = config.EtfSelection.MAX_STOCK_HOLDINGS.get(region or '')
+    return None if most is None else (config.EtfSelection.MIN_STOCK_HOLDINGS, most)
+
+
+def parts_pass(part_holdings: dict[str, int]) -> bool:
+    """Whether each part of a Global ETF holds as many companies as an ETF of its region must
+    (rule 11)."""
+    return all(holdings_range(r)[0] <= part_holdings.get(r, 0) <= holdings_range(r)[1] for r in company.REGIONS)
+
+
+def international_top_country(etf: ProviderEtf) -> float | None:
+    """A Global ETF's top country's share of its International part (rule 6): of its country
+    weights, US (every US-region company) left out."""
+    weights = [v for k, v in (etf.country_weights or {}).items() if k != company.US and v and v > 0]
+    total = sum(weights)
+    return max(weights) / total if total > 0 else None
+
+
+def international_emerging(etf: ProviderEtf) -> float | None:
+    """The emerging share of an ETF's International stocks (rule 7): all of an International ETF's,
+    a Global ETF's International part."""
+    if etf.region != company.GLOBAL:
+        return etf.emerging_weight
+    if etf.emerging_weight is None or etf.us_weight is None or etf.us_weight >= 1:
+        return None
+    return etf.emerging_weight / (1 - etf.us_weight)
 
 
 def status_for(failed: list[str], latest: date | None) -> str:
@@ -200,8 +254,9 @@ def status_for(failed: list[str], latest: date | None) -> str:
     return INACTIVE
 
 
-def _benchmark_ids() -> dict[str, int]:
-    """{region: id} of each region's enabled large-cap blend / core benchmark."""
+def benchmark_ids() -> dict[str, int]:
+    """{region: id} of each region's enabled large-cap blend / core benchmark (an ETF's benchmark_id;
+    a Global ETF's parts take their region's - best_ideas_generator.parts_of)."""
     out: dict[str, int] = {}
     for b in benchmark.fetch_all():
         if b.cap_type == 'large' and b.style_type in index_funds.FULL_UNIVERSE_STYLES:
@@ -233,33 +288,44 @@ def holdings_measures(as_of: date) -> dict[int, HoldingsMeasures]:
     """{provider_etf_id: rules 5 and 8 on its latest stored holdings}: its resolved stock lines
     (positive weight) by company (current master) and sector (ours), against the benchmarks'
     latest snapshots on or before as_of."""
-    blend_ids = _benchmark_ids()
+    blend_ids = benchmark_ids()
     bench = benchmark.fetch_latest_company_weights(as_of)
     reference = sector_reference(bench, blend_ids)
     blend_companies = {region: set(bench.get(bid, {})) for region, bid in blend_ids.items()}
-    by_etf: dict[int, list[tuple[int, float, str | None]]] = defaultdict(list)
+    by_etf: dict[int, list[tuple[int, float, str | None, str | None]]] = defaultdict(list)
     regions: dict[int, str | None] = {}
-    for etf_id, region, company_id, weight, sector in provider_etf_holding.fetch_latest_company_weights():
-        by_etf[etf_id].append((company_id, weight, sector))
+    for etf_id, region, company_id, weight, sector, company_region in provider_etf_holding.fetch_latest_company_weights():
+        by_etf[etf_id].append((company_id, weight, sector, company_region))
         regions[etf_id] = region
     out: dict[int, HoldingsMeasures] = {}
     for etf_id, lines in by_etf.items():
-        total = sum(w for _, w, _ in lines)
+        total = sum(w for _, w, _, _ in lines)
         m = HoldingsMeasures()
         out[etf_id] = m
         if total <= 0:
             continue
         sectors: dict[str, float] = defaultdict(float)
-        for _, w, sector in lines:
+        for _, w, sector, _ in lines:
             if sector:
                 sectors[sector] += w / total
         if sectors:
             m.excess_sector = max(sectors, key=lambda s: sectors[s] - reference.get(s, 0.0))
             m.sector_excess = sectors[m.excess_sector] - reference.get(m.excess_sector, 0.0)
-        companies = blend_companies.get(regions[etf_id] or '')
-        if companies:
-            m.benchmark_coverage = sum(w for c, w, _ in lines if c in companies) / total
+        if regions[etf_id] == company.GLOBAL:
+            # Each part - the companies of one region - measured as an ETF of that region
+            parts = {r: [(c, w) for c, w, _, cr in lines if cr == r] for r in company.REGIONS}
+            m.part_holdings = {r: len({c for c, _ in part}) for r, part in parts.items()}
+            coverages = [_coverage(part, blend_companies.get(r)) for r, part in parts.items()]
+            m.benchmark_coverage = None if any(c is None for c in coverages) else min(c for c in coverages if c is not None)
+        else:
+            m.benchmark_coverage = _coverage([(c, w) for c, w, _, _ in lines], blend_companies.get(regions[etf_id] or ''))
     return out
+
+
+def _coverage(lines: list[tuple[int, float]], companies: set[int] | None) -> float | None:
+    """The share of the lines' weight in the benchmark's companies (rule 8); None without either."""
+    total = sum(w for _, w in lines)
+    return sum(w for c, w in lines if c in companies) / total if companies and total > 0 else None
 
 
 def _newest_by_ticker(etfs: list[ProviderEtf], filed: dict[str, date]) -> dict[str, int | None]:
@@ -273,7 +339,7 @@ def evaluate(as_of: date | None = None) -> list[Evaluated]:
     today = as_of or date.today()
     filed = {e.series_id: e.filing_date for e in sec_active_etf.fetch_current(ncen.filed_since(today))}
     latest_dates = provider_etf_holding.fetch_latest_dates()
-    benchmarks = _benchmark_ids()
+    benchmarks = benchmark_ids()
     measures = holdings_measures(today)
     etfs = provider_etf.fetch_all()
     providers = {p.id: p.name for p in provider.fetch_by_ids(sorted({e.provider_id for e in etfs if e.provider_id}))}

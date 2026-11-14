@@ -1,3 +1,4 @@
+import dataclasses
 import log
 import pandas as pd
 from collections import defaultdict
@@ -12,6 +13,7 @@ from modules.object.provider_etf_holding import ProviderEtfHolding, QuarantinedH
 from modules.object.ticker_value import fetch_latest_market_caps_within_window
 from modules.object import best_idea, benchmark
 from modules.object.fund_analysis import FundAnalysis
+from modules.sec import etf_selection
 from modules.ticker import company
 
 
@@ -27,10 +29,47 @@ class EtfInputs:
     unpriced_ticker_ids: list[int] = field(default_factory=list)
     quarantined: list[QuarantinedHolding] = field(default_factory=list)
     total_holdings: int = 0                        # after aggregation, excluding quarantined
+    part: str | None = None                        # a Global ETF's part (its companies of one region - parts_of)
 
     @property
     def coverage_ratio(self) -> float:
         return len(self.holdings) / self.total_holdings if self.total_holdings else 0.0
+
+    def company_region(self, ticker_id: int) -> str | None:
+        """The region of a held ticker's company (its master's)."""
+        return self.regions.get(self.master_info.get(ticker_id, (None, None))[0] or ticker_id)
+
+
+def parts_of(inputs: EtfInputs, benchmark_ids: dict[str, int]) -> list[EtfInputs]:
+    """
+    The inputs each set of the ETF's best ideas is measured on: a regional ETF's own; a Global
+    ETF's split into its parts, one per region (company.REGIONS) - its holdings of that region's
+    companies, as an ETF of that region (region and benchmark_id: benchmark_ids[region], its
+    region's blend) holding only them. compute_active_weights rescales a part's weights to 100%:
+    each company is measured against its own region's benchmark at the manager's weight within
+    that region, so how much the fund puts in each region (a region bet) doesn't move its stock
+    ideas, and each part ranks among its own region's companies like a regional ETF's (one ranking
+    of both would favour International companies: the US value / growth benchmarks weigh US
+    companies 1.75-2.33x their blend weight). A company of no known region is in neither part.
+    """
+    if inputs.etf.region != company.GLOBAL:
+        return [inputs]
+    return [_part(inputs, region, benchmark_ids.get(region)) for region in company.REGIONS]
+
+
+def _part(inputs: EtfInputs, region: str, benchmark_id: int | None) -> EtfInputs:
+    """A Global ETF's inputs restricted to its companies of the region (parts_of)."""
+    holdings = [h for h in inputs.holdings if h.ticker_id and inputs.company_region(h.ticker_id) == region]
+    unpriced = [t for t in inputs.unpriced_ticker_ids if inputs.company_region(t) == region]
+    return dataclasses.replace(
+        inputs,
+        etf=dataclasses.replace(inputs.etf, region=region, benchmark_id=benchmark_id),
+        holdings=holdings,
+        unpriced_ticker_ids=unpriced,
+        quarantined=[q for q in inputs.quarantined if inputs.company_region(q.ticker_id) == region],
+        total_holdings=len(holdings) + len(unpriced),
+        part=region,
+    )
 
 
 def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = None) -> EtfInputs | None:
@@ -77,7 +116,9 @@ def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = N
         master_info[mid] = (None, cap)
 
     priced_ids = {v.ticker_id for v in market_cap_values}
-    company_ids = {(master_info.get(t, (None, None))[0] or t) for t in ticker_ids}
+    # Every company's region (a quarantined ticker's own - region is set on every listing): a
+    # Global ETF's parts split on it (parts_of)
+    company_ids = {(master_info.get(t, (None, None))[0] or t) for t in ticker_ids} | {q.ticker_id for q in quarantined}
     return EtfInputs(
         etf=pe,
         holding_date=holding_date,
@@ -196,7 +237,8 @@ def compute_active_weights(inputs: EtfInputs, universe: UniverseWeights | None =
     # ideas: every regional fund requires the company's region to be the ETF's
     # (model_fund._eligibility_masks), so it could never be bought and would only push a usable
     # idea out of the ETF's top config.BestIdeas.MAX_BEST_IDEAS_PER_FUND. A fund with no region (none today)
-    # would lose these ideas. A Global ETF (no fund region) or a company with no region is kept.
+    # would lose these ideas. A company with no region is kept. A Global ETF comes here one part at
+    # a time (parts_of), as an ETF of the part's region holding only its companies.
     etf_region = inputs.etf.region
     grouped["region"] = grouped["ticker_id"].map(lambda t: inputs.regions.get(int(t)))
     if etf_region in (company.US, company.INTERNATIONAL):
@@ -306,7 +348,7 @@ def build_analysis_rows(
     else benchmark_id.
     """
     rank_by_ticker = {int(t): rank for rank, t in enumerate(selected["ticker_id"], start=1)}
-    make_row = partial(FundAnalysis, fund_id=fund_id, as_of_date=as_of_date, provider_etf_id=inputs.etf.id,
+    make_row = partial(FundAnalysis, fund_id=fund_id, as_of_date=as_of_date, provider_etf_id=inputs.etf.id, part=inputs.part,
                        holding_date=inputs.holding_date, benchmark_id=benchmark_id, benchmark_date=benchmark_date)
 
     rows: list[FundAnalysis] = []
@@ -415,6 +457,8 @@ def run(as_of_date: date | None = None) -> RunStats:
 
         # Benchmark snapshots and market weights, fetched once per benchmark (get_market_weights).
         _bm_cache: dict = {}
+        blend_ids = etf_selection.benchmark_ids()      # each region's blend: a Global ETF's parts'
+
 
         for p in providers:
             pe_list = etfs_by_provider[p.id]
@@ -448,29 +492,37 @@ def run(as_of_date: date | None = None) -> RunStats:
                     if inputs.unpriced_ticker_ids:
                         etf_stats.notes.append(f"{len(inputs.unpriced_ticker_ids)} stale")
 
-                    # 4. Coverage check
-                    if inputs.coverage_ratio < config.BestIdeas.MIN_HOLDINGS_WITH_PRICES_PCT:
-                        missing_count = inputs.total_holdings - len(inputs.holdings)
-                        msg = f"Coverage {inputs.coverage_ratio:.1%}. Missing {missing_count} market caps for holding date {inputs.holding_date.strftime('%Y-%m-%d')}"
-                        record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Insufficient market cap coverage", message=msg)
-                        etf_stats.notes.append(f"coverage {inputs.coverage_ratio:.0%}, skipped")
-                        continue
+                    # 4. Coverage check, then 5. the best ideas - a Global ETF's per part (parts_of),
+                    #    each its own top config.BestIdeas.MAX_BEST_IDEAS_PER_FUND, stored together
+                    rows: dict[str, list[tuple]] = defaultdict(list)
+                    for part in parts_of(inputs, blend_ids):
+                        label = f"{part.part} part: " if part.part else ""
+                        if part.coverage_ratio < config.BestIdeas.MIN_HOLDINGS_WITH_PRICES_PCT:
+                            missing_count = part.total_holdings - len(part.holdings)
+                            msg = f"{label}Coverage {part.coverage_ratio:.1%}. Missing {missing_count} market caps for holding date {part.holding_date.strftime('%Y-%m-%d')}"
+                            record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error="Insufficient market cap coverage", message=msg)
+                            etf_stats.notes.append(f"{label}coverage {part.coverage_ratio:.0%}, skipped")
+                            continue
 
-                    # 5a. Always generate self-benchmark best ideas
-                    self_df = _find_best_ideas(inputs, config.BestIdeas.MAX_BEST_IDEAS_PER_FUND)
-                    best_idea.insert_bulk(pe.id, inputs.holding_date, best_idea.MODE_SELF, best_idea.df_to_rows(self_df, provider_etf_id=pe.id, value_date=inputs.holding_date, benchmark_mode=best_idea.MODE_SELF))
-                    etf_stats.self_ideas = len(self_df)
+                        # 5a. Always generate self-benchmark best ideas
+                        self_df = _find_best_ideas(part, config.BestIdeas.MAX_BEST_IDEAS_PER_FUND)
+                        rows[best_idea.MODE_SELF] += best_idea.df_to_rows(self_df, provider_etf_id=pe.id, value_date=part.holding_date, benchmark_mode=best_idea.MODE_SELF, part=part.part)
 
-                    # 5b. If this ETF has a benchmark configured, also generate the market best ideas:
-                    #     each company against its own style's benchmark where the region is split
-                    #     (US), its region's blend elsewhere (International)
-                    if pe.benchmark_id:
-                        universe = get_market_weights(pe.benchmark_id, as_of_date, _bm_cache)
-                        if universe.weights:
-                            mode = best_idea.MODE_MARKET
-                            universe_df = _find_best_ideas(inputs, config.BestIdeas.MAX_BEST_IDEAS_PER_FUND, universe=universe)
-                            best_idea.insert_bulk(pe.id, inputs.holding_date, mode, best_idea.df_to_rows(universe_df, provider_etf_id=pe.id, value_date=inputs.holding_date, benchmark_mode=mode))
-                            etf_stats.market_ideas = len(universe_df)
+                        # 5b. If it has a benchmark, also the market best ideas: each company against its
+                        #     own style's benchmark where the region is split (US), its region's blend
+                        #     elsewhere (International)
+                        if part.etf.benchmark_id:
+                            universe = get_market_weights(part.etf.benchmark_id, as_of_date, _bm_cache)
+                            if universe.weights:
+                                universe_df = _find_best_ideas(part, config.BestIdeas.MAX_BEST_IDEAS_PER_FUND, universe=universe)
+                                rows[best_idea.MODE_MARKET] += best_idea.df_to_rows(universe_df, provider_etf_id=pe.id, value_date=part.holding_date, benchmark_mode=best_idea.MODE_MARKET, part=part.part)
+
+                    for mode, mode_rows in rows.items():
+                        best_idea.insert_bulk(pe.id, inputs.holding_date, mode, mode_rows)
+                    if best_idea.MODE_SELF in rows:
+                        etf_stats.self_ideas = len(rows[best_idea.MODE_SELF])
+                    if best_idea.MODE_MARKET in rows:
+                        etf_stats.market_ideas = len(rows[best_idea.MODE_MARKET])
 
                 except Exception as e:
                     record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"{e}", message=None)

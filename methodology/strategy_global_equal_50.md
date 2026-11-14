@@ -24,7 +24,7 @@ The configuration of a strategy-specific methodology document. Claude generates 
 | Rank points | 512, 256, 128, 64, 32, 16, 8, 4, 2, 1 for ranks 1–10 (the default) – every manager's ten best ideas count, each rank half the one above |
 | Rebalancing | Every two weeks |
 | ESG | Not applied |
-| ETF restrictions | None – all active US and International ETFs |
+| ETF restrictions | None – all active US, International and Global ETFs (a Global ETF's US part feeds the US holdings, its International part the International holdings) |
 | Exchange restrictions | None |
 
 ## Leave out
@@ -42,6 +42,7 @@ Anything this strategy doesn't use, so the reader isn't left wondering which opt
 
 - Present the two references as the fund's design: US companies against their style peers, International companies against the whole international large-cap market (no reliable international style classification) – not as options among several. The benchmark a company is measured against follows the company's own style; the style split decides how many US positions each style gets. Explain both and how they fit: the ideas and the allocation rest on the same value / growth benchmarks.
 - Foreign companies held by a region's managers (a US manager's TSMC) still count in the manager's total but are never ideas for that manager: say so.
+- Global managers (between 20% and 80% US) are measured as two managers, one per region: explain the parts (re-weighted within the region, measured like a fund of that region, own top 10, scored in that region's list), the three skews one combined measure would bring (region allocation leaking into stock ideas, the style benchmarks favouring International companies, ranks not comparing), and the selection rules applied per part (20 stocks in each region, country / emerging / coverage on the International part or each part).
 - Explain the market split: measured on the same benchmarks the ideas are measured against (consistency), float-adjusted (why: whole caps would count International's state / family / cross holdings in full – 58% vs 65% US in November 2026), recalculated quarterly, each rebalancing using the latest; the US share of the 50 holdings rounded half up. Quote November 2026 as the illustration (65.0% / 35.0% → 33 / 17), not as a fixed parameter. Don't mention MSCI ACWI.
 - Explain the style split the same way: within the US, growth / value by the float-adjusted totals of the US growth and value benchmarks (the same benchmarks the US ideas are measured against), recalculated quarterly with the region split; the growth share of the 33 US holdings rounded half up, value taking the rest (November 2026: 57.5% / 42.5% → 19 / 14). International holdings have no style split (no international style benchmark). A US company of neither style (rare) can't be held.
 - Explain that each part – US growth, US value, International – is scored, ordered and kept on its own (keep buffer: top 24 US growth / 18 US value / 22 International at 19 / 14 / 17, moving with the targets), and free positions are filled part by part (a sold US value holding is replaced by a US value idea), so the fund stays at its targets; a part short of eligible ideas is not made up from another.

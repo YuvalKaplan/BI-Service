@@ -335,7 +335,8 @@ CREATE TABLE public.best_idea (
     benchmark_weight double precision,
     delta double precision,
     ranking integer,
-    benchmark_mode text DEFAULT 'self'::text NOT NULL
+    benchmark_mode text DEFAULT 'self'::text NOT NULL,
+    part text
 );
 
 
@@ -511,6 +512,7 @@ CREATE TABLE public.fund_analysis (
     fund_id integer NOT NULL,
     as_of_date date NOT NULL,
     provider_etf_id integer NOT NULL,
+    part text,
     holding_date date NOT NULL,
     ticker_id integer NOT NULL,
     benchmark_id integer,

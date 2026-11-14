@@ -97,10 +97,10 @@ class EtfProfile:
 
 class EtfSelection:
     """The selection rules: which provider ETFs are active (modules/sec/etf_selection.py)."""
-    REGIONS = ('US', 'International')
+    REGIONS = ('US', 'International', 'Global')
     CAP_TYPES = ('large', 'all')
-    MIN_STOCK_HOLDINGS = 20
-    MAX_STOCK_HOLDINGS = {'US': 200, 'International': 250}
+    MIN_STOCK_HOLDINGS = 20         # a regional ETF's stocks - and each regional part's of a Global ETF
+    MAX_STOCK_HOLDINGS = {'US': 200, 'International': 250}   # per region (a Global ETF: per part, the sum in all)
     MAX_SECTOR_EXCESS = 0.20        # a sector's weight over its highest weight in our benchmarks (sector_reference)
     MAX_TOP_COUNTRY_WEIGHT = 0.35
     MAX_EMERGING_WEIGHT = 0.35
