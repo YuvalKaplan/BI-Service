@@ -3,8 +3,8 @@ Which provider ETFs feed best ideas: the selection rules, applied to every provi
 (the SEC active ETF list's actively managed equity funds, modules/sec/etf_profile.py).
 
 The rules keep out the funds whose holdings wouldn't express a manager's stock picks within a
-broad large-cap market: derivative strategies, single-country and emerging-market funds, sector
-themes and funds mostly outside the large-cap universe our benchmarks measure. Each is a test
+broad large-cap market: derivative strategies, funds named after an index, single-country and
+emerging-market funds, sector themes and funds mostly outside the large-cap universe our benchmarks measure. Each is a test
 with a round level, not one fitted to the pool of the day. An ETF is active when it is still on
 the current SEC list, its profile still finds it an equity fund, and:
   1. its holdings have never shown a derivative contract (contracts): an option - FMP lists
@@ -41,7 +41,14 @@ the current SEC list, its profile still finds it an equity fund, and:
   9. its latest stored holdings (provider_etf_holding) are at most config.EtfSelection.MAX_HOLDINGS_AGE_DAYS old. FMP
      refreshes most funds' holdings weekly (dated Sunday), some on other weekdays; two weeks
      covers the longest fund look-back (recalc_frequency_days, at most 14), so every active ETF
-     can feed every fund. Best ideas and the valuation pass look back as far.
+     can feed every fund. Best ideas and the valuation pass look back as far;
+ 10. its name carries no index provider's brand (index - names_index: Dow Jones, S&P, MSCI, FTSE,
+     Russell, STOXX, Nasdaq, ... or the word "index"), the provider's own name left out first
+     ("Russell Investments" is a manager, its "Russell Investments Russell 1000 Index ETF" would
+     still fail). A fund named after an index tracks it, even when its N-CEN doesn't call it an
+     index fund: UMMA, "Wahed Dow Jones Islamic World", mirrors the Dow Jones Islamic Market
+     International Titans 100 - its overweights are the index's screen, not a manager's picks. Not
+     the FMP description: it paraphrases ("does not endeavor to mirror ... any index" matched).
 A fund that moved to another trust is on the list twice under one ticker until its old series
 drops off (BRIF, TGLR): only the one with the latest filing can be active - the other fails
 'duplicate' (they'd download the same holdings and count twice in the funds).
@@ -63,15 +70,15 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from modules import config
-from modules.object import benchmark, provider_etf, provider_etf_holding, sec_active_etf
+from modules.object import benchmark, provider, provider_etf, provider_etf_holding, sec_active_etf
 from modules.object.provider_etf import ProviderEtf, ACTIVE, INACTIVE, PENDING
 from modules.sec import ncen
 from modules.ticker import index_funds
 
 
 EQUITY = 'equity'   # the profile's strategy for an actively managed equity fund (etf_profile.classify)
-RULES = ('sec', 'duplicate', 'equity', 'contracts', 'region', 'cap', 'holdings', 'sector', 'country', 'emerging',
-         'coverage', 'fresh')
+RULES = ('sec', 'duplicate', 'equity', 'index', 'contracts', 'region', 'cap', 'holdings', 'sector', 'country',
+         'emerging', 'coverage', 'fresh')
 HOLDINGS_RULES = {'fresh', 'sector', 'coverage'}    # decided by the stored holdings: checked again on each download
 
 _MONTH = r'(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)'
@@ -82,6 +89,19 @@ _OPTION_NAME = re.compile(
     r'|\b(?:CALL|PUT)S?\b.*' + _DATE + r'|\s[CP] @ \d', re.IGNORECASE)
 _ELN_NAME = re.compile(r'\beln\b', re.IGNORECASE)
 _ELN_LEVEL = re.compile(r'(\d+(?:\.\d+)?)%\s+\d{1,2}/\d{1,2}/\d{2,4}\b')
+# An index provider's brand (or "index") in a fund's name (rule 10). "SP Funds" isn't S&P.
+_INDEX_BRAND = re.compile(
+    r'\bdow jones\b|\bs\s?&\s?p\b|\bstandard (?:&|and) poor|\bmsci\b|\bftse\b|\brussell\b|\bstoxx\b|\bnasdaq\b'
+    r'|\bnyse\b|\bsolactive\b|\bcrsp\b|\bmorningstar\b|\bbloomberg\b|\bindxx\b|\bindex\b', re.IGNORECASE)
+
+
+def names_index(name: str | None, provider_name: str | None = None) -> bool:
+    """Whether a fund's name carries an index provider's brand once its provider's own name is
+    taken out (rule 10)."""
+    rest = name or ''
+    if provider_name and provider_name.strip():
+        rest = re.sub(re.escape(provider_name.strip()), ' ', rest, flags=re.IGNORECASE)
+    return bool(_INDEX_BRAND.search(rest))
 
 
 def is_contract_line(symbol: str | None, name: str | None) -> bool:
@@ -134,10 +154,11 @@ def coverage_level(etf: ProviderEtf) -> float:
 
 
 def failed_rules(etf: ProviderEtf, current_series: set[str], latest: date | None, as_of: date,
-                 superseded: bool = False, measures: HoldingsMeasures | None = None) -> list[str]:
+                 superseded: bool = False, measures: HoldingsMeasures | None = None,
+                 provider_name: str | None = None) -> list[str]:
     """The rules the ETF fails (RULES order); an unknown value fails, except that the holdings
     measures wait for the first holdings download. superseded: another ETF with its ticker has a
-    later filing."""
+    later filing. provider_name: its provider's, left out of the index-name test."""
     m = measures or HoldingsMeasures()
     failed = []
     if not etf.sec_series_id or etf.sec_series_id not in current_series:
@@ -146,6 +167,8 @@ def failed_rules(etf: ProviderEtf, current_series: set[str], latest: date | None
         failed.append('duplicate')
     if etf.strategy != EQUITY:
         failed.append('equity')
+    if names_index(etf.name, provider_name):
+        failed.append('index')
     if etf.contracts_found is not None:
         failed.append('contracts')
     if etf.region not in config.EtfSelection.REGIONS:
@@ -253,13 +276,14 @@ def evaluate(as_of: date | None = None) -> list[Evaluated]:
     benchmarks = _benchmark_ids()
     measures = holdings_measures(today)
     etfs = provider_etf.fetch_all()
+    providers = {p.id: p.name for p in provider.fetch_by_ids(sorted({e.provider_id for e in etfs if e.provider_id}))}
     newest = _newest_by_ticker(etfs, filed)
     out = []
     for etf in etfs:
         latest = latest_dates.get(etf.id) if etf.id is not None else None
         m = measures.get(etf.id, HoldingsMeasures()) if etf.id is not None else HoldingsMeasures()
         superseded = bool(etf.ticker) and newest.get((etf.ticker or '').upper()) != etf.id
-        failed = failed_rules(etf, set(filed), latest, today, superseded, m)
+        failed = failed_rules(etf, set(filed), latest, today, superseded, m, providers.get(etf.provider_id))
         out.append(Evaluated(etf=etf, failed=failed, latest=latest, status=status_for(failed, latest),
                              benchmark_id=benchmarks.get(etf.region or ''), measures=m))
     return out

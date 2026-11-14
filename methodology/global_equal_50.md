@@ -113,10 +113,11 @@ Each equity fund is profiled from its holdings against our company data and the 
 
 ### Selection rules
 
-A profiled equity fund is one of the fund's managers (**active**) when it passes every rule. The rules keep out funds whose overweights would reflect a mandate rather than stock selection within a broad large-cap market: derivative strategies, sector and thematic funds, single-country and emerging-market funds, and funds investing mostly outside large caps. They are applied every time holdings are read, so a manager that drifts out of its mandate drops out on its own and returns when it comes back – except one that has used derivatives:
+A profiled equity fund is one of the fund's managers (**active**) when it passes every rule. The rules keep out funds whose overweights would reflect a mandate rather than stock selection within a broad large-cap market: derivative strategies, funds that follow an index, sector and thematic funds, single-country and emerging-market funds, and funds investing mostly outside large caps. They are applied every time holdings are read, so a manager that drifts out of its mandate drops out on its own and returns when it comes back – except one that has used derivatives:
 
 | Rule | Passes when | Why |
 |------|-------------|-----|
+| Index name | No index provider's brand (Dow Jones, S&P, MSCI, FTSE, Russell, STOXX, Nasdaq and the like) or the word "index" in the fund's name – the fund company's own name aside | A fund named after an index follows it, even when it reports to the SEC as actively managed: its overweights are the index's screen, not a manager's choices. |
 | Region | A US fund (≥ 80% US) or an international fund (≤ 20% US) | Each manager's overweights are measured against one market. |
 | Size | Large or all-cap | Small- and mid-cap managers' overweights are measured against a different opportunity set. |
 | Number of stocks | 20 to 200 (US), 20 to 250 (international) | Fewer than 20 is a concentrated fund where every holding is an overweight; above the maximum the fund is close to an index and its tilts are small. International managers spread over more markets and names. |
@@ -128,7 +129,7 @@ A profiled equity fund is one of the fund's managers (**active**) when it passes
 | Holdings freshness | Latest holdings ≤ 14 days old | Ideas must be current. |
 | Duplicate | Only one row per fund | A fund moved to a new trust is briefly listed twice under one ticker; it must count once. |
 
-Anything unknown fails its rule; the sector and coverage rules are measured on the fund's holdings, so a new fund waits for its first holdings. A fund enters the coverage rule at 70% and stays while at 65%, so a manager near the line doesn't drop in and out. Funds are judged by what they hold, never by their name, and the levels are round numbers rather than ones fitted to the funds of the day. US managers supply the fund's US ideas, international managers its international ideas.
+Anything unknown fails its rule; the sector and coverage rules are measured on the fund's holdings, so a new fund waits for its first holdings. A fund enters the coverage rule at 70% and stays while at 65%, so a manager near the line doesn't drop in and out. Funds are judged by what they hold, never by their name – except a fund named after an index, which follows it – and the levels are round numbers rather than ones fitted to the funds of the day. US managers supply the fund's US ideas, international managers its international ideas.
 
 ## 5. Holdings
 
@@ -348,7 +349,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 - **Whole-company cap, not float-adjusted, for benchmark weights.** Managers size positions against a company's full size; a float-adjusted benchmark would make closely held companies look like overweights for every manager. A float-weighted version was tested and reverted. Float is used only as a minimum (10%) for large-cap membership.
 - **Market-relative large-cap lines** rather than fixed dollar thresholds, so "large cap" means the same thing in every market and every market environment.
 - **Consensus before single conviction.** A company's score adds up every manager that ranks it, each rank worth half the one above, so agreement across managers weighs as much as the strength of one manager's view, and marginal differences between neighbouring ranks matter less. Ranking by best rank alone (the earlier rule) let one manager's #1 outrank ten managers' #2 and turned small active-weight differences into portfolio changes.
-- **Managers selected by holdings behaviour.** Funds are kept or excluded by what they hold – derivatives, sector concentration against the benchmarks, country and emerging-market exposure, benchmark coverage – never by their name, at round levels rather than levels fitted to the funds of the day.
+- **Managers selected by holdings behaviour.** Funds are kept or excluded by what they hold – derivatives, sector concentration against the benchmarks, country and emerging-market exposure, benchmark coverage – never by their name, except a fund named after an index (it follows that index), at round levels rather than levels fitted to the funds of the day.
 - **Every manager counts equally**, regardless of assets under management or holdings date – the method aggregates opinions, not money.
 - **Equal weight.** Each idea gets the same conviction in the fund, whatever the company's size; the fund carries no market-cap tilt.
 
@@ -391,6 +392,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Equity fund: minimum stock share | 75% |
 | Manager: region | ≥ 80% US (US) / ≤ 20% US (international) |
 | Company region: held by both index markets | One market's float-adjusted holding ≥ 2× the other's decides |
+| Manager: index name | No index provider's brand or "index" in the fund's name (the fund company's name aside) |
 | Manager: size | Large or all-cap |
 | Manager: number of stocks | 20–200 (US) / 20–250 (international) |
 | Manager: derivatives | Excluded for good once holdings show an option or an equity-linked note |
