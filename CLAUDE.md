@@ -27,7 +27,7 @@ pip freeze > requirements.txt
 
 No automated test suite exists. Validation is done by running the cron or BT pipelines directly.
 
-All script/pipeline output (reports, sim results, methodology exports, BT CSVs) goes under `.output/` (git-ignored); downloaded files kept for debugging go under `.output/downloads/` (today only the N-CEN filings that failed to parse, `.output/downloads/ncen/`). New scripts should follow the same convention.
+All script/pipeline output (reports, sim results, methodology exports, BT CSVs) goes under `.output/` (git-ignored); downloaded files kept for debugging go under `.output/downloads/` (today only the N-CEN filings that failed to parse, `.output/downloads/ncen/`). New scripts should follow the same convention. In a worktree session, run scripts with the main checkout's `.venv` (`.env` is found by `load_dotenv` walking up to the main checkout) and `PYTHONPATH` set to the worktree; the worktree's `.output/` is copied into the main checkout's `.output/` after every turn by a Stop / SessionEnd hook (`tools/claude_sync_output.ps1`) — never make `.output` a junction to the main one: `git worktree remove` deletes through it.
 
 All external data comes from APIs (FMP, EDGAR) — nothing is scraped any more, and nothing needs a browser.
 

@@ -602,7 +602,7 @@ All scripts are run from the project root with the virtual environment active. C
 
 - **`--dev` / `--prod`** – which database the script uses. Default is development (or whatever `ENV_TYPE` says). The resolved environment is printed at startup.
 - Several scripts have their parameters (`fund_id`, dates…) as variables at the top of the file, marked `# <-- edit before each run`.
-- All script output goes to `.output/` (git-ignored): reports and simulation results at the top level or in their own subfolder (`methodology/`), and downloaded files kept for debugging in `.output/downloads/`.
+- All script output goes to `.output/` (git-ignored): reports and simulation results at the top level or in their own subfolder (`methodology/`), and downloaded files kept for debugging in `.output/downloads/`. A Claude Code session working in its own git worktree writes to that worktree's `.output/`; a hook (`.claude/settings.json`, Stop and SessionEnd) runs `tools/claude_sync_output.ps1`, which copies it into the main checkout's `.output/` after every turn, so the files outlive the worktree (one shared folder: the same path is overwritten, nothing is deleted). A link to the main `.output/` isn't used: `git worktree remove` deletes through it.
 
 ### Live pipeline stages (run one stage by hand)
 
