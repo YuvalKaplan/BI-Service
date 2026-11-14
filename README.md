@@ -106,11 +106,12 @@ The ETFs come from the [SEC active ETF list](#sec-active-etf-list), not from con
 
 **`fund`** is a model fund we build, with its `strategy` stored as JSON (step 8).
 
-**Selection rules** (`modules/sec/etf_selection.py`). Which ETFs feed best ideas is decided by rules, not by hand – they keep out derivative strategies, sector / thematic, single-country and emerging-market funds and funds mostly outside the benchmarks' large caps, by what the funds hold, never by name ([methodology](methodology/detailed.md#selection-rules) for the reasoning). An ETF is **active** when it's still on the SEC list, its profile still finds it an equity fund, and:
+**Selection rules** (`modules/sec/etf_selection.py`). Which ETFs feed best ideas is decided by rules, not by hand – they keep out derivative strategies, sector / thematic, single-country and emerging-market funds and funds mostly outside the benchmarks' large caps, by what the funds hold – the one name rule keeps out funds named after an index ([methodology](methodology/detailed.md#selection-rules) for the reasoning). An ETF is **active** when it's still on the SEC list, its profile still finds it an equity fund, and:
 
 | Rule | Passes when |
 |------|-------------|
 | Contracts | its holdings have never shown an option or an equity-linked note (`provider_etf.contracts_found` is empty) – covered-call and option-income funds, out for good once seen. A line is one by `etf_selection.is_contract_line`: an option's date with a strike and call / put marker in FMP's formats ("AAPL US 10/16/26 C340", "SPY 11/17/2026 762.29 C", "SPY CALL USD 12/04/2026", "… NOV26 355 CALL", "NOV26 AVGO C @ 390", OCC codes "USAR  261016C00020000"), "ELN", or a level of 20% or more before a date ("Wells Fargo & Co 147.40% 12/15/2026") – T-bills, sweeps, FX forwards and rights don't match. Marked by the holdings download and by the monthly profile (its FMP holdings) |
+| Index name | its name carries no index provider's brand – Dow Jones, S&P, MSCI, FTSE, Russell, STOXX, Nasdaq, NYSE, Solactive, CRSP, Morningstar, Bloomberg, Indxx – nor the word "index" (`etf_selection.names_index`), once its provider's own name is taken out ("Russell Investments" is a manager). A fund named after an index tracks it even when its N-CEN doesn't say index fund: UMMA, "Wahed Dow Jones Islamic World", mirrors the Dow Jones Islamic Market International Titans 100 (out from November 2026). FMP's descriptions are paraphrases and aren't used ("does not endeavor to mirror … any index" would match) |
 | Region | US or International (a Global fund has no benchmark and no fund to feed) |
 | Cap size | `large` or `all` |
 | Stock holdings | 20 to 200 for a US fund, 20 to 250 for an International one (lines matching an index fund's stock) |
