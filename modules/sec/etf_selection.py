@@ -3,8 +3,9 @@ Which provider ETFs feed best ideas: the selection rules, applied to every provi
 (the SEC active ETF list's actively managed equity funds, modules/sec/etf_profile.py).
 
 The rules keep out the funds whose holdings wouldn't express a manager's stock picks within a
-broad large-cap market: derivative strategies, funds named after an index, single-country and
-emerging-market funds, sector themes and funds mostly outside the large-cap universe our benchmarks measure. Each is a test
+broad large-cap market: derivative strategies, funds named after an index, equal-weighted funds,
+single-country and emerging-market funds, sector themes and funds mostly outside the large-cap
+universe our benchmarks measure. Each is a test
 with a round level, not one fitted to the pool of the day. An ETF is active when it is still on
 the current SEC list, its profile still finds it an equity fund, and:
   1. its holdings have never shown a derivative contract (contracts): an option - FMP lists
@@ -56,25 +57,37 @@ the current SEC list, its profile still finds it an equity fund, and:
      the FMP description: it paraphrases ("does not endeavor to mirror ... any index" matched);
  11. a Global fund's parts each hold as many companies as an ETF of their region must (parts -
      rule 4's limits, counted on the latest stored holdings by company region): a part of a few
-     stocks would make nearly all of them best ideas. A fund short in either region is out.
+     stocks would make nearly all of them best ideas. A fund short in either region is out;
+ 12. it isn't an equal-weighted fund (equal_weight): its name or FMP description says it weights
+     its holdings equally (says_equal_weight - "Equal Weight", "equally weighted", "equal
+     weighting") and its latest stored holdings are flat - the 90th percentile company weight under
+     config.EtfSelection.MIN_WEIGHT_SPREAD times the 10th (weight_spread). Its weights are the method's,
+     not the manager's: every overweight is the same size less the company's benchmark weight, so
+     its best ideas are its smallest companies, ranked by price drift since the last rebalance
+     (ROE). The text alone isn't enough - FMP paraphrases (CBSE "mirrors" an equal-weight world
+     index it can't, with 38 US stocks), and some funds equal-weight only part of the book (ROPE)
+     or drift far from it (GPT) - and flat holdings alone aren't either: many concentrated managers
+     size their 20-40 picks about the same, by choice (Parnassus, Touchstone, Segall Bryant).
 A fund that moved to another trust is on the list twice under one ticker until its old series
 drops off (BRIF, TGLR): only the one with the latest filing can be active - the other fails
 'duplicate' (they'd download the same holdings and count twice in the funds).
 Otherwise it's inactive - except a fund that passes everything but has no holdings stored yet,
-which stays pending until its first download (the holdings rules - sector, coverage, parts - wait
-for it). The holdings download (modules/cron/etf_downloader.py) fetches the active and pending funds,
-and those failing only the rules its holdings decide (HOLDINGS_RULES: freshness, sector,
-coverage, parts - download_targets), so a fund comes back as soon as FMP refreshes it or its
-holdings change.
+which stays pending until its first download (the holdings rules - sector, coverage, parts,
+equal weight - wait for it). The holdings download (modules/cron/etf_downloader.py) fetches the
+active and pending funds, and those failing only the rules its holdings decide (HOLDINGS_RULES:
+freshness, sector, coverage, parts, equal weight - download_targets), so a fund comes back as soon
+as FMP refreshes it or its holdings change.
 
 run() follows every profile run (the monthly SEC list update, by hand) and holdings download (the
 daily run days). It also sets each ETF's benchmark_id - its region's enabled large-cap blend /
 core benchmark, which the market best ideas compare it with (with its value / growth split, if
 any); none for a Global fund, whose parts each take their region's (benchmark_ids) - and stores
-the measures behind rules 5 and 8 (sector_excess, excess_sector, benchmark_coverage).
+the measures behind rules 5, 8 and 12 (sector_excess, excess_sector, benchmark_coverage,
+weight_spread).
 """
 import log
 import re
+import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -87,8 +100,8 @@ from modules.ticker import company, index_funds
 
 EQUITY = 'equity'   # the profile's strategy for an actively managed equity fund (etf_profile.classify)
 RULES = ('sec', 'duplicate', 'equity', 'index', 'contracts', 'region', 'cap', 'holdings', 'parts', 'sector',
-         'country', 'emerging', 'coverage', 'fresh')
-HOLDINGS_RULES = {'fresh', 'sector', 'coverage', 'parts'}    # decided by the stored holdings: checked again on each download
+         'country', 'emerging', 'coverage', 'equal_weight', 'fresh')
+HOLDINGS_RULES = {'fresh', 'sector', 'coverage', 'parts', 'equal_weight'}    # decided by the stored holdings: checked again on each download
 
 _MONTH = r'(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)'
 _DATE = r'(?:\b\d{1,2}/\d{1,2}/\d{2,4}\b|\b' + _MONTH + r'\d{2}\b)'
@@ -102,6 +115,9 @@ _ELN_LEVEL = re.compile(r'(\d+(?:\.\d+)?)%\s+\d{1,2}/\d{1,2}/\d{2,4}\b')
 _INDEX_BRAND = re.compile(
     r'\bdow jones\b|\bs\s?&\s?p\b|\bstandard (?:&|and) poor|\bmsci\b|\bftse\b|\brussell\b|\bstoxx\b|\bnasdaq\b'
     r'|\bnyse\b|\bsolactive\b|\bcrsp\b|\bmorningstar\b|\bbloomberg\b|\bindxx\b|\bindex\b', re.IGNORECASE)
+# Equal weighting in a fund's name or description (rule 12): "Equal Weight", "equal-weighted",
+# "equally weighted", "equal weighting", "equal weights its holdings".
+_EQUAL_WEIGHT = re.compile(r'\bequal(?:ly)?[- ]weight(?:s|ed|ing)?\b', re.IGNORECASE)
 
 
 def names_index(name: str | None, provider_name: str | None = None) -> bool:
@@ -111,6 +127,20 @@ def names_index(name: str | None, provider_name: str | None = None) -> bool:
     if provider_name and provider_name.strip():
         rest = re.sub(re.escape(provider_name.strip()), ' ', rest, flags=re.IGNORECASE)
     return bool(_INDEX_BRAND.search(rest))
+
+
+def says_equal_weight(name: str | None, description: str | None) -> bool:
+    """Whether a fund's name or FMP description says it weights its holdings equally (rule 12)."""
+    return bool(_EQUAL_WEIGHT.search(name or '') or _EQUAL_WEIGHT.search(description or ''))
+
+
+def weight_spread(weights: list[float]) -> float | None:
+    """The 90th percentile weight over the 10th (interpolated, as SQL's percentile_cont): 1.0 for
+    equal weights (rule 12). None for fewer than two weights."""
+    if len(weights) < 2:
+        return None
+    deciles = statistics.quantiles(weights, n=10, method='inclusive')
+    return deciles[8] / deciles[0] if deciles[0] > 0 else None
 
 
 def is_contract_line(symbol: str | None, name: str | None) -> bool:
@@ -131,12 +161,13 @@ def has_contract_lines(lines: list[dict]) -> bool:
 
 @dataclass
 class HoldingsMeasures:
-    """Rules 5, 8 and 11 on an ETF's latest stored holdings."""
+    """Rules 5, 8, 11 and 12 on an ETF's latest stored holdings."""
     sector_excess: float | None = None        # its sector's weight most above that sector's reference weight
     excess_sector: str | None = None
     benchmark_coverage: float | None = None   # stock weight in its region's blend benchmark companies (a
                                               # Global ETF: the lower of its two parts')
     part_holdings: dict[str, int] = field(default_factory=dict)   # a Global ETF's companies per part
+    weight_spread: float | None = None        # its 90th percentile company weight over its 10th (1 = equal)
 
 
 @dataclass
@@ -207,6 +238,9 @@ def failed_rules(etf: ProviderEtf, current_series: set[str], latest: date | None
             failed.append('emerging')
     if latest is not None and (m.benchmark_coverage is None or m.benchmark_coverage < coverage_level(etf)):
         failed.append('coverage')
+    if latest is not None and says_equal_weight(etf.name, etf.description) and (
+            m.weight_spread is None or m.weight_spread < config.EtfSelection.MIN_WEIGHT_SPREAD):
+        failed.append('equal_weight')
     if latest is None or latest < as_of - timedelta(days=config.EtfSelection.MAX_HOLDINGS_AGE_DAYS):
         failed.append('fresh')
     return failed
@@ -285,8 +319,8 @@ def sector_reference(weights: dict[int, dict[int, tuple[float, str | None]]], bl
 
 
 def holdings_measures(as_of: date) -> dict[int, HoldingsMeasures]:
-    """{provider_etf_id: rules 5 and 8 on its latest stored holdings}: its resolved stock lines
-    (positive weight) by company (current master) and sector (ours), against the benchmarks'
+    """{provider_etf_id: rules 5, 8, 11 and 12 on its latest stored holdings}: its resolved stock
+    lines (positive weight) by company (current master) and sector (ours), against the benchmarks'
     latest snapshots on or before as_of."""
     blend_ids = benchmark_ids()
     bench = benchmark.fetch_latest_company_weights(as_of)
@@ -304,6 +338,10 @@ def holdings_measures(as_of: date) -> dict[int, HoldingsMeasures]:
         out[etf_id] = m
         if total <= 0:
             continue
+        by_company: dict[int, float] = defaultdict(float)     # a company's share classes together
+        for c, w, _, _ in lines:
+            by_company[c] += w
+        m.weight_spread = weight_spread(list(by_company.values()))
         sectors: dict[str, float] = defaultdict(float)
         for _, w, sector, _ in lines:
             if sector:
@@ -367,7 +405,8 @@ def _same(a: float | None, b: float | None) -> bool:
 def _changed(e: Evaluated) -> bool:
     etf, m = e.etf, e.measures
     return (e.status != etf.status or e.benchmark_id != etf.benchmark_id or m.excess_sector != etf.excess_sector
-            or not _same(m.sector_excess, etf.sector_excess) or not _same(m.benchmark_coverage, etf.benchmark_coverage))
+            or not _same(m.sector_excess, etf.sector_excess) or not _same(m.benchmark_coverage, etf.benchmark_coverage)
+            or not _same(m.weight_spread, etf.weight_spread))
 
 
 def run(as_of: date | None = None) -> SelectionStats:
@@ -383,7 +422,8 @@ def run(as_of: date | None = None) -> SelectionStats:
         m = e.measures
         changes.append(provider_etf.SelectionUpdate(
             id=e.etf.id, status=e.status, benchmark_id=e.benchmark_id, sector_excess=m.sector_excess,
-            excess_sector=m.excess_sector, benchmark_coverage=m.benchmark_coverage))
+            excess_sector=m.excess_sector, benchmark_coverage=m.benchmark_coverage,
+            weight_spread=m.weight_spread))
         if e.status == e.etf.status:
             continue
         stats.changed += 1

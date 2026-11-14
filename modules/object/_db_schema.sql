@@ -854,6 +854,7 @@ CREATE TABLE public.provider_etf (
     sector_excess double precision,
     excess_sector text,
     benchmark_coverage double precision,
+    weight_spread double precision,
     CONSTRAINT provider_etf_pkey PRIMARY KEY (id),
     CONSTRAINT provider_etf_sec_series_id_key UNIQUE (sec_series_id),
     CONSTRAINT provider_etf_status_check CHECK (status IN ('pending', 'active', 'inactive')),

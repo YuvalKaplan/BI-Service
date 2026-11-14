@@ -108,6 +108,7 @@ class EtfSelection:
     MIN_COVERAGE_STAY = 0.65        # ... and to stay active
     MAX_HOLDINGS_AGE_DAYS = 14      # an active ETF's latest holdings are at most this old
     ELN_MIN_LEVEL = 20.0            # a percentage before a date at or above this is an equity-linked note's level, not a coupon
+    MIN_WEIGHT_SPREAD = 2.0         # a fund saying it equal-weights fails under this 90th / 10th percentile company weight
 
 
 # ── Holdings download ────────────────────────────────────────────────────────
