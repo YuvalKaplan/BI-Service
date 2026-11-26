@@ -278,11 +278,13 @@ Each fund is defined by a JSON **strategy**, for example:
   "provider_etfs": [12, 15, 87],
   "esg_only": false,
   "rank_points": [512, 256, 128, 64, 32, 16, 8, 4, 2, 1],
-  "recalc_frequency_days": 7
+  "recalc_frequency_days": 14,
+  "keep_buffer": 1.0,
+  "staggered": true
 }
 ```
 
-A setting left out of a fund's strategy takes its default from `config.FundStrategy` in `modules/config.py` (`allocation_rebalance`, `esg_only`, `rank_points`, `benchmark`, `recalc_frequency_days`).
+A setting left out of a fund's strategy takes its default from `config.FundStrategy` in `modules/config.py` (`allocation_rebalance`, `esg_only`, `rank_points`, `benchmark`, `recalc_frequency_days`, `keep_buffer`; `staggered` defaults to off).
 
 | Field | Meaning |
 |-------|---------|
@@ -296,7 +298,9 @@ A setting left out of a fund's strategy takes its default from `config.FundStrat
 | `exchanges` | limit to stocks on these exchanges |
 | `esg_only` | only ESG-qualified companies |
 | `rank_points` | the points a company earns from each ETF for its rank there (rank 1 first; ranks beyond the list earn none), positive and non-increasing; default `[512, 256, 128, 64, 32, 16, 8, 4, 2, 1]` – each rank half the one above, over all ten best ideas |
-| `recalc_frequency_days` | the fund is skipped until this many days have passed since its last recalculation, counted from week to week (Monday to Monday – a generation moved around a holiday mustn't make a weekly fund skip the next week: Thursday to the next Wednesday is 6 days); also its look-back: each ETF's latest best ideas within that many days, every ETF counting equally |
+| `keep_buffer` | how far below its bucket's cutoff a holding may fall before it is sold: kept while within the top `ceil(N × keep_buffer)` of its bucket; at least 1.0 (exactly the top list), default 1.25 (below) |
+| `staggered` | staggered rebalancing (below): the holdings are split into two halves reviewed on alternate runs; the fund runs every `recalc_frequency_days / 2` and each holding is reviewed every `recalc_frequency_days`, which must be a multiple of 14 |
+| `recalc_frequency_days` | the fund is skipped until this many days (half of it when `staggered`) have passed since its last recalculation, counted from week to week (Monday to Monday – a generation moved around a holiday mustn't make a weekly fund skip the next week: Thursday to the next Wednesday is 6 days); also its look-back: each ETF's latest best ideas within that many days, every ETF counting equally |
 
 **Building the candidate list.** Each ETF's latest best ideas within the fund's look-back (`recalc_frequency_days`) are filtered by the strategy. Every ETF counts equally whatever the date of its holdings file – a newer file doesn't override another ETF's view of a company:
 
@@ -306,12 +310,14 @@ A setting left out of a fund's strategy takes its default from `config.FundStrat
 
 The candidates are then combined per company into a **score** (`model_fund._filter_and_aggregate`): each ETF gives it the `rank_points` of its rank there (each ETF once, at its best rank), summed across the ETFs – rank 1 with one manager (512) equals rank 2 with two (2 × 256) or rank 4 with eight, so breadth of agreement counts as much as the strength of one manager's view, and marginal delta differences between ranks matter less. Alongside: its best rank, the number of ETFs scoring it (**appearances**), its highest delta and the ETF with it (the **source ETF**). Companies scoring 0 are left out. They're ordered by score, then appearances, then delta. Each **bucket** – a region of a split, a market of International with `international`, and a style of a `blend` with percentages – is ordered on its own, and its **ideal** holdings are its top N, N being its share of the holdings (33 / 17 for a 50-holding Global fund on the market split of Nov 2026: 65.0% of 50 = 32.5, rounded half up).
 
-**Changes to the previous holdings** (per bucket, `config.FundStrategy.KEEP_BUFFER` = 1.25):
+**Changes to the previous holdings** (per bucket, the fund's `strategy.keep_buffer`, default `config.FundStrategy.KEEP_BUFFER` = 1.25; fund 11 sets 1.0):
 
-- A current holding is **kept** while it's within the top `ceil(N × 1.25)` of its bucket by score (top 63 of a single 50-holding bucket; 42 US / 22 International at 33 / 17) – a company drifting between 45th and 60th stays held.
+- A current holding is **kept** while it's within the top `ceil(N × keep_buffer)` of its bucket by score. At 1.25: top 63 of a single 50-holding bucket (42 US / 22 International at 33 / 17), so a company drifting between 45th and 60th stays held. At 1.0 (fund 11): exactly the bucket's top N, so a holding below the cutoff is sold at the next rebalance – chosen from the Nov 2026 rebalancing study (`.output/rebalancing_study/`: a US replay of March–October 2026, where 1.0 beat 1.25 and 1.5 against the S&P 500 Equal Weight at every interval).
 - A current holding no longer scored at all is **sold** ("No longer a best idea"); one scored but below that line is **sold** ("Below the score buffer").
-- Free places are filled from the bucket's ideal list in score order (**buys**), each bucket's from its own list (`model_fund._select_region_buckets`): its target less the holdings it kept, so a sold International holding is replaced by an International idea and the split stays exact. A kept holding is never sold to make room for a higher score: a newcomer scoring inside the top N waits until a place frees up (the price of the lower turnover). A bucket short of ideas isn't made up from another. When a new quarterly [market split](#the-market-split) moves the targets, nothing is sold to rebalance: the bucket above its new target buys nothing until its own sells bring it down, and freed places go to the one below – the keep buffer moves with the targets.
+- Free places are filled from the bucket's ideal list in score order (**buys**), each bucket's from its own list (`model_fund._select_region_buckets`): its target less the holdings it kept, so a sold International holding is replaced by an International idea and the split stays exact. With a buffer above 1.0 a kept holding is never sold to make room for a higher score: a newcomer scoring inside the top N waits until a place frees up (the price of the lower turnover); at 1.0 the keep line is the cutoff, so a newcomer rising into the top N pushes the bucket's lowest holding out at that rebalance. A bucket short of ideas isn't made up from another. When a new quarterly [market split](#the-market-split) moves the targets, the keep line moves with them: above 1.0 nothing is sold to rebalance (the bucket above its new target buys nothing until its own sells bring it down, and freed places go to the one below); at 1.0 the bucket above its new target sells its lowest-scored holdings beyond it at once.
 - Kept holdings carry the day's score, best rank, max delta and source ETF.
+
+**Staggered rebalancing** (`strategy.staggered`, `model_fund._apply_stagger`; fund 11 by decision, Nov 2026 – the rebalancing study in `.output/rebalancing_study/`: on a US replay of March–October 2026 it had the highest alpha against the S&P 500 Equal Weight of the schedules tested, at plain two-weekly's turnover). Every holding belongs to a half, `fund_holding.half` (0 / 1; migration 26). The fund runs every `recalc_frequency_days / 2` (`Strategy.run_interval_days`, weekly for fund 11) and the halves take turns by run week counted from `config.FundStrategy.STAGGER_EPOCH` (`model_fund.review_half` – a skipped run doesn't put them out of step). The selection runs as above; then a holding of the other half that it sold below the score buffer is kept until its own half's turn, and the lowest-scored of that day's buys in its bucket is cancelled to make room (any bucket's when its own has none; with none to cancel it is sold). A holding no longer a best idea at all is sold at once, whichever half. Buys join the half reviewed that day; a first build, and holdings carried from before the fund was staggered, are split alternately down each bucket's ranking.
 - If no ideal holdings can be found, the previous holdings are carried over unchanged.
 
 **Weighting.**

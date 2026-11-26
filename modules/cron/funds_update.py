@@ -65,8 +65,9 @@ def activate_fund(
 ) -> model_fund.FundChangesResult | None:
     """
     Updates a single fund's holdings for as_of_date and persists the result.
-    Returns None if the fund's strategy.recalc_frequency_days hasn't elapsed
-    since its last recalculation (the fund's holdings are left untouched). It's counted
+    Returns None if the fund's run interval (strategy.run_interval_days: recalc_frequency_days, or half
+    of it for a staggered fund, whose halves are each reviewed every recalc_frequency_days) hasn't
+    elapsed since its last recalculation (the fund's holdings are left untouched). It's counted
     between the two dates' weeks (Monday to Monday), not their days: the generation day can
     move a day around a holiday (modules/cron/schedule.py), and a Thursday generation followed
     by the next Wednesday's is 6 days apart - a weekly fund would skip that week.
@@ -85,10 +86,10 @@ def activate_fund(
     if previous_holdings:
         last_recalc = previous_holdings[0].holding_date
         days_since_recalc = (schedule.week_start(as_of_date) - schedule.week_start(last_recalc)).days
-        if days_since_recalc < strategy.recalc_frequency_days:
+        if days_since_recalc < strategy.run_interval_days:
             log.record_status(
                 f"[funds_update] Skipping '{f.name}' — last recalculated {last_recalc}, {days_since_recalc // 7} week(s) "
-                f"ago, frequency is {strategy.recalc_frequency_days}d."
+                f"ago, runs every {strategy.run_interval_days}d."
             )
             return None
 

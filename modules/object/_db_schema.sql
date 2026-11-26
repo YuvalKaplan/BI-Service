@@ -478,7 +478,9 @@ CREATE TABLE public.fund_holding (
     score integer,
     source_etf_id integer,
     max_delta double precision,
-    weight double precision
+    weight double precision,
+    half smallint,
+    CONSTRAINT fund_holding_half_check CHECK (half IN (0, 1))
 );
 
 
