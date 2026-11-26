@@ -5,11 +5,14 @@ the SEC blocks the hosted cron's IP, so it can't read EDGAR itself):
      actively managed ETFs (sec_active_etf - modules/sec/ncen.py). The first run reads about
      4,000 filings (15-25 minutes); later runs only the new ones. --reload reads every filing in
      the window again (the result is the same).
-  2. Profiles the listed funds due for it with FMP (modules/sec/etf_profile.py): each one's
+  2. Finds the non-transparent ETFs (sec_nontransparent_filing - modules/sec/prospectus.py): the
+     single-fund prospectus filings of the last ~15 months carrying the legend the SEC requires
+     of them, by EDGAR full-text search. The selection keeps them out (rule 'transparent').
+  3. Profiles the listed funds due for it with FMP (modules/sec/etf_profile.py): each one's
      strategy (sec_etf_classification), and the actively managed equity funds - with region, cap
      size, value / growth, sectors, countries and emerging share - placed in provider_etf.
      --refresh-all profiles every listed fund again (needed once after migration 18).
-  3. Applies the selection rules (modules/sec/etf_selection.py): each provider ETF's status.
+  4. Applies the selection rules (modules/sec/etf_selection.py): each provider ETF's status.
 
 Writes .output/sec_active_etfs.csv: every current fund with its strategy and, for the equity
 funds, their profile, status, latest holdings date, the rules they fail and the holdings measures
@@ -31,7 +34,7 @@ import sys
 from collections import Counter
 from modules.object.exit import cleanup
 from modules.object import sec_active_etf, sec_etf_classification
-from modules.sec import etf_profile, etf_selection, ncen
+from modules.sec import etf_profile, etf_selection, ncen, prospectus
 
 atexit.register(cleanup)
 
@@ -47,8 +50,10 @@ OLD_COLUMNS = ['old_provider_etf_id', 'old_enabled', 'old_cap_type', 'old_style_
 
 if __name__ == '__main__':
     stats = ncen.run(reload='--reload' in sys.argv)
+    legends = prospectus.run()
     profiles = etf_profile.run(refresh_all='--refresh-all' in sys.argv)
     print(ncen.summary(stats))
+    print(prospectus.summary(legends))
     print(etf_profile.summary(profiles))
     if profiles.selection is not None:
         print("\n" + etf_selection.summary(profiles.selection))

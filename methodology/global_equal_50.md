@@ -70,6 +70,7 @@ Active ETFs are used rather than mutual funds because they publish their holding
 | Source | Used for |
 |--------|----------|
 | **SEC EDGAR – Form N-CEN** | Which ETFs are actively managed: every registered fund's annual report of its own type ([§4](#4-the-managers-actively-managed-us-and-international-equity-etfs)). Read directly from EDGAR, the day after filing. |
+| **SEC EDGAR – fund prospectuses** | Which ETFs are non-transparent: the legend the SEC requires on their prospectus cover, found by EDGAR's full-text search ([§4](#4-the-managers-actively-managed-us-and-international-equity-etfs)). Checked monthly. |
 | **Financial Modeling Prep (FMP)** | ETF holdings and profiles (asset class, sector weights, sponsor, AUM); company profiles (identifiers – ISIN, CUSIP, SEC CIK – name, domicile, sector, currency, trading status); daily prices and market caps with history; shares outstanding and free float; quarterly financials (share counts); fundamental factors (growth, margins, valuation ratios, yields) for style classification; FX rates; the stock screener (all large companies, across about 40 exchanges); NYSE holiday calendar. |
 | **Vanguard index funds – VTI, VEA, VWO** (holdings via FMP) | The whole market: CRSP US Total Market (VTI) for the US; FTSE Developed All Cap ex US (VEA) and FTSE Emerging Markets All Cap China A Inclusion (VWO) for international. They hold nearly every listed company at its float-adjusted weight, so they define where large cap ends and each company's float ([§7](#7-large-cap-and-the-reference-benchmarks)). |
 | **Style reference ETFs** – Vanguard VUG / VTV / VBK / VBR, iShares Morningstar ILCG / ILCV / IMCG / IMCV / ISCG / ISCV (holdings via FMP) | Which US companies the index providers (CRSP, Morningstar) classify as value or growth ([§8](#8-value--growth-style-of-us-companies)). |
@@ -113,11 +114,12 @@ Each equity fund is profiled from its holdings against our company data and the 
 
 ### Selection rules
 
-A profiled equity fund is one of the fund's managers (**active**) when it passes every rule. The rules keep out funds whose overweights would reflect a mandate rather than stock selection within a broad large-cap market: derivative strategies, funds that follow an index, equal-weighted funds, sector and thematic funds, single-country and emerging-market funds, and funds investing mostly outside large caps. They are applied every time holdings are read, so a manager that drifts out of its mandate drops out on its own and returns when it comes back – except one that has used derivatives:
+A profiled equity fund is one of the fund's managers (**active**) when it passes every rule. The rules keep out funds whose overweights would reflect a mandate rather than stock selection within a broad large-cap market: derivative strategies, funds that follow an index, equal-weighted funds, funds that don't publish their holdings daily, sector and thematic funds, single-country and emerging-market funds, and funds investing mostly outside large caps. They are applied every time holdings are read, so a manager that drifts out of its mandate drops out on its own and returns when it comes back – except one that has used derivatives:
 
 | Rule | Passes when | Why |
 |------|-------------|-----|
 | Index name | No index provider's brand (Dow Jones, S&P, MSCI, FTSE, Russell, STOXX, Nasdaq and the like) or the word "index" in the fund's name – the fund company's own name aside | A fund named after an index follows it, even when it reports to the SEC as actively managed: its overweights are the index's screen, not a manager's choices. |
+| Holdings transparency | The fund publishes its holdings daily: no prospectus of its own from the last 15 months carries the SEC's non-transparent ETF legend ("This ETF is different from traditional ETFs…") | A non-transparent fund discloses its actual holdings only quarterly, a month or two late; the data vendor re-dates that file with every refresh, so its ideas would be last quarter's positions. The fund's annual SEC filing has a related question, but it is answered unreliably; the prospectus legend is required and dropped when a fund converts. |
 | Region | A US fund (≥ 80% US), an international fund (≤ 20% US) or a global fund (in between) | Each manager's overweights are measured against one market – a global fund's in two parts, its US companies and its international ones ([§9](#9-measuring-a-managers-best-ideas)). |
 | Size | Large or all-cap | Small- and mid-cap managers' overweights are measured against a different opportunity set. |
 | Number of stocks | 20 to 200 (US), 20 to 250 (international); a global fund 20 to 200 US **and** 20 to 250 international companies | Fewer than 20 is a concentrated fund where every holding is an overweight; above the maximum the fund is close to an index and its tilts are small. International managers spread over more markets and names. A global fund's part of a few stocks would make nearly all of them best ideas, so a fund short in either region is excluded. |
@@ -130,7 +132,7 @@ A profiled equity fund is one of the fund's managers (**active**) when it passes
 | Holdings freshness | Latest holdings ≤ 14 days old | Ideas must be current. |
 | Duplicate | Only one row per fund | A fund moved to a new trust is briefly listed twice under one ticker; it must count once. |
 
-Anything unknown fails its rule; the sector, coverage, global stock-count and equal-weighting rules are measured on the fund's holdings, so a new fund waits for its first holdings. A fund enters the coverage rule at 70% and stays while at 65%, so a manager near the line doesn't drop in and out. Funds are judged by what they hold, never by their name – except a fund named after an index, which follows it, and an equal-weighted fund, which says so and whose holdings show it – and the levels are round numbers rather than ones fitted to the funds of the day. US managers supply the fund's US ideas, international managers its international ideas, and global managers both – each region's from its holdings in that region.
+Anything unknown fails its rule; the sector, coverage, global stock-count and equal-weighting rules are measured on the fund's holdings, so a new fund waits for its first holdings. A fund enters the coverage rule at 70% and stays while at 65%, so a manager near the line doesn't drop in and out. Funds are judged by what they hold, never by their name – except a fund named after an index, which follows it, an equal-weighted fund, which says so and whose holdings show it, and a non-transparent fund, whose prospectus says so – and the levels are round numbers rather than ones fitted to the funds of the day. US managers supply the fund's US ideas, international managers its international ideas, and global managers both – each region's from its holdings in that region.
 
 ## 5. Holdings
 
@@ -409,6 +411,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 | International manager (global: its international holdings): top country / emerging markets | ≤ 35% / ≤ 35% |
 | Manager: benchmark coverage | ≥ 70% to enter / ≥ 65% to stay (global: in each region) |
 | Manager: equal weighting | Excluded when the fund says it weights equally and its 90th-percentile position is under 2× its 10th-percentile one |
+| Manager: holdings transparency | Excluded when a prospectus of its own from the last 15 months carries the non-transparent ETF legend |
 | Manager style (for US company style, step 2) | ≥ 60% of style-classified holdings |
 | Holdings: maximum age | 14 days |
 | Market cap: validation window | 21 days; excluded after 5 days without a good value |

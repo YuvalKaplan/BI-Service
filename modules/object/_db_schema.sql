@@ -59,6 +59,7 @@ BEGIN
 		public.sec_active_etf,
 		public.sec_etf_classification,
 		public.sec_ncen_filing,
+		public.sec_nontransparent_filing,
 		public.ticker,
 		public.ticker_value,
 		public.universe_etf,
@@ -764,6 +765,26 @@ CREATE TABLE public.sec_ncen_filing (
 
 
 ALTER TABLE public.sec_ncen_filing OWNER TO admin;
+
+--
+-- Name: sec_nontransparent_filing; Type: TABLE; Schema: public; Owner: admin
+--
+
+CREATE TABLE public.sec_nontransparent_filing (
+    accession_number text NOT NULL,
+    series_id text NOT NULL,
+    created_at timestamp without time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
+    updated_at timestamp without time zone DEFAULT (now() AT TIME ZONE 'utc'::text) NOT NULL,
+    cik text NOT NULL,
+    form_type text NOT NULL,
+    filing_date date NOT NULL,
+    CONSTRAINT sec_nontransparent_filing_pkey PRIMARY KEY (accession_number, series_id)
+);
+
+
+ALTER TABLE public.sec_nontransparent_filing OWNER TO admin;
+
+CREATE INDEX idx_sec_nontransparent_filing_series_id ON public.sec_nontransparent_filing USING btree (series_id);
 
 --
 -- Name: sec_etf_classification; Type: TABLE; Schema: public; Owner: admin
