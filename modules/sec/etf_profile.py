@@ -27,7 +27,10 @@ rule: Accenture is US), else the market of the index fund holding the stock; cou
 company's domicile (ticker.country), a US-region company counting as US; emerging is held by an
 emerging index fund (config.IndexFunds.EMERGING_FUNDS - FTSE's view), the company's else the line's.
 The index fallback matters for a new fund: its small caps aren't our tickers until its holdings
-are downloaded. An equity fund whose holdings show an option or an equity-linked note is marked
+are downloaded. A fund's stocks (stock_holdings, stock_weight, the cap size) are the lines the index
+funds hold, by symbol / ISIN / CUSIP, or that are one of our companies an index fund holds - an ADR
+line (SNY, NVS, GSK) counts as its company's index stock: by identifiers alone, a fund holding ADRs
+had too few holdings and no cap size. An equity fund whose holdings show an option or an equity-linked note is marked
 (provider_etf.contracts_found, etf_selection.is_contract_line): the selection keeps it out for
 good. A provider ETF no longer equity keeps its row with its
 new strategy, and the selection makes it inactive. Every checked fund's strategy is kept in
@@ -110,6 +113,8 @@ class Reference:
     listings: index_funds.Listings
     style_of: dict[int, str | None]               # company id -> style_type
     fund_of: dict[int, str]                       # company id -> the index fund holding it
+    stock_of: dict[int, IndexStock]               # company id -> its index stock (a line of the company not
+                                                  # in the index funds by identifier - an ADR - counts as it)
     region_of: dict[int, str | None]              # company id -> region (ticker.region)
     country_of: dict[int, str | None]             # company id -> domicile (ticker.country), US for a US-region company
 
@@ -175,10 +180,12 @@ def build_reference(as_of: date | None = None) -> Reference:
     week old), the 70% / 90% breakpoints per market, and our listings and companies."""
     index: dict[str, IndexStock] = {}
     fund_of: dict[int, str] = {}
+    stock_of: dict[int, IndexStock] = {}
     snapshot = index_funds.snapshot(as_of)
     listings = index_funds.our_listings()
     for fund, (market, rows) in sorted(snapshot.items(), key=lambda kv: kv[1][0] != index_funds.US):  # US first
         for r in rows:
+            stock = None
             if r.get('float_cap') and not company.is_instrument_line(r.get('name')):
                 stock = IndexStock(fund=fund, market=market, float_cap=r['float_cap'])
                 for key in _keys(r):
@@ -186,6 +193,8 @@ def build_reference(as_of: date | None = None) -> Reference:
             cid = _line_company(r, listings)
             if cid is not None:
                 fund_of.setdefault(cid, fund)
+                if stock is not None:
+                    stock_of.setdefault(cid, stock)
     markets = {market for market, _rows in snapshot.values()}
     region_of = {cid: listings.by_id[cid].region for cid in listings.members if cid in listings.by_id}
     return Reference(
@@ -195,6 +204,7 @@ def build_reference(as_of: date | None = None) -> Reference:
         listings=listings,
         style_of={cid: listings.by_id[cid].style_type for cid in listings.members if cid in listings.by_id},
         fund_of=fund_of,
+        stock_of=stock_of,
         region_of=region_of,
         country_of={cid: 'US' if region_of.get(cid) == REGION_US else company.company_country(members, cid)
                     for cid, members in listings.members.items()},
@@ -224,6 +234,16 @@ def classify(etf: SecActiveEtf, asset_class: str | None, equity_weight: float | 
     return 'other'
 
 
+def index_stock(line: dict, ref: Reference) -> IndexStock | None:
+    """The index stock a holding line is: by its symbol / ISIN / CUSIP, else through its company of
+    ours (an ADR line - the index funds hold the home listing)."""
+    key = next((k for k in _keys(line) if k in ref.index), None)
+    if key is not None:
+        return ref.index[key]
+    cid = _line_company(line, ref.listings)
+    return ref.stock_of.get(cid) if cid is not None else None
+
+
 def is_stock_line(line: dict, stock: IndexStock | None, listings: index_funds.Listings | None = None) -> bool:
     """Whether an FMP holding line is a stock: never a note, option, right or warrant described as
     one (company.is_instrument_line - first, as it may carry its issuer's symbol: "JPMORGAN CHASE
@@ -251,7 +271,7 @@ def profile_fund(etf: SecActiveEtf, info: dict | None, holdings: list[dict], ref
     matched: list[tuple[float, IndexStock | None]] = []
     stock: list[tuple[float, IndexStock]] = []
     if total > 0:
-        matched = [(r['weightPercentage'] / total, ref.index.get(next((k for k in _keys(r) if k in ref.index), ''))) for r in lines]
+        matched = [(r['weightPercentage'] / total, index_stock(r, ref)) for r in lines]
         stock = [(w, s) for w, s in matched if s is not None]
         p.equity_weight = sum(w for (w, s), r in zip(matched, lines) if is_stock_line(r, s, ref.listings))
         p.stock_weight = sum(w for w, _ in stock)

@@ -7,6 +7,8 @@ from modules.core.db import db_pool_instance
 
 REGION = 'region'   # parts: 'US' | 'International' - the regions' full-universe (blend) benchmarks
 STYLE = 'style'     # parts: 'growth' | 'value' - the US blend's value / growth split
+MARKET = 'market'   # parts: 'developed' | 'emerging' - the International blend's developed / emerging split
+SPLIT_TYPES = (REGION, STYLE, MARKET)
 
 
 @dataclass(kw_only=True)
@@ -21,7 +23,7 @@ class BenchmarkSplit:
     created_at: datetime | None = None
     updated_at: datetime | None = None
     as_of_date: date          # the benchmark snapshot date
-    split_type: str           # REGION | STYLE
+    split_type: str           # REGION | STYLE | MARKET
     part: str
     benchmark_id: int
     companies: int

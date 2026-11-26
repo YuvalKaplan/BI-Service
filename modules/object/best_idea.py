@@ -9,10 +9,11 @@ from modules.core.db import db_pool_instance
 
 # best_idea.benchmark_mode — what each company's benchmark weight is (a fund picks one: strategy.benchmark):
 MODE_SELF = 'self'                          # its market-cap weight among the ETF's own holdings
-MODE_MARKET = 'full_value_growth_split'     # its weight in its own style's benchmark (value / growth) where
-                                            # the ETF's region is split (US), else the region's blend.
-                                            # The only external mode (by decision, Nov 2026: the blend-only
-                                            # 'full_universe' mode was dropped); the stored value keeps its old name.
+MODE_MARKET = 'market_split'                # its weight in its own part's benchmark where the ETF's region's
+                                            # blend is split (US: value / growth; International: developed /
+                                            # emerging), else the region's blend. The only external mode (by
+                                            # decision, Nov 2026: the blend-only 'full_universe' mode was dropped;
+                                            # 'full_value_growth_split' until migration 25).
 BENCHMARK_MODES = (MODE_SELF, MODE_MARKET)
 
 @dataclass
@@ -137,7 +138,7 @@ def fetch_all_as_df(as_of_date: date, look_back_days: int) -> pd.DataFrame:
     have several dates here: model_fund.fund_best_ideas picks each ETF's latest within a fund's
     own look-back.
     Returned DataFrame columns: provider_etf_id, ticker_id, value_date, ranking,
-    delta, benchmark_mode, style_type, exchange, country, region, esg_qualified, name,
+    delta, benchmark_mode, style_type, exchange, country, region, market_class, esg_qualified, name,
     master_ticker_id, market_cap, part, etf_region. etf_region is the region the idea was measured
     in: the ETF's, a Global ETF's part's (so the funds' region buckets take each part as an ETF of
     its region).
@@ -156,6 +157,7 @@ def fetch_all_as_df(as_of_date: date, look_back_days: int) -> pd.DataFrame:
             t.exchange,
             t.country,
             t.region,
+            t.market_class,
             t.esg_qualified,
             t.name,
             t.master_ticker_id,

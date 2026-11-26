@@ -6,8 +6,8 @@ history – so the live cron carries on from the replayed holdings.
 1. Every stored weekly screen a generation day uses (the latest on or before the day before it,
    as live) is rebuilt: the screened companies (company_builder – today's masters, regions and
    validated values) and every enabled benchmark (benchmark_generator – that date's breakpoints,
-   today's float factors and styles), so each week's benchmarks include any added since (the US
-   value / growth split).
+   today's float factors, styles and market classes), so each week's benchmarks include any added
+   since (the US value / growth split, the International developed / emerging split).
 2. The active funds' fund_holding / fund_holding_change / fund_analysis are erased, and every best
    idea from the first generation day's look-back on.
 3. On every generation day, best ideas are generated for all active ETFs and every active fund is
@@ -37,7 +37,7 @@ from modules.calc import model_fund
 
 atexit.register(cleanup)
 
-INCEPTION_DATE = date(2026, 10, 1)  # <-- edit before each run: the first generation day on or after it starts the replay
+INCEPTION_DATE = date(2026, 11, 18)  # <-- edit before each run: the first generation day on or after it starts the replay
 REBUILD_BENCHMARKS = True           # <-- False keeps the stored screened companies and benchmarks as they are
 
 

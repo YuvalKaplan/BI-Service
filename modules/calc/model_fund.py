@@ -43,11 +43,21 @@ class RegionSplit(BaseModel):
     US: Optional[int] = None
     International: Optional[int] = None
 
+class InternationalSplit(BaseModel):
+    # Percent of the International holdings per market, keyed by ticker.market_class value.
+    model_config = {'extra': 'forbid'}
+    developed: int
+    emerging: int
+
 class Region(BaseModel):
     name: str
     # Fixed US / International percentages, or 'market': the US and International benchmarks'
     # float-adjusted shares in force on the rebalancing date (modules/cron/market_split.py).
     split: Optional[RegionSplit | Literal['market']] = None
+    # The International holdings (of a region split, or of an International fund) divided by market:
+    # fixed developed / emerging percentages, or 'market': the International developed and emerging
+    # benchmarks' float-adjusted shares in force on the rebalancing date.
+    international: Optional[InternationalSplit | Literal['market']] = None
 
 class Strategy(BaseModel):
     allocation: str
@@ -65,11 +75,12 @@ class Strategy(BaseModel):
     # list earn none), summed across the ETFs into its score - the selection's order. The halving
     # scale makes rank 1 worth two rank 2s, four rank 3s, ... (consensus over a single conviction).
     rank_points: list[int] = Field(default_factory=lambda: list(config.FundStrategy.RANK_POINTS))
-    # Which best ideas the fund draws on (best_idea.benchmark_mode): the market — 'full_value_growth_split'
-    # (best_idea.MODE_MARKET: each company against its own style's benchmark, US value / growth, else its
-    # region's blend) — or 'self' (the ETF's own holdings, market-cap weighted). The fund's style setting
-    # (filter / split) only decides what it buys; the company's own style picks its benchmark.
-    benchmark: Literal['full_value_growth_split', 'self'] = config.FundStrategy.BENCHMARK
+    # Which best ideas the fund draws on (best_idea.benchmark_mode): the market — 'market_split'
+    # (best_idea.MODE_MARKET: each company against its own part's benchmark - US value / growth,
+    # International developed / emerging - else its region's blend) — or 'self' (the ETF's own holdings,
+    # market-cap weighted). The fund's style and market settings (filter / split) only decide what it
+    # buys; the company's own style / market class picks its benchmark.
+    benchmark: Literal['market_split', 'self'] = config.FundStrategy.BENCHMARK
     recalc_frequency_days: int = config.FundStrategy.RECALC_FREQUENCY_DAYS
 
     @field_validator('rank_points')
@@ -222,11 +233,13 @@ def _eligibility_masks(
     exchanges: list[str],
     esg_only: bool,
     held_ticker_ids: set[int] | None = None,
+    market_class: str | None = None,
 ) -> dict[str, pd.Series]:
     """
     The fund-configuration filters applied to the best-ideas DataFrame, one named boolean mask
     per criterion (a row is eligible when all are True). Kept separate so the methodology
     report can say which filter excluded a row, using exactly the logic the selection uses.
+    market_class: a market bucket's ('developed' | 'emerging' - the company's ticker.market_class).
     """
     key = 'canonical_ticker_id'
     etf_set = set(provider_etf_ids)
@@ -235,6 +248,7 @@ def _eligibility_masks(
 
     masks['etf'] = df['provider_etf_id'].isin(etf_set) if etf_set else all_true
     masks['style'] = df['style_type'] == style_type if style_type not in (None, 'core', 'blend') else all_true
+    masks['market'] = df['market_class'] == market_class if market_class else all_true
     if cap_type == 'large':
         # A stock that has dropped below the large-cap cutoff since it was bought is still
         # let through here if it's already one of this fund's current holdings (held_ticker_ids),
@@ -276,6 +290,7 @@ def _filter_and_aggregate(
     rank_points: list[int],
     exclude_ticker_ids: set[int] | None = None,
     held_ticker_ids: set[int] | None = None,
+    market_class: str | None = None,
 ) -> pd.DataFrame:
     """
     Filter the fund's best-ideas DataFrame (fund_best_ideas: one date per ETF) for a specific
@@ -287,7 +302,8 @@ def _filter_and_aggregate(
     key = 'canonical_ticker_id'
 
     mask = pd.Series(True, index=df.index)
-    for m in _eligibility_masks(df, provider_etf_ids, style_type, cap_type, country_type, exchanges, esg_only, held_ticker_ids).values():
+    for m in _eligibility_masks(df, provider_etf_ids, style_type, cap_type, country_type, exchanges, esg_only, held_ticker_ids,
+                                market_class).values():
         mask &= m
 
     filtered = df[mask].copy()
@@ -357,19 +373,21 @@ def _share(n: int, percent: float) -> int:
 @dataclass
 class Bucket:
     """One part of a fund, filled from its own list: a region (US / International with a region
-    split, else the fund's region or 'all') and, with a style split, a style. Its ideal holdings (in
-    score order, at most `target`), the ids of every idea scored for it, the ids a holding is kept at
-    (within the keep buffer), and its number of holdings."""
+    split, else the fund's region or 'all'), with an International market split a market
+    (developed / emerging), and with a style split a style. Its ideal holdings (in score order, at
+    most `target`), the ids of every idea scored for it, the ids a holding is kept at (within the
+    keep buffer), and its number of holdings."""
     region: str
     style: str | None
     ideal: list
     fetched_ids: set[int]
     keep_ids: set[int]
     target: int
+    market: str | None = None
 
     @property
     def label(self) -> str:
-        return f"{self.region} / {self.style}" if self.style else self.region
+        return " / ".join(p for p in (self.region, self.market, self.style) if p)
 
 
 def _fetch_and_select_by_style(
@@ -382,11 +400,40 @@ def _fetch_and_select_by_style(
     held_ticker_ids: set[int] | None = None,
 ) -> tuple[list[Bucket], list]:
     """
-    Returns (buckets, fetched): one bucket per style with a style split (style_split_percents for
-    this region on as_of), else one; `fetched` is every scored idea, in score order per bucket.
-    Each bucket's keep_ids are its ideas within the top ceil(target x config.FundStrategy.KEEP_BUFFER): a holding among
-    them is kept. A growth bucket short of ideas leaves its places to value.
+    Returns (buckets, fetched): one bucket per market with an International market split
+    (market_split_percents for this region on as_of), each divided by style with a style split
+    (style_split_percents), else one per style, else one; `fetched` is every scored idea, in score
+    order per bucket. Each bucket's keep_ids are its ideas within the top
+    ceil(target x config.FundStrategy.KEEP_BUFFER): a holding among them is kept. An emerging bucket
+    short of ideas leaves its places to developed, a growth bucket to value.
     """
+    markets = market_split_percents(strategy, as_of, country_type)
+    if markets is None:
+        return _style_buckets(n_holdings, n_holdings, strategy, all_best_ideas_df, as_of, country_type, None,
+                              exclude_ticker_ids, held_ticker_ids)
+    emerging_target = _share(n_holdings, markets[1])
+    emerging, fetched_emerging = _style_buckets(emerging_target, emerging_target, strategy, all_best_ideas_df, as_of,
+                                                country_type, company.EMERGING, exclude_ticker_ids, held_ticker_ids)
+    developed_room = n_holdings - sum(len(b.ideal) for b in emerging)
+    developed, fetched_developed = _style_buckets(developed_room, n_holdings - emerging_target, strategy, all_best_ideas_df,
+                                                  as_of, country_type, company.DEVELOPED, exclude_ticker_ids, held_ticker_ids)
+    return emerging + developed, fetched_emerging + fetched_developed
+
+
+def _style_buckets(
+    places: int,
+    target: int,
+    strategy: Strategy,
+    all_best_ideas_df: pd.DataFrame,
+    as_of: date,
+    country_type: str,
+    market: str | None,
+    exclude_ticker_ids: set[int] | None,
+    held_ticker_ids: set[int] | None,
+) -> tuple[list[Bucket], list]:
+    """(buckets, fetched) of one region / market: `places` holdings (its target, or more when a
+    market before it is short of ideas), its keep buffers measured on `target`. One bucket per style
+    with a style split, else one."""
     etf_ids = strategy.provider_etfs or []
     exchanges = strategy.exchanges or []
 
@@ -394,7 +441,7 @@ def _fetch_and_select_by_style(
         return _df_to_ranked(_filter_and_aggregate(
             all_best_ideas_df, etf_ids, style, strategy.cap.name,
             country_type, exchanges, strategy.esg_only, strategy.rank_points, exclude_ticker_ids,
-            held_ticker_ids,
+            held_ticker_ids, market,
         ))
 
     def keep(ideas: list[best_idea.BestIdeaRanked], target: int) -> set[int]:
@@ -407,17 +454,17 @@ def _fetch_and_select_by_style(
     if percents is not None:
         fetched_growth = scored('growth')
         fetched_value = scored('value')
-        growth_target = _share(n_holdings, percents[0])
-        value_target = n_holdings - growth_target
+        growth_target = _share(places, percents[0])
+        growth_keep = _share(target, percents[0])
         growth_count = min(len(fetched_growth), growth_target)
-        value_room = n_holdings - growth_count
+        value_room = places - growth_count
         return [
-            Bucket(country_type, 'growth', fetched_growth[:growth_count], ids(fetched_growth), keep(fetched_growth, growth_target), growth_count),
-            Bucket(country_type, 'value', fetched_value[:value_room], ids(fetched_value), keep(fetched_value, value_target), value_room),
+            Bucket(country_type, 'growth', fetched_growth[:growth_count], ids(fetched_growth), keep(fetched_growth, growth_keep), growth_count, market),
+            Bucket(country_type, 'value', fetched_value[:value_room], ids(fetched_value), keep(fetched_value, target - growth_keep), value_room, market),
         ], fetched_growth + fetched_value
 
     fetched = scored(strategy.style.name)
-    return [Bucket(country_type, None, fetched[:n_holdings], ids(fetched), keep(fetched, n_holdings), n_holdings)], fetched
+    return [Bucket(country_type, None, fetched[:places], ids(fetched), keep(fetched, target), places, market)], fetched
 
 
 def _select_region_buckets(
@@ -478,10 +525,26 @@ def style_split_percents(strategy: Strategy, as_of: date, country_type: str) -> 
     return None
 
 
-def bucket_styles(strategy: Strategy, as_of: date, country_type: str) -> list[str]:
-    """The style filters a region's buckets select with: growth and value with a style split, else
-    the strategy's style."""
-    return ['growth', 'value'] if style_split_percents(strategy, as_of, country_type) else [strategy.style.name]
+def market_split_percents(strategy: Strategy, as_of: date, country_type: str) -> tuple[float, float] | None:
+    """(developed %, emerging %) of the strategy's International market split for a region's bucket
+    on as_of: fixed percentages, or the market split in force (International buckets only); None
+    without a split."""
+    split = strategy.region.international if strategy.region is not None else None
+    if split is None or country_type != company.INTERNATIONAL:
+        return None
+    if split == MARKET:
+        _, w = benchmark_split.weights_in_force(benchmark_split.MARKET, as_of)
+        return w[company.DEVELOPED] * 100, w[company.EMERGING] * 100
+    return split.developed, split.emerging
+
+
+def bucket_filters(strategy: Strategy, as_of: date, country_type: str) -> list[tuple[str | None, str]]:
+    """The (market, style) filters a region's buckets select with: developed and emerging with an
+    International market split (else no market filter), each by growth and value with a style
+    split, else the strategy's style."""
+    markets = [company.EMERGING, company.DEVELOPED] if market_split_percents(strategy, as_of, country_type) else [None]
+    styles = ['growth', 'value'] if style_split_percents(strategy, as_of, country_type) else [strategy.style.name]
+    return [(m, s) for m in markets for s in styles]
 
 
 def strategy_country_types(strategy: Strategy) -> list[str]:

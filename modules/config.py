@@ -112,8 +112,7 @@ class EtfSelection:
     MIN_STOCK_HOLDINGS = 20         # a regional ETF's stocks - and each regional part's of a Global ETF
     MAX_STOCK_HOLDINGS = {'US': 200, 'International': 250}   # per region (a Global ETF: per part, the sum in all)
     MAX_SECTOR_EXCESS = 0.20        # a sector's weight over its highest weight in our benchmarks (sector_reference)
-    MAX_TOP_COUNTRY_WEIGHT = 0.35
-    MAX_EMERGING_WEIGHT = 0.35
+    MAX_TOP_COUNTRY_WEIGHT = 0.50   # an emerging-markets fund's Taiwan / China (its benchmark's 25-45%) passes, a single-country fund doesn't
     MIN_COVERAGE_ENTRY = 0.70       # stock weight in the region's blend benchmark companies to become active...
     MIN_COVERAGE_STAY = 0.65        # ... and to stay active
     MAX_HOLDINGS_AGE_DAYS = 14      # an active ETF's latest holdings are at most this old
@@ -338,8 +337,8 @@ class FundStrategy:
     # 2 = 256, ... 10 = 1 (each ETF's best ideas run to rank BestIdeas.MAX_BEST_IDEAS_PER_FUND): the
     # halving scale makes rank 1 worth two rank 2s, four rank 3s, ... (consensus over a single conviction).
     RANK_POINTS = [2 ** (10 - r) for r in range(1, 11)]
-    # Which best ideas the fund draws on (best_idea.benchmark_mode): 'full_value_growth_split' | 'self'
-    BENCHMARK = 'full_value_growth_split'
+    # Which best ideas the fund draws on (best_idea.benchmark_mode): 'market_split' | 'self'
+    BENCHMARK = 'market_split'
     RECALC_FREQUENCY_DAYS = 7
     # A holding is kept while it's within the top ceil(target x KEEP_BUFFER) of its bucket by score.
     KEEP_BUFFER = 1.25

@@ -4,7 +4,9 @@ float-adjusted total (whole company cap x float factor, capped at 1; unknown cou
 
 - region: the US and International full-universe (large blend) benchmarks - US vs International;
 - style: the US blend's value / growth benchmarks - growth vs value (US only: International has
-  no style split).
+  no style split);
+- market: the International blend's developed / emerging benchmarks - developed vs emerging
+  (International only).
 
 Recalculated quarterly, on the first generation day of each calendar quarter (the first run in a
 quarter with no split stored for it), from that day's benchmark snapshots, and stored in
@@ -20,11 +22,13 @@ from datetime import date
 from psycopg.errors import Error
 from modules.core.db import db_pool_instance
 from modules.object import benchmark, benchmark_split
-from modules.object.benchmark_split import BenchmarkSplit, REGION, STYLE
-from modules.ticker import company, index_funds
+from modules.object.benchmark_split import BenchmarkSplit, REGION, STYLE, MARKET, SPLIT_TYPES
+from modules.ticker import company
 
 REGION_PARTS = (company.US, company.INTERNATIONAL)
 STYLE_PARTS = ('growth', 'value')
+MARKET_PARTS = company.MARKET_CLASSES     # developed, emerging
+PARTS = {REGION: REGION_PARTS, STYLE: STYLE_PARTS, MARKET: MARKET_PARTS}
 
 
 @dataclass
@@ -67,7 +71,7 @@ def _blend_ids() -> dict[str, int]:
     """{region: id} of each region's enabled large-cap blend / core (full-universe) benchmark."""
     out: dict[str, int] = {}
     for b in benchmark.fetch_all():
-        if b.cap_type == 'large' and b.style_type in index_funds.FULL_UNIVERSE_STYLES and not b.disabled:
+        if b.cap_type == 'large' and benchmark.is_blend(b) and not b.disabled:
             out.setdefault(b.region, b.id)
     return out
 
@@ -98,15 +102,16 @@ def compute(snapshot_date: date) -> tuple[dict[str, list[BenchmarkSplit]], list[
             notices.append(f"region split: a blend benchmark has no snapshot on {snapshot_date}")
     else:
         notices.append("region split: no enabled US and International blend benchmarks")
-    styles = {b.style_type: b.id for b in benchmark.fetch_style_split(blends[company.US])} if company.US in blends else {}
-    if all(s in styles for s in STYLE_PARTS):
-        parts = _parts(STYLE, {s: styles[s] for s in STYLE_PARTS}, snapshot_date)
-        if parts:
-            out[STYLE] = parts
+    for split_type, region in ((STYLE, company.US), (MARKET, company.INTERNATIONAL)):
+        found = {benchmark.split_part(b): b.id for b in benchmark.fetch_split(blends[region])} if region in blends else {}
+        if all(p in found for p in PARTS[split_type]):
+            parts = _parts(split_type, {p: found[p] for p in PARTS[split_type]}, snapshot_date)
+            if parts:
+                out[split_type] = parts
+            else:
+                notices.append(f"{split_type} split: a {region} {split_type} benchmark has no snapshot on {snapshot_date}")
         else:
-            notices.append(f"style split: a US style benchmark has no snapshot on {snapshot_date}")
-    else:
-        notices.append("style split: no enabled US value and growth benchmarks")
+            notices.append(f"{split_type} split: no enabled {region} {' and '.join(PARTS[split_type])} benchmarks")
     return out, notices
 
 
@@ -139,7 +144,7 @@ def refresh(snapshot_date: date | None = None, force: bool = False) -> MarketSpl
         return stats
 
     due = []
-    for split_type in (REGION, STYLE):
+    for split_type in SPLIT_TYPES:
         current = benchmark_split.fetch_in_force(split_type, snapshot_date)
         if force or not current or current[0].as_of_date > snapshot_date or quarter(current[0].as_of_date) != quarter(snapshot_date):
             due.append(split_type)
@@ -161,7 +166,7 @@ def refresh(snapshot_date: date | None = None, force: bool = False) -> MarketSpl
 
 
 def _line(split_type: str, parts: list[BenchmarkSplit], recalculated: bool) -> str:
-    order = REGION_PARTS if split_type == REGION else STYLE_PARTS
+    order = PARTS[split_type]
     by_part = {p.part: p for p in parts}
     shares = " / ".join(f"{by_part[k].weight:.1%} {k}" for k in order if k in by_part)
     when = "recalculated" if recalculated else f"in force since {parts[0].as_of_date}"

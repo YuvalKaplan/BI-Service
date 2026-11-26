@@ -1,4 +1,4 @@
-# Global Large Cap Best Ideas – Region and Style by Market Weight, Equal Weight, 50 Holdings
+# Global Large Cap Best Ideas – Region, Style and Market by Market Weight, Equal Weight, 50 Holdings
 
 How this fund is populated and maintained: which managers it listens to, where the data comes from, how each manager's "best ideas" are measured, and how those ideas become a 50-stock, equally weighted portfolio of large-cap companies, split between the US and international – and the US part between growth and value – by their weight in the market. It is written for investment professionals.
 
@@ -36,7 +36,7 @@ The fund applies this across the population of US-listed, actively managed, dive
 2. read each one's holdings every week;
 3. for each, measure each holding's **active weight** – its weight in the ETF minus its weight in the relevant large-cap benchmark – and keep the top overweights as that manager's best ideas (a global manager's US and international holdings separately);
 4. combine the best ideas of all managers in each region into a consensus score – points for each manager's rank, summed – so the stocks that several managers rank highly come first;
-5. split the 50 holdings between the US and international, and the US holdings between growth and value, by their float-adjusted weight in the reference benchmarks (19 US growth, 14 US value and 17 international as of November 2026), hold each part's top large-cap companies at equal weight, and rebalance every two weeks with turnover controls.
+5. split the 50 holdings between the US and international, the US holdings between growth and value, and the international holdings between developed and emerging markets, by their float-adjusted weight in the reference benchmarks (19 US growth, 14 US value, and 17 international – about 12 developed and 5 emerging), hold each part's top large-cap companies at equal weight, and rebalance every two weeks with turnover controls.
 
 Active ETFs are used rather than mutual funds because they publish their holdings far more often (most daily; we read them weekly – [§5](#5-holdings)), so the ideas are recent rather than a quarter old.
 
@@ -47,9 +47,10 @@ Active ETFs are used rather than mutual funds because they publish their holding
 | **Universe** | Large-cap companies worldwide |
 | **Regions** | By number of holdings: each region's float-adjusted weight in the reference benchmarks, recalculated quarterly – 65.0% US / 35.0% international as of November 2026, so 33 and 17 |
 | **Source of ideas** | US companies: qualifying actively managed US equity ETFs and the US holdings of global ones. International companies: qualifying actively managed international equity ETFs and the international holdings of global ones |
-| **Best ideas measured against** | US companies: the US Large Cap Value benchmark for value companies, the US Large Cap Growth benchmark for growth companies. International companies: the International Large Cap benchmark |
+| **Best ideas measured against** | US companies: the US Large Cap Value benchmark for value companies, the US Large Cap Growth benchmark for growth companies. International companies: the International Large Cap Developed benchmark for developed-market companies, the International Large Cap Emerging benchmark for emerging-market companies |
 | **Ideas used** | Each manager's ten best ideas, scored by rank and summed across managers |
 | **Style** | US holdings by number: each style's float-adjusted weight in the US value and growth benchmarks, recalculated quarterly – 57.5% growth / 42.5% value as of November 2026, so 19 and 14 of the 33. International holdings: no style split |
+| **Developed / emerging** | International holdings by number: each market's float-adjusted weight in the International developed and emerging benchmarks, recalculated quarterly – 71.5% developed / 28.5% emerging on the September 2026 benchmarks, so 12 and 5 of the 17 |
 | **Holdings** | 50 |
 | **Weighting** | Equal (2% each) |
 | **Rebalancing** | Every two weeks, with turnover controls |
@@ -60,10 +61,10 @@ Active ETFs are used rather than mutual funds because they publish their holding
 |------|--------------|---------|
 | Managers | Every ETF that tells the SEC it is not an index fund; its profile decides whether it is a diversified US or international equity fund that qualifies ([§4](#4-the-managers-actively-managed-us-and-international-equity-etfs)) | Monthly list, rules re-checked daily |
 | Holdings | Each qualifying ETF's holdings, every line identified as a company ([§5](#5-holdings)) | Daily (Tue–Sat); most ETFs refresh weekly |
-| Company data | Prices, market caps, share-class consolidation, region, validation ([§6](#6-company-data-and-data-quality)) | Daily |
+| Company data | Prices, market caps, share-class consolidation, region and developed / emerging market, validation ([§6](#6-company-data-and-data-quality)) | Daily |
 | Large-cap lines and benchmarks | Where large cap ends in each region; the reference benchmarks ([§7](#7-large-cap-and-the-reference-benchmarks)) | Weekly |
 | Best ideas | Top 10 active weights per ETF ([§9](#9-measuring-a-managers-best-ideas)) | Weekly |
-| Portfolio | Candidate lists per part → US growth + US value + international holdings (19 + 14 + 17) → buys and sells ([§10](#10-building-the-portfolio), [§11](#11-maintaining-the-portfolio-rebalancing-and-turnover)) | Every two weeks |
+| Portfolio | Candidate lists per part → US growth + US value + international developed + international emerging holdings (19 + 14 + 12 + 5) → buys and sells ([§10](#10-building-the-portfolio), [§11](#11-maintaining-the-portfolio-rebalancing-and-turnover)) | Every two weeks |
 
 ## 3. Data sources
 
@@ -108,13 +109,12 @@ Each equity fund is profiled from its holdings against our company data and the 
 |---------|-----|
 | **Region** | Share of the fund in US companies (by each company's region – [§6](#6-company-data-and-data-quality)). ≥ 80% US → a US fund; ≤ 20% → an international fund; in between, a global fund. |
 | **Size** | Each stock large above its market's 70% breakpoint, small below the 90% one, mid between (Morningstar's approach). The fund is *large* with ≥ 70% large stocks, *small* with ≥ 50% small, *mid* with ≥ 50% mid, *smid* with ≥ 70% mid + small, otherwise *all-cap*. |
-| **Stock count** | Lines matching a stock the total-market index funds hold. |
+| **Stock count** | Lines matching a stock the total-market index funds hold – directly, or through the company: a depositary receipt (ADR) counts as its company's stock, which the index funds hold in its home market. |
 | **Country concentration** | Our companies' country of domicile: the largest country. |
-| **Emerging-market share** | Share held in stocks VWO holds (FTSE's classification: Taiwan, China, India, Brazil emerging; Korea developed). |
 
 ### Selection rules
 
-A profiled equity fund is one of the fund's managers (**active**) when it passes every rule. The rules keep out funds whose overweights would reflect a mandate rather than stock selection within a broad large-cap market: derivative strategies, funds that follow an index, equal-weighted funds, funds that don't publish their holdings daily, sector and thematic funds, single-country and emerging-market funds, and funds investing mostly outside large caps. They are applied every time holdings are read, so a manager that drifts out of its mandate drops out on its own and returns when it comes back – except one that has used derivatives:
+A profiled equity fund is one of the fund's managers (**active**) when it passes every rule. The rules keep out funds whose overweights would reflect a mandate rather than stock selection within a broad large-cap market: derivative strategies, funds that follow an index, equal-weighted funds, funds that don't publish their holdings daily, sector and thematic funds, single-country funds, and funds investing mostly outside large caps. They are applied every time holdings are read, so a manager that drifts out of its mandate drops out on its own and returns when it comes back – except one that has used derivatives:
 
 | Rule | Passes when | Why |
 |------|-------------|-----|
@@ -124,9 +124,8 @@ A profiled equity fund is one of the fund's managers (**active**) when it passes
 | Size | Large or all-cap | Small- and mid-cap managers' overweights are measured against a different opportunity set. |
 | Number of stocks | 20 to 200 (US), 20 to 250 (international); a global fund 20 to 200 US **and** 20 to 250 international companies | Fewer than 20 is a concentrated fund where every holding is an overweight; above the maximum the fund is close to an index and its tilts are small. International managers spread over more markets and names. A global fund's part of a few stocks would make nearly all of them best ideas, so a fund short in either region is excluded. |
 | Derivatives | The fund's holdings have **never** shown an option contract or an equity-linked note | Covered-call and option-income funds hold ordinary-looking stocks, but their weights follow the option book; once seen, the fund is excluded for good. |
-| Sector concentration | No sector more than **20 points** above its reference weight: the highest weight the sector has in the US large value, US large growth or international large-cap benchmark | A sector or thematic fund's overweights reflect its mandate, not stock selection; measuring each sector against the market lets a growth manager hold as much technology as the growth market does. |
-| Top country | ≤ 35% of an international fund, or of a global fund's international holdings | Single-country funds (Japan, India, China) – same reason. |
-| Emerging markets | ≤ 35% of an international fund, or of a global fund's international holdings | International managers are diversified, developed-market managers. |
+| Sector concentration | No sector more than **20 points** above its reference weight: the highest weight the sector has in the US large value, US large growth, international large developed or international large emerging benchmark | A sector or thematic fund's overweights reflect its mandate, not stock selection; measuring each sector against the market lets a growth manager hold as much technology as the growth market does. |
+| Top country | ≤ 50% of an international fund, or of a global fund's international holdings | Single-country funds (Japan, India, China, Korea – 80–100% in one country) – same reason. Half rather than a third: a diversified emerging-markets fund holds 25–45% in Taiwan or China, as the emerging benchmark does. |
 | Benchmark coverage | ≥ 70% of the fund's stock weight in large-cap companies of its own region ([§7](#7-large-cap-and-the-reference-benchmarks)) to enter; ≥ 65% to stay – a global fund in each region | Holdings outside large cap have no benchmark weight, so they would all count as overweights. |
 | Equal weighting | Not an equal-weighted fund: the fund says it weights its holdings equally (in its name or description) **and** its holdings are flat – its 90th-percentile position under **2×** its 10th-percentile one | An equal-weighted fund's weights come from its method, not the manager's view of each stock: its overweights would simply be its smallest companies. Both signals are needed – descriptions can be wrong, and many concentrated managers size their picks alike by choice. |
 | Holdings freshness | Latest holdings ≤ 14 days old | Ideas must be current. |
@@ -166,6 +165,14 @@ A company can trade as several listings – share classes (Alphabet GOOGL / GOOG
 4. **The listing exchange** – US when the company's main listing is on a US exchange.
 
 So TSMC, ASML, Shell, Shopify, PDD, Trip.com and Spotify are international (whatever their US listings), while Accenture, Medtronic, Linde and Chubb – incorporated abroad, run from the US and held by the US index – are US. The same rule is used everywhere: manager profiles, the benchmarks and both parts of the fund.
+
+**Developed or emerging market** – an international company is **developed** or **emerging** in FTSE's classification, the index family behind the international index funds (Korea and Poland are developed; Taiwan, China, India, Brazil and Saudi Arabia emerging), by the first of these that decides:
+
+1. **The index provider's assignment** – a company held by the emerging-markets index fund (FTSE Emerging) is emerging, one held by the developed ex-US fund (FTSE Developed) developed; held by both, the one holding it at least twice the other's float-adjusted value decides.
+2. **Its country** – a company neither fund holds takes the classification of its country, as the index-held companies of that country have it, so a reclassification by the index provider follows on its own. A tax haven, or a US country of record (a depositary receipt's or a US holding company's), says nothing about the market.
+3. **Its country of incorporation**, the same way.
+
+A company none of these decide – frontier markets such as Kazakhstan or Argentina – belongs to neither market: it is measured against the whole international large-cap market and can't be held (it belongs to neither international part).
 
 ### Validated prices and market caps
 
@@ -213,15 +220,16 @@ The lines therefore move with the market: when markets rise, so do the lines, an
 
 ### The reference benchmarks
 
-Three benchmarks are rebuilt weekly from the full screened universe (every listed company above the screening threshold, across about 40 exchanges):
+Four benchmarks are rebuilt weekly from the full screened universe (every listed company above the screening threshold, across about 40 exchanges):
 
 | Benchmark | Members | Used for |
 |-----------|---------|----------|
 | **US Large Cap Value** | The US large-cap companies classified value ([§8](#8-value--growth-style-of-us-companies)) | US value companies |
 | **US Large Cap Growth** | The US large-cap companies classified growth | US growth companies |
-| **International Large Cap** | The international large-cap companies | International companies |
+| **International Large Cap Developed** | The international large-cap companies of developed markets ([§6](#6-company-data-and-data-quality)) | International developed-market companies |
+| **International Large Cap Emerging** | The international large-cap companies of emerging markets | International emerging-market companies |
 
-Within each benchmark, **weights are proportional to the whole company's market cap** – the size the managers themselves see and size positions against ([§13](#13-design-decisions-and-known-limitations)) – and add up to 100%. In the US, each company belongs wholly to one style.
+Within each benchmark, **weights are proportional to the whole company's market cap** – the size the managers themselves see and size positions against ([§13](#13-design-decisions-and-known-limitations)) – and add up to 100%. Each US company belongs wholly to one style, each international company wholly to one market. Emerging markets are about 38% of the international large-cap market by whole market cap (29% float-adjusted, September 2026).
 
 ## 8. Value / growth style of US companies
 
@@ -231,7 +239,7 @@ Each US company carries one style, **value** or **growth**, which decides the US
 2. **Active managers' classification** – a company not in the reference ETFs but held by active ETFs whose own profile is value or growth (at least 60% of their style-classified holdings) takes that style.
 3. **Statistical classifier** – for the rest, a gradient-boosting model trained on the reference-classified companies' fundamentals (size, sector, industry, growth rates, margins, P/E, P/B, yields) predicts value or growth.
 
-International companies are measured against the whole international large-cap market, and the international holdings are not split by style: the index providers' style classifications used above are US-only, and a large part of the international market has no reliable style.
+International companies are measured against their own market – developed or emerging – rather than their style, and the international holdings are not split by style: the index providers' style classifications used above are US-only, and a large part of the international market has no reliable style, whereas every international company's market is known from the index provider.
 
 ## 9. Measuring a manager's best ideas
 
@@ -242,27 +250,29 @@ For every active ETF, each week:
 **Active weight.** For each company the ETF holds, two weights are compared:
 
 - **the manager's weight** – the share of the ETF's stock portfolio invested in the company, across all its listings;
-- **the benchmark weight** – the company's share of its reference benchmark: for a US company, US Large Cap Value if it is a value company, US Large Cap Growth if it is a growth company; for an international company, International Large Cap. A company below its region's large-cap line is in none, so its benchmark weight is zero.
+- **the benchmark weight** – the company's share of its reference benchmark: for a US company, US Large Cap Value if it is a value company, US Large Cap Growth if it is a growth company; for an international company, International Large Cap Developed if it is a developed-market company, International Large Cap Emerging if it is an emerging-market one. A company below its region's large-cap line is in none, so its benchmark weight is zero.
 
-The **active weight** is the difference: how much more of the company the manager holds than the benchmark does. For example, an international manager with 3% of its fund in a company that makes up 0.5% of the International Large Cap benchmark has an active weight of 2.5 percentage points – a clear overweight. A company held at or below its benchmark weight is not an overweight at all.
+The **active weight** is the difference: how much more of the company the manager holds than the benchmark does. For example, an international manager with 3% of its fund in a company that makes up 0.5% of the International Large Cap Developed benchmark has an active weight of 2.5 percentage points – a clear overweight. A company held at or below its benchmark weight is not an overweight at all.
 
 All of a manager's active weights are then ranked together.
 
 **Why US companies are measured against their own style.** A manager's overweight is most meaningful against the peers it competes with for a place in the portfolio. Measured against the whole US large-cap market, a value manager that holds a growth mega-cap at well below its growth-index weight could still show it as one of its largest overweights – a conviction it doesn't have. Against the growth benchmark, where that company weighs more, it shows as what it is. The manager itself needs no style label: each of its holdings is simply compared with its own style's benchmark. (The few US large-cap companies with no style – about 0.1% of the market – are measured against the whole US large-cap market.)
+
+**Why international companies are measured against their own market.** Against the whole international large-cap market, a dedicated emerging-markets manager's largest overweights would simply be the largest emerging-market companies – TSMC, Tencent, Alibaba, the big Indian banks – because the manager holds only emerging markets, which are a minority of the international market: an allocation between developed and emerging markets, not stock selection. Against the emerging benchmark, an emerging-markets manager's overweights are its stock picks within its own market, so emerging-markets managers are among the fund's international managers. A manager holding both markets is measured against both, each holding against its own market's benchmark. (The few international companies of neither market – frontier markets – are measured against the whole international large-cap market.)
 
 **Selection.** Companies with a positive active weight are ranked from the largest overweight down. An active weight above **20%** is treated as abnormal (a data problem or an extreme concentrated bet) and dropped. A company from **the other region** – a US manager's holding in TSMC or Shell, an international manager's holding in a US company – counts in the manager's total, but is never one of its best ideas: each part of the fund takes only its own region's companies from its own region's managers, so such an idea could never be bought and would only push a usable one out of the manager's list. The **top 10** per ETF are that manager's best ideas, with their rank (1 = the largest overweight).
 
 **Global managers: two parts.** A global fund is measured as two managers: its **US holdings** and its **international holdings**, each re-weighted to 100% of that part – the manager's weight in the company within the region – and measured exactly as a US or an international fund's holdings are, with its own top 10. For example, a global fund 60% in the US with 3% in Microsoft has 5% of its US holdings in it; 2% in Nestlé is 5% of its 40% international holdings. Its US list then competes in the fund's US parts and its international list in the international part. Measuring the whole fund against one combined world benchmark would skew its ideas three ways:
 
 - **Its region allocation would leak into every stock.** A global manager five points underweight the US would show every US holding a little less overweight and every international one a little more – a call on regions, not on stocks. Within each region the weight is the manager's own, so only its stock selection is measured.
-- **The style benchmarks would favour international companies.** US companies are measured against their own style's benchmark, where a large company weighs 1.75× (growth) to 2.3× (value) its weight in the whole US market; international companies against the whole international market. Ranked together, the US holdings would show smaller overweights and the international ones would crowd the top 10.
+- **The style benchmarks would favour international companies.** US companies are measured against their own style's benchmark, where a large company weighs 1.75× (growth) to 2.3× (value) its weight in the whole US market; international companies against their own market's (developed or emerging). Ranked together, the US holdings would show smaller overweights and the international ones would crowd the top 10.
 - **Its ranks would not compare with the regional managers'.** One top 10 across both regions spreads a global manager's ideas over the two regions at lower ranks (2, 5, 9 rather than 1, 2, 3), so its ideas would earn fewer points than a regional manager's. With a list per region, it scores in each region like a manager of that region.
 
 **Companies below the large-cap line.** Such a company has no benchmark weight, so its whole ETF weight is active weight. The fund applies the large-cap test itself ([§10](#10-building-the-portfolio)), so these never enter as new buys.
 
 ## 10. Building the portfolio
 
-The fund is built as three parts – **US growth, US value and international holdings** – the US parts from US managers and global managers' US lists, the international part from international managers and global managers' international lists.
+The fund is built as four parts – **US growth, US value, international developed and international emerging holdings** – the US parts from US managers and global managers' US lists, the international parts from international managers and global managers' international lists.
 
 ### The US / international split
 
@@ -292,11 +302,25 @@ The style split is recalculated with the region split, each quarter. The growth 
 
 The international holdings are not split by style ([§8](#8-value--growth-style-of-us-companies)). A US company of neither style – rare – belongs to neither US part and is not held.
 
+### The developed / emerging split of the international holdings
+
+The international holdings are divided between developed and emerging markets the same way: by **the international developed and emerging benchmarks' float-adjusted values** – the same two benchmarks each international company's active weight is measured against ([§9](#9-measuring-a-managers-best-ideas)). An emerging-market company is measured against the emerging market and competes for an emerging position, and the number of emerging positions is the emerging market's share of the international market. Float adjustment matters here too: state-controlled and family-held emerging-market companies would weigh more on whole market caps (about 38% emerging, against 29% float-adjusted).
+
+The market split is recalculated with the region split, each quarter. The emerging share of the international holdings is rounded to the nearest whole number (a half rounds up), with developed taking the rest. On the September 2026 benchmarks, as an illustration:
+
+| International market | Float-adjusted value | Weight | Holdings |
+|----------------------|----------------------|--------|----------|
+| Developed | $27.5T | 71.5% | 12 |
+| Emerging | $11.0T | 28.5% | 5 |
+| Total | $38.5T | 100.0% | 17 |
+
+An international company of neither market – frontier markets – belongs to neither international part and is not held.
+
 ### The candidate lists
 
 For each part:
 
-1. **Collect** the best ideas of that region's active ETFs from the last two weeks (the rebalancing period): US companies from US managers and global managers' US lists, international companies from international managers and global managers' international lists. A global manager counts once in each region.
+1. **Collect** the best ideas of that region's active ETFs from the last two weeks (the rebalancing period): US companies from US managers and global managers' US lists, international companies from international managers and global managers' international lists. A global manager counts once in each region. Each part then keeps its own style's (US) or market's (international) companies.
 2. **Filter**: only companies that are large cap on the rebalancing date – their whole market cap at or above their region's breakpoint, with at least 10% float ([§7](#7-large-cap-and-the-reference-benchmarks)).
 3. **Score each company across managers.** Each of the region's managers gives a company points for its rank on that manager's best-ideas list – all ten ranks count – and the points are summed into the company's **consensus score**:
 
@@ -309,11 +333,11 @@ For each part:
 
 So a stock that is the #2 of three managers (768) comes ahead of one that is the #1 of a single manager (512), and a stock ranked #4 to #10 by many managers can outscore one ranked #3 by only one. The ranking deltas within a manager's list, which can be marginal, matter less than how many managers agree.
 
-5. **The ideal portfolio** is the top of each list up to its part's share of the holdings (the top 19 US growth, 14 US value and 17 international companies at the November 2026 split), each part ordered by its own scores: US growth companies against each other, US value companies against each other. A part with fewer eligible ideas than its target holds fewer; the shortfall is not made up from another part.
+5. **The ideal portfolio** is the top of each list up to its part's share of the holdings (the top 19 US growth, 14 US value, 12 international developed and 5 international emerging companies at the splits above), each part ordered by its own scores: US growth companies against each other, emerging-market companies against each other. A part with fewer eligible ideas than its target holds fewer; the shortfall is not made up from another part – except that an emerging part short of ideas leaves its places to the developed part.
 
 ### Weighting
 
-Every holding is held at **equal weight**: 1/50, or 2%. So the split by number of holdings is also the split by weight (66% US / 34% international at 33 / 17; 38% US growth / 28% US value at 19 / 14 – rounding to whole holdings keeps each within one holding, 2%, of the market split). If fewer than 50 eligible ideas exist on a rebalancing date, the fund holds what there is, still equally weighted.
+Every holding is held at **equal weight**: 1/50, or 2%. So the split by number of holdings is also the split by weight (66% US / 34% international at 33 / 17; 38% US growth / 28% US value at 19 / 14; 24% international developed / 10% international emerging at 12 / 5 – rounding to whole holdings keeps each within one holding, 2%, of the market split). If fewer than 50 eligible ideas exist on a rebalancing date, the fund holds what there is, still equally weighted.
 
 ## 11. Maintaining the portfolio: rebalancing and turnover
 
@@ -321,15 +345,15 @@ The fund is rebalanced every two weeks, on the weekly run. Starting from the cur
 
 | Current holding | Action |
 |-----------------|--------|
-| Within the top 1.25 × its part's target by its part's score – the top 24 US growth, 18 US value and 22 international at 19 / 14 / 17 – the line moves with the targets | **Keep** – a holding that drifts a few places below its part's cut-off is tolerated, to limit turnover |
+| Within the top 1.25 × its part's target by its part's score – the top 24 US growth, 18 US value, 15 international developed and 7 international emerging at 19 / 14 / 12 / 5 – the line moves with the targets | **Keep** – a holding that drifts a few places below its part's cut-off is tolerated, to limit turnover |
 | Still scored, but below that line | **Sell** – "below the score buffer" |
 | No longer among any of its region's managers' best ideas | **Sell** – "no longer a best idea" |
 
-Free positions are then filled **part by part** (**buys**): each part's from its own ideal holdings, in score order, up to its target (19, 14 or 17). A sold international holding is replaced by an international idea, a sold US value holding by a US value idea. A held stock is not replaced merely because a higher-scoring idea has appeared: positions are only freed by sells, so a new idea that scores inside its part's top can wait outside the fund until a position frees up. That delay is the price of the lower turnover. All holdings are then reset to equal weight.
+Free positions are then filled **part by part** (**buys**): each part's from its own ideal holdings, in score order, up to its target (19, 14, 12 or 5). A sold emerging-market holding is replaced by an emerging-market idea, a sold US value holding by a US value idea. A held stock is not replaced merely because a higher-scoring idea has appeared: positions are only freed by sells, so a new idea that scores inside its part's top can wait outside the fund until a position frees up. That delay is the price of the lower turnover. All holdings are then reset to equal weight.
 
-**The split between rebalances.** Each part buys only up to its target less the holdings it kept, so the fund holds exactly its targets (19 US growth, 14 US value and 17 international at the November 2026 split). Holdings are never sold to make room. A part short of eligible ideas holds fewer, and the shortfall is not made up from another part.
+**The split between rebalances.** Each part buys only up to its target less the holdings it kept, so the fund holds exactly its targets (19 US growth, 14 US value, 12 international developed and 5 international emerging at the splits above). Holdings are never sold to make room. A part short of eligible ideas holds fewer, and the shortfall is not made up from another part – except that an emerging part's goes to the developed part.
 
-**When the quarterly split changes.** A new split can move positions between the targets, and the keep lines move with them. No holding is sold to rebalance: the part now above its target makes no buys until its own sells bring it down, and each freed position goes to the part below its target. The fund reaches the new split through normal turnover. A US company whose style changes moves to the other style's part, where it is measured against the other benchmark and kept only while it stays within that part's keep line.
+**When the quarterly split changes.** A new split can move positions between the targets, and the keep lines move with them. No holding is sold to rebalance: the part now above its target makes no buys until its own sells bring it down, and each freed position goes to the part below its target. The fund reaches the new split through normal turnover. A US company whose style changes moves to the other style's part, where it is measured against the other benchmark and kept only while it stays within that part's keep line; likewise an international company the index provider reclassifies between developed and emerging.
 
 Other maintenance rules:
 
@@ -352,14 +376,15 @@ A **simulation** replays the same rules week by week over the holdings collected
 **Design decisions**
 
 - **US companies against their own style's benchmark.** Out-of-style mega-caps aren't credited as convictions ([§9](#9-measuring-a-managers-best-ideas)). The trade-off: a US manager that holds both styles is measured against two benchmarks in which large companies weigh more than in the whole US large-cap market (×2.3 for value, ×1.75 for growth), so its largest holdings rank somewhat lower. Accepted.
-- **International companies against the whole international large-cap market**, for want of a reliable international style classification – so the international holdings have no style split either.
+- **International companies against their own market's benchmark** – developed or emerging – rather than their style, for want of a reliable international style classification (so the international holdings have no style split). Emerging-markets managers are measured on their stock picks, not on their allocation to emerging markets, which is what lets them into the fund's managers. The trade-off, as in the US: a manager holding both markets is measured against two benchmarks, so its largest holdings rank somewhat lower than against the whole international market. Accepted.
+- **The developed / emerging split on the same benchmarks as the ideas.** The managers decide which international companies, the market decides how many of each market – so the fund's emerging-market exposure follows the market rather than how many of its international managers happen to invest in emerging markets.
 - **The style split on the same benchmarks as the ideas.** US companies are measured against their own style's benchmark and compete for their own style's positions, sized by that benchmark's share of the US market. The fund's growth / value balance follows the market rather than whichever style the managers happen to favour in a given week: the managers decide which companies, the market decides how many of each style.
 - **Each region from its own managers.** US ideas come from US managers and international ideas from international managers, each measured against its own market, so the two parts of the fund don't compete on incomparable active weights.
 - **Global managers as two regional managers.** A global fund's US and international holdings are each measured as a fund of that region, at the manager's weights within the region, so its region allocation doesn't move its stock ideas and its lists compare with the regional managers'. Each part must hold the 20 stocks a regional fund needs.
 - **Whole-company cap, not float-adjusted, for benchmark weights.** Managers size positions against a company's full size; a float-adjusted benchmark would make closely held companies look like overweights for every manager. A float-weighted version was tested and reverted. Float is used only as a minimum (10%) for large-cap membership.
 - **Market-relative large-cap lines** rather than fixed dollar thresholds, so "large cap" means the same thing in every market and every market environment.
 - **Consensus before single conviction.** A company's score adds up every manager that ranks it, each rank worth half the one above, so agreement across managers weighs as much as the strength of one manager's view, and marginal differences between neighbouring ranks matter less. Ranking by best rank alone (the earlier rule) let one manager's #1 outrank ten managers' #2 and turned small active-weight differences into portfolio changes.
-- **Managers selected by holdings behaviour.** Funds are kept or excluded by what they hold – derivatives, sector concentration against the benchmarks, country and emerging-market exposure, benchmark coverage – never by their name, except a fund named after an index (it follows that index) and an equal-weighted fund (it says so and its holdings show it), at round levels rather than levels fitted to the funds of the day.
+- **Managers selected by holdings behaviour.** Funds are kept or excluded by what they hold – derivatives, sector concentration against the benchmarks, country concentration, benchmark coverage – never by their name, except a fund named after an index (it follows that index) and an equal-weighted fund (it says so and its holdings show it), at round levels rather than levels fitted to the funds of the day.
 - **Every manager counts equally**, regardless of assets under management or holdings date – the method aggregates opinions, not money.
 - **Equal weight.** Each idea gets the same conviction in the fund, whatever the company's size; the fund carries no market-cap tilt.
 
@@ -371,7 +396,8 @@ A **simulation** replays the same rules week by week over the holdings collected
 - **Active ETFs only.** Mutual funds and separately managed accounts, which hold most active assets, are not covered; the manager population is younger and skewed toward sponsors that have launched ETFs, and international managers are fewer than US ones.
 - **One firm, several managers.** Funds from the same firm – a global, a US and an international fund drawing on one research team – each count as a manager, so a firm with several qualifying funds has several voices.
 - **Vendor data.** Holdings, prices, share counts and style factors come from one vendor (FMP); the validation in [§6](#6-company-data-and-data-quality) catches known failure modes but cannot rule out every error. Lines that cannot be identified (a small share of weight, mostly emerging-market names) take no part.
-- **Style is a single label.** Each US company is wholly value or wholly growth; companies near the boundary can change side when the index providers reconstitute, which changes the benchmark they are measured against and the part of the fund they compete for.
+- **Style is a single label.** Each US company is wholly value or wholly growth; companies near the boundary can change side when the index providers reconstitute, which changes the benchmark they are measured against and the part of the fund they compete for. The same holds for an international company's market when the index provider reclassifies a country.
+- **Frontier markets left out.** An international company of neither market – one the international index funds don't hold, in a country they don't cover – can't be held.
 - **No risk model.** Equal weighting is a rule, not an optimisation; no sector or country limits, currency hedging, risk model, transaction costs or liquidity constraints are applied.
 - **No performance claim.** This document describes how the fund is constructed; it makes no claim about its future performance.
 
@@ -386,8 +412,9 @@ A **simulation** replays the same rules week by week over the holdings collected
 | **Consensus score** | The sum of the rank points a company earns from every manager ranking it. |
 | **Company market cap** | The whole company's equity value, all share classes, in USD. |
 | **Float factor** | The investable share of a company's equity, from the index funds' holdings or free float. |
-| **Market split** | The fund's division of its holdings between the US and international, and of the US holdings between growth and value, by the reference benchmarks' float-adjusted values, recalculated quarterly. |
-| **Part** | US growth, US value or international: a share of the fund's holdings, filled from its own ordered list of ideas. A global manager's US and international holdings are also measured as two parts, one per region. |
+| **Developed / emerging market** | An international company's market in FTSE's classification, the index family behind the international index funds (Korea developed). |
+| **Market split** | The fund's division of its holdings between the US and international, of the US holdings between growth and value, and of the international holdings between developed and emerging markets, by the reference benchmarks' float-adjusted values, recalculated quarterly. |
+| **Part** | US growth, US value, international developed or international emerging: a share of the fund's holdings, filled from its own ordered list of ideas. A global manager's US and international holdings are also measured as two parts, one per region. |
 | **Primary listing** | The listing that represents a company: its home-market ordinary shares. |
 | **Rank** | A company's position in a manager's best-ideas list (1 = largest overweight). |
 | **Region** | US or international: the index providers' country assignment, else the head-office country, else the country of incorporation, else the listing exchange. |
@@ -405,10 +432,11 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Company region: held by both index markets | One market's float-adjusted holding ≥ 2× the other's decides |
 | Manager: index name | No index provider's brand or "index" in the fund's name (the fund company's name aside) |
 | Manager: size | Large or all-cap |
-| Manager: number of stocks | 20–200 (US) / 20–250 (international); global: both, per region |
+| Manager: number of stocks | 20–200 (US) / 20–250 (international), a depositary receipt counting as its company's stock; global: both, per region |
 | Manager: derivatives | Excluded for good once holdings show an option or an equity-linked note |
 | Manager: sector concentration | No sector > 20 points above its highest benchmark weight |
-| International manager (global: its international holdings): top country / emerging markets | ≤ 35% / ≤ 35% |
+| International manager (global: its international holdings): top country | ≤ 50% |
+| Company market: held by both international index funds | One fund's float-adjusted holding ≥ 2× the other's decides |
 | Manager: benchmark coverage | ≥ 70% to enter / ≥ 65% to stay (global: in each region) |
 | Manager: equal weighting | Excluded when the fund says it weights equally and its 90th-percentile position is under 2× its 10th-percentile one |
 | Manager: holdings transparency | Excluded when a prospectus of its own from the last 15 months carries the non-transparent ETF legend |
@@ -423,9 +451,10 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Best ideas: maximum active weight | 20% |
 | Best ideas: per ETF | 10 |
 | Fund: holdings | 50 – US / international by the market split: the reference benchmarks' float-adjusted totals, recalculated quarterly (65.0% / 35.0% → 33 / 17, November 2026) |
-| Fund: US growth / value | By the US growth and value benchmarks' float-adjusted totals, recalculated quarterly (57.5% / 42.5% → 19 / 14, November 2026); international not split |
+| Fund: US growth / value | By the US growth and value benchmarks' float-adjusted totals, recalculated quarterly (57.5% / 42.5% → 19 / 14, November 2026); international not split by style |
+| Fund: international developed / emerging | By the international developed and emerging benchmarks' float-adjusted totals, recalculated quarterly (71.5% / 28.5% → 12 / 5 on the September 2026 benchmarks) |
 | Fund: rank points, ranks 1–10 | 512, 256, 128, 64, 32, 16, 8, 4, 2, 1 |
 | Fund: weighting | Equal (2%) |
 | Fund: rebalancing | Every two weeks |
-| Fund: keep buffer | Top 1.25 × each part's target by score (top 24 US growth / 18 US value / 22 international at 19 / 14 / 17) |
+| Fund: keep buffer | Top 1.25 × each part's target by score (top 24 US growth / 18 US value / 15 international developed / 7 international emerging at 19 / 14 / 12 / 5) |
 | Weekly run | Wednesday on Tuesday's close (moved around NYSE holidays) |
