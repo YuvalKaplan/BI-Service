@@ -36,7 +36,7 @@ The fund applies this across the population of US-listed, actively managed, dive
 2. read each one's holdings every week;
 3. for each, measure each holding's **active weight** – its weight in the ETF minus its weight in the relevant large-cap benchmark – and keep the top overweights as that manager's best ideas (a global manager's US and international holdings separately);
 4. combine the best ideas of all managers in each region into a consensus score – points for each manager's rank, summed – so the stocks that several managers rank highly come first;
-5. split the 50 holdings between the US and international, the US holdings between growth and value, and the international holdings between developed and emerging markets, by their float-adjusted weight in the reference benchmarks (19 US growth, 14 US value, and 17 international – about 12 developed and 5 emerging), hold each part's top large-cap companies at equal weight, and rebalance every two weeks with turnover controls.
+5. split the 50 holdings between the US and international, the US holdings between growth and value, and the international holdings between developed and emerging markets, by their float-adjusted weight in the reference benchmarks (19 US growth, 14 US value, and 17 international – 13 developed and 4 emerging, as of November 2026), hold each part's top large-cap companies at equal weight, and rebalance every two weeks with turnover controls.
 
 Active ETFs are used rather than mutual funds because they publish their holdings far more often (most daily; we read them weekly – [§5](#5-holdings)), so the ideas are recent rather than a quarter old.
 
@@ -50,7 +50,7 @@ Active ETFs are used rather than mutual funds because they publish their holding
 | **Best ideas measured against** | US companies: the US Large Cap Value benchmark for value companies, the US Large Cap Growth benchmark for growth companies. International companies: the International Large Cap Developed benchmark for developed-market companies, the International Large Cap Emerging benchmark for emerging-market companies |
 | **Ideas used** | Each manager's ten best ideas, scored by rank and summed across managers |
 | **Style** | US holdings by number: each style's float-adjusted weight in the US value and growth benchmarks, recalculated quarterly – 57.5% growth / 42.5% value as of November 2026, so 19 and 14 of the 33. International holdings: no style split |
-| **Developed / emerging** | International holdings by number: each market's float-adjusted weight in the International developed and emerging benchmarks, recalculated quarterly – 71.5% developed / 28.5% emerging on the September 2026 benchmarks, so 12 and 5 of the 17 |
+| **Developed / emerging** | International holdings by number: each market's float-adjusted weight in the International developed and emerging benchmarks, recalculated quarterly – 73.5% developed / 26.5% emerging as of November 2026, so 13 and 4 of the 17 |
 | **Holdings** | 50 |
 | **Weighting** | Equal (2% each) |
 | **Rebalancing** | Every two weeks, with turnover controls |
@@ -64,7 +64,7 @@ Active ETFs are used rather than mutual funds because they publish their holding
 | Company data | Prices, market caps, share-class consolidation, region and developed / emerging market, validation ([§6](#6-company-data-and-data-quality)) | Daily |
 | Large-cap lines and benchmarks | Where large cap ends in each region; the reference benchmarks ([§7](#7-large-cap-and-the-reference-benchmarks)) | Weekly |
 | Best ideas | Top 10 active weights per ETF ([§9](#9-measuring-a-managers-best-ideas)) | Weekly |
-| Portfolio | Candidate lists per part → US growth + US value + international developed + international emerging holdings (19 + 14 + 12 + 5) → buys and sells ([§10](#10-building-the-portfolio), [§11](#11-maintaining-the-portfolio-rebalancing-and-turnover)) | Every two weeks |
+| Portfolio | Candidate lists per part → US growth + US value + international developed + international emerging holdings (19 + 14 + 13 + 4) → buys and sells ([§10](#10-building-the-portfolio), [§11](#11-maintaining-the-portfolio-rebalancing-and-turnover)) | Every two weeks |
 
 ## 3. Data sources
 
@@ -229,7 +229,7 @@ Four benchmarks are rebuilt weekly from the full screened universe (every listed
 | **International Large Cap Developed** | The international large-cap companies of developed markets ([§6](#6-company-data-and-data-quality)) | International developed-market companies |
 | **International Large Cap Emerging** | The international large-cap companies of emerging markets | International emerging-market companies |
 
-Within each benchmark, **weights are proportional to the whole company's market cap** – the size the managers themselves see and size positions against ([§13](#13-design-decisions-and-known-limitations)) – and add up to 100%. Each US company belongs wholly to one style, each international company wholly to one market. Emerging markets are about 38% of the international large-cap market by whole market cap (29% float-adjusted, September 2026).
+Within each benchmark, **weights are proportional to the whole company's market cap** – the size the managers themselves see and size positions against ([§13](#13-design-decisions-and-known-limitations)) – and add up to 100%. Each US company belongs wholly to one style, each international company wholly to one market. Emerging markets are about 35% of the international large-cap market by whole market cap (26.5% float-adjusted, November 2026).
 
 ## 8. Value / growth style of US companies
 
@@ -304,15 +304,15 @@ The international holdings are not split by style ([§8](#8-value--growth-style-
 
 ### The developed / emerging split of the international holdings
 
-The international holdings are divided between developed and emerging markets the same way: by **the international developed and emerging benchmarks' float-adjusted values** – the same two benchmarks each international company's active weight is measured against ([§9](#9-measuring-a-managers-best-ideas)). An emerging-market company is measured against the emerging market and competes for an emerging position, and the number of emerging positions is the emerging market's share of the international market. Float adjustment matters here too: state-controlled and family-held emerging-market companies would weigh more on whole market caps (about 38% emerging, against 29% float-adjusted).
+The international holdings are divided between developed and emerging markets the same way: by **the international developed and emerging benchmarks' float-adjusted values** – the same two benchmarks each international company's active weight is measured against ([§9](#9-measuring-a-managers-best-ideas)). An emerging-market company is measured against the emerging market and competes for an emerging position, and the number of emerging positions is the emerging market's share of the international market. Float adjustment matters here too: state-controlled and family-held emerging-market companies would weigh more on whole market caps (about 35% emerging, against 26.5% float-adjusted).
 
-The market split is recalculated with the region split, each quarter. The emerging share of the international holdings is rounded to the nearest whole number (a half rounds up), with developed taking the rest. On the September 2026 benchmarks, as an illustration:
+The market split is recalculated with the region split, each quarter. The emerging share of the international holdings is rounded to the nearest whole number (a half rounds up), with developed taking the rest. As of November 2026:
 
 | International market | Float-adjusted value | Weight | Holdings |
 |----------------------|----------------------|--------|----------|
-| Developed | $27.5T | 71.5% | 12 |
-| Emerging | $11.0T | 28.5% | 5 |
-| Total | $38.5T | 100.0% | 17 |
+| Developed | $26.9T | 73.5% | 13 |
+| Emerging | $9.7T | 26.5% | 4 |
+| Total | $36.5T | 100.0% | 17 |
 
 An international company of neither market – frontier markets – belongs to neither international part and is not held.
 
@@ -333,11 +333,11 @@ For each part:
 
 So a stock that is the #2 of three managers (768) comes ahead of one that is the #1 of a single manager (512), and a stock ranked #4 to #10 by many managers can outscore one ranked #3 by only one. The ranking deltas within a manager's list, which can be marginal, matter less than how many managers agree.
 
-5. **The ideal portfolio** is the top of each list up to its part's share of the holdings (the top 19 US growth, 14 US value, 12 international developed and 5 international emerging companies at the splits above), each part ordered by its own scores: US growth companies against each other, emerging-market companies against each other. A part with fewer eligible ideas than its target holds fewer; the shortfall is not made up from another part – except that an emerging part short of ideas leaves its places to the developed part.
+5. **The ideal portfolio** is the top of each list up to its part's share of the holdings (the top 19 US growth, 14 US value, 13 international developed and 4 international emerging companies at the splits above), each part ordered by its own scores: US growth companies against each other, emerging-market companies against each other. A part with fewer eligible ideas than its target holds fewer; the shortfall is not made up from another part – except that an emerging part short of ideas leaves its places to the developed part.
 
 ### Weighting
 
-Every holding is held at **equal weight**: 1/50, or 2%. So the split by number of holdings is also the split by weight (66% US / 34% international at 33 / 17; 38% US growth / 28% US value at 19 / 14; 24% international developed / 10% international emerging at 12 / 5 – rounding to whole holdings keeps each within one holding, 2%, of the market split). If fewer than 50 eligible ideas exist on a rebalancing date, the fund holds what there is, still equally weighted.
+Every holding is held at **equal weight**: 1/50, or 2%. So the split by number of holdings is also the split by weight (66% US / 34% international at 33 / 17; 38% US growth / 28% US value at 19 / 14; 26% international developed / 8% international emerging at 13 / 4 – rounding to whole holdings keeps each within one holding, 2%, of the market split). If fewer than 50 eligible ideas exist on a rebalancing date, the fund holds what there is, still equally weighted.
 
 ## 11. Maintaining the portfolio: rebalancing and turnover
 
@@ -345,13 +345,13 @@ The fund is rebalanced every two weeks, on the weekly run. Starting from the cur
 
 | Current holding | Action |
 |-----------------|--------|
-| Within the top 1.25 × its part's target by its part's score – the top 24 US growth, 18 US value, 15 international developed and 7 international emerging at 19 / 14 / 12 / 5 – the line moves with the targets | **Keep** – a holding that drifts a few places below its part's cut-off is tolerated, to limit turnover |
+| Within the top 1.25 × its part's target by its part's score – the top 24 US growth, 18 US value, 17 international developed and 5 international emerging at 19 / 14 / 13 / 4 – the line moves with the targets | **Keep** – a holding that drifts a few places below its part's cut-off is tolerated, to limit turnover |
 | Still scored, but below that line | **Sell** – "below the score buffer" |
 | No longer among any of its region's managers' best ideas | **Sell** – "no longer a best idea" |
 
-Free positions are then filled **part by part** (**buys**): each part's from its own ideal holdings, in score order, up to its target (19, 14, 12 or 5). A sold emerging-market holding is replaced by an emerging-market idea, a sold US value holding by a US value idea. A held stock is not replaced merely because a higher-scoring idea has appeared: positions are only freed by sells, so a new idea that scores inside its part's top can wait outside the fund until a position frees up. That delay is the price of the lower turnover. All holdings are then reset to equal weight.
+Free positions are then filled **part by part** (**buys**): each part's from its own ideal holdings, in score order, up to its target (19, 14, 13 or 4). A sold emerging-market holding is replaced by an emerging-market idea, a sold US value holding by a US value idea. A held stock is not replaced merely because a higher-scoring idea has appeared: positions are only freed by sells, so a new idea that scores inside its part's top can wait outside the fund until a position frees up. That delay is the price of the lower turnover. All holdings are then reset to equal weight.
 
-**The split between rebalances.** Each part buys only up to its target less the holdings it kept, so the fund holds exactly its targets (19 US growth, 14 US value, 12 international developed and 5 international emerging at the splits above). Holdings are never sold to make room. A part short of eligible ideas holds fewer, and the shortfall is not made up from another part – except that an emerging part's goes to the developed part.
+**The split between rebalances.** Each part buys only up to its target less the holdings it kept, so the fund holds exactly its targets (19 US growth, 14 US value, 13 international developed and 4 international emerging at the splits above). Holdings are never sold to make room. A part short of eligible ideas holds fewer, and the shortfall is not made up from another part – except that an emerging part's goes to the developed part.
 
 **When the quarterly split changes.** A new split can move positions between the targets, and the keep lines move with them. No holding is sold to rebalance: the part now above its target makes no buys until its own sells bring it down, and each freed position goes to the part below its target. The fund reaches the new split through normal turnover. A US company whose style changes moves to the other style's part, where it is measured against the other benchmark and kept only while it stays within that part's keep line; likewise an international company the index provider reclassifies between developed and emerging.
 
@@ -452,9 +452,9 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Best ideas: per ETF | 10 |
 | Fund: holdings | 50 – US / international by the market split: the reference benchmarks' float-adjusted totals, recalculated quarterly (65.0% / 35.0% → 33 / 17, November 2026) |
 | Fund: US growth / value | By the US growth and value benchmarks' float-adjusted totals, recalculated quarterly (57.5% / 42.5% → 19 / 14, November 2026); international not split by style |
-| Fund: international developed / emerging | By the international developed and emerging benchmarks' float-adjusted totals, recalculated quarterly (71.5% / 28.5% → 12 / 5 on the September 2026 benchmarks) |
+| Fund: international developed / emerging | By the international developed and emerging benchmarks' float-adjusted totals, recalculated quarterly (73.5% / 26.5% → 13 / 4, November 2026) |
 | Fund: rank points, ranks 1–10 | 512, 256, 128, 64, 32, 16, 8, 4, 2, 1 |
 | Fund: weighting | Equal (2%) |
 | Fund: rebalancing | Every two weeks |
-| Fund: keep buffer | Top 1.25 × each part's target by score (top 24 US growth / 18 US value / 15 international developed / 7 international emerging at 19 / 14 / 12 / 5) |
+| Fund: keep buffer | Top 1.25 × each part's target by score (top 24 US growth / 18 US value / 17 international developed / 5 international emerging at 19 / 14 / 13 / 4) |
 | Weekly run | Wednesday on Tuesday's close (moved around NYSE holidays) |
