@@ -53,6 +53,7 @@ class Ticker:
     free_float: float | None = None        # FMP freeFloat % of the listing; 0 = no equity float (a note / preferred) — see free_float.refresh
     float_factor: float | None = None      # index funds' float cap / our company cap (masters): normally 0-1, > 1 = our cap looks too low; a cap check and share-count witness, not weights — see free_float.refresh
     region: str | None = None
+    market_class: str | None = None        # 'developed' | 'emerging' (every listing; company.market_class - FTSE's view)
 
 
 # ── DB read ──────────────────────────────────────────────────────────────────
@@ -635,7 +636,7 @@ def clear_master_ticker_bulk(ticker_ids: list[int]) -> None:
 
 def clear_derived_data_bulk(ticker_ids: list[int]) -> None:
     """Clears what was derived from a listing's FMP data - style, ESG, free float and float
-    factor, turnover, verified share count, company cap and region - and its invalid flag, for a
+    factor, turnover, verified share count, company cap, region and market class - and its invalid flag, for a
     listing whose data turned out to be another company's (scripts/data_fix_symbol_encoding.py);
     the ticker maintenance fills them again."""
     if not ticker_ids:
@@ -648,7 +649,7 @@ def clear_derived_data_bulk(ticker_ids: list[int]) -> None:
                     SET style_type = NULL, cap_type = NULL, type_from = NULL, style_factors_failed_at = NULL,
                         esg_factors = NULL, esg_qualified = NULL, free_float = NULL, float_factor = NULL,
                         average_turnover = NULL, verified_shares = NULL, company_market_cap = NULL,
-                        region = NULL, invalid = NULL
+                        region = NULL, market_class = NULL, invalid = NULL
                     WHERE id = ANY(%s);
                 """, (ticker_ids,))
     except Error as e:
@@ -770,6 +771,21 @@ def update_region_bulk(pairs: list[tuple[int, str]]) -> None:
                 )
     except Error as e:
         raise Exception(f"Error bulk-updating region: {e}")
+
+
+def update_market_class_bulk(pairs: list[tuple[int, str | None]]) -> None:
+    """pairs: [(ticker_id, market_class), ...] — only rows whose market class actually changes are written."""
+    if not pairs:
+        return
+    try:
+        with db_pool_instance.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "UPDATE ticker SET market_class = %s WHERE id = %s AND market_class IS DISTINCT FROM %s",
+                    [(c, tid, c) for tid, c in pairs]
+                )
+    except Error as e:
+        raise Exception(f"Error bulk-updating market_class: {e}")
 
 
 def fetch_all() -> list['Ticker']:

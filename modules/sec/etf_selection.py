@@ -4,7 +4,7 @@ Which provider ETFs feed best ideas: the selection rules, applied to every provi
 
 The rules keep out the funds whose holdings wouldn't express a manager's stock picks within a
 broad large-cap market: derivative strategies, funds named after an index, equal-weighted funds,
-non-transparent funds (whose holdings are months old), single-country and emerging-market funds,
+non-transparent funds (whose holdings are months old), single-country funds,
 sector themes and funds mostly outside the large-cap universe our benchmarks measure. Each is a
 test with a round level, not one fitted to the pool of the day. An ETF is active when it is still on
 the current SEC list, its profile still finds it an equity fund, and:
@@ -19,24 +19,28 @@ the current SEC list, its profile still finds it an equity fund, and:
   2. its region is US, International or Global (config.EtfSelection.REGIONS). A Global fund (neither
      mostly US nor mostly International - etf_profile) is measured as two parts, its US companies
      and its International ones, each like an ETF of that region (best_ideas_generator.parts_of):
-     its region bet, and the US benchmarks' style split, would skew one ranking of both;
+     its region bet, and the benchmarks' splits (US value / growth, International developed /
+     emerging), would skew one ranking of both;
   3. its cap size is large or all (config.EtfSelection.CAP_TYPES);
   4. it holds config.EtfSelection.MIN_STOCK_HOLDINGS to config.EtfSelection.MAX_STOCK_HOLDINGS[region] stocks (lines matched to the index
      funds' stocks) - international managers spread over more names; a Global fund its two parts'
      limits together (holdings_range);
   5. no sector is more than config.EtfSelection.MAX_SECTOR_EXCESS above its reference weight: the highest weight that
-     sector has in our most specific benchmarks - each region's blend, or its value and growth
-     benchmarks where it's split (sector_reference). A growth fund may hold as much technology
-     as the growth benchmark, a value fund as much finance as the value one, plus the margin; a
-     sector theme exceeds both. Measured on the fund's latest stored holdings, by our tickers'
+     sector has in our most specific benchmarks - each region's blend, or its parts where it's
+     split: US value and growth, International developed and emerging (sector_reference). A growth
+     fund may hold as much technology as the growth benchmark, a value fund as much finance as the
+     value one, an emerging-markets fund as much as the emerging one, plus the margin; a sector
+     theme exceeds them all. Measured on the fund's latest stored holdings, by our tickers'
      sectors;
   6. its top country is at most config.EtfSelection.MAX_TOP_COUNTRY_WEIGHT of the fund - a single-country fund - unless
      it's a US fund whose top country is the US (our companies' domicile, a US-region company
      counting as US); a Global fund's top country outside the US at most that share of its
-     International part (international_top_country);
-  7. an International fund has at most config.EtfSelection.MAX_EMERGING_WEIGHT in emerging markets (stocks the
-     emerging index fund holds - config.IndexFunds.EMERGING_FUNDS): the funds are developed
-     international; a Global fund's International part likewise (international_emerging);
+     International part (international_top_country). Half, not a third: an emerging-markets
+     fund holds 25-45% in Taiwan or China as its benchmark does, a single-country fund 80-100%;
+  7. (none since Nov 2026 - emerging markets) an International fund's emerging-market share is no
+     rule: the International blend is split into developed and emerging benchmarks, each company
+     measured against its own market's, so an emerging-markets fund's best ideas are its stock picks,
+     not its region bet (the reason the emerging-market funds were left out until then);
   8. at least config.EtfSelection.MIN_COVERAGE_ENTRY of its stock weight is in companies of its region's blend
      benchmark (coverage) - a fund mostly in mid and small caps, or outside the benchmarks' universe,
      has best ideas the benchmark can't measure. An active fund stays while at config.EtfSelection.MIN_COVERAGE_STAY,
@@ -85,8 +89,9 @@ as FMP refreshes it or its holdings change.
 
 run() follows every profile run (the monthly SEC list update, by hand) and holdings download (the
 daily run days). It also sets each ETF's benchmark_id - its region's enabled large-cap blend /
-core benchmark, which the market best ideas compare it with (with its value / growth split, if
-any); none for a Global fund, whose parts each take their region's (benchmark_ids) - and stores
+core benchmark, which the market best ideas compare it with (with its split, if any: US value /
+growth, International developed / emerging); none for a Global fund, whose parts each take their
+region's (benchmark_ids) - and stores
 the measures behind rules 5, 8 and 12 (sector_excess, excess_sector, benchmark_coverage,
 weight_spread).
 """
@@ -105,7 +110,7 @@ from modules.ticker import company, index_funds
 
 EQUITY = 'equity'   # the profile's strategy for an actively managed equity fund (etf_profile.classify)
 RULES = ('sec', 'duplicate', 'equity', 'index', 'transparent', 'contracts', 'region', 'cap', 'holdings', 'parts', 'sector',
-         'country', 'emerging', 'coverage', 'equal_weight', 'fresh')
+         'country', 'coverage', 'equal_weight', 'fresh')
 HOLDINGS_RULES = {'fresh', 'sector', 'coverage', 'parts', 'equal_weight'}    # decided by the stored holdings: checked again on each download
 
 _MONTH = r'(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)'
@@ -240,10 +245,6 @@ def failed_rules(etf: ProviderEtf, current_series: set[str], latest: date | None
         single_country = etf.top_country_weight is None or etf.top_country_weight > config.EtfSelection.MAX_TOP_COUNTRY_WEIGHT
         if single_country and not (etf.region == company.US and etf.top_country == company.US):
             failed.append('country')
-    if etf.region in (company.INTERNATIONAL, company.GLOBAL):
-        emerging = international_emerging(etf)
-        if emerging is None or emerging > config.EtfSelection.MAX_EMERGING_WEIGHT:
-            failed.append('emerging')
     if latest is not None and (m.benchmark_coverage is None or m.benchmark_coverage < coverage_level(etf)):
         failed.append('coverage')
     if latest is not None and says_equal_weight(etf.name, etf.description) and (
@@ -278,16 +279,6 @@ def international_top_country(etf: ProviderEtf) -> float | None:
     return max(weights) / total if total > 0 else None
 
 
-def international_emerging(etf: ProviderEtf) -> float | None:
-    """The emerging share of an ETF's International stocks (rule 7): all of an International ETF's,
-    a Global ETF's International part."""
-    if etf.region != company.GLOBAL:
-        return etf.emerging_weight
-    if etf.emerging_weight is None or etf.us_weight is None or etf.us_weight >= 1:
-        return None
-    return etf.emerging_weight / (1 - etf.us_weight)
-
-
 def status_for(failed: list[str], latest: date | None) -> str:
     if not failed:
         return ACTIVE
@@ -301,18 +292,18 @@ def benchmark_ids() -> dict[str, int]:
     a Global ETF's parts take their region's - best_ideas_generator.parts_of)."""
     out: dict[str, int] = {}
     for b in benchmark.fetch_all():
-        if b.cap_type == 'large' and b.style_type in index_funds.FULL_UNIVERSE_STYLES:
+        if b.cap_type == 'large' and benchmark.is_blend(b):
             out.setdefault(b.region, b.id)
     return out
 
 
 def sector_reference(weights: dict[int, dict[int, tuple[float, str | None]]], blend_ids: dict[str, int]) -> dict[str, float]:
     """{sector: its highest weight in our most specific benchmarks}: each region's blend, or its
-    value / growth benchmarks where the region is split. weights: {benchmark_id: {company:
-    (weight, sector)}} of the latest snapshots."""
+    parts where the blend is split (US value / growth, International developed / emerging).
+    weights: {benchmark_id: {company: (weight, sector)}} of the latest snapshots."""
     references = set(weights)
     for blend_id in blend_ids.values():
-        if any(b.id in weights for b in benchmark.fetch_style_split(blend_id)):
+        if any(b.id in weights for b in benchmark.fetch_split(blend_id)):
             references.discard(blend_id)
     out: dict[str, float] = {}
     for bid in references:

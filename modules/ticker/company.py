@@ -38,6 +38,9 @@ US = 'US'
 INTERNATIONAL = 'International'
 GLOBAL = 'Global'                   # a provider ETF's region when it's neither mostly US nor mostly International
 REGIONS = (US, INTERNATIONAL)       # a company's regions - and the parts a Global ETF is measured in
+DEVELOPED = 'developed'
+EMERGING = 'emerging'
+MARKET_CLASSES = (DEVELOPED, EMERGING)   # a company's market (ticker.market_class) - the International benchmark's split
 
 
 # Lines that aren't the company's common equity. FMP reports the parent company's full market
@@ -324,3 +327,62 @@ def region(
     if tu.listing_country(master.symbol, master.exchange) is None and _company_country(members, master_id) == US:
         return US, 'exchange'
     return INTERNATIONAL, 'exchange'
+
+
+def market_class(
+    members: list[Ticker],
+    master_id: int | None,
+    region_: str,
+    latest_dates: dict[int, date] | None = None,
+    index_classes: dict[str, float] | None = None,
+    country_classes: dict[str, str] | None = None,
+) -> tuple[str | None, str]:
+    """(market class, how it was decided): 'developed' | 'emerging' (None: undecided), the first rule
+    that decides - FTSE's view, the index family behind the International index funds (Korea is
+    developed):
+
+      0. 'us' - a US company is developed (only International is split).
+      1. 'index' - the International index funds holding the company (index_classes, {market class:
+         float cap} - config.IndexFunds.EMERGING_FUNDS (VWO) emerging, the others (VEA) developed).
+         Held by both: the class with config.Company.INDEX_MARKET_DOMINANCE times the other's float cap,
+         else the next rule.
+      2. 'country' - its country (ticker.country, the region rule's) in country_classes: each
+         country's class among the companies the index funds decide (index_country_classes) -
+         derived each run, so it follows FTSE's reclassifications. A tax haven or a country no index
+         fund holds a company of (frontier markets) doesn't decide.
+      3. 'isin' - the same, for an ordinary listing's ISIN country.
+    Else None: the company is measured against the International blend, as a company of neither
+    style is against the US blend."""
+    if region_ == US:
+        return DEVELOPED, 'us'
+    held = {c: cap for c, cap in (index_classes or {}).items() if cap and cap > 0}
+    if len(held) == 1:
+        return next(iter(held)), 'index'
+    if held:
+        dev, em = held.get(DEVELOPED, 0.0), held.get(EMERGING, 0.0)
+        if dev >= config.Company.INDEX_MARKET_DOMINANCE * em:
+            return DEVELOPED, 'index'
+        if em >= config.Company.INDEX_MARKET_DOMINANCE * dev:
+            return EMERGING, 'index'
+    classes = country_classes or {}
+    country = _company_country(members, master_id)
+    if country and country not in config.Markets.TAX_HAVEN_COUNTRIES and country in classes:
+        return classes[country], 'country'
+    for t in ordered_listings(members, master_id, latest_dates=latest_dates):
+        c = tu.isin_country(t.isin)
+        if not is_secondary_line(t) and c and c not in config.Markets.TAX_HAVEN_COUNTRIES and c in classes:
+            return classes[c], 'isin'
+    return None, 'none'
+
+
+def index_country_classes(decided: list[tuple[str | None, str, float]]) -> dict[str, str]:
+    """{country: market class} from the companies the index funds decide: decided is [(country,
+    market class, float cap)], and each country takes the class holding most of its float cap. A
+    tax haven is no country of its own (Bermuda / Cayman companies are run from anywhere), and
+    neither is the US: an International company's US country or ISIN is its depositary receipt's or
+    a Delaware holding's (YPF, Kaspi, MercadoLibre), which says nothing of its market."""
+    caps: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for country, cls, cap in decided:
+        if country and country != US and country not in config.Markets.TAX_HAVEN_COUNTRIES:
+            caps[country][cls] += cap or 0.0
+    return {country: max(by_class, key=lambda c: by_class[c]) for country, by_class in caps.items() if any(by_class.values())}

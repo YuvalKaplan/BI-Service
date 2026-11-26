@@ -138,7 +138,7 @@ class UniverseWeights:
     benchmark_id: int                  # the ETF's benchmark (provider_etf.benchmark_id, its region's blend)
     holding_date: date | None          # the snapshot date (blend and style snapshots share it)
     weights: dict[int, float]          # company (master) ticker_id -> benchmark weight
-    benchmark_of: dict[int, int]       # company -> the benchmark its weight came from (value / growth / the blend)
+    benchmark_of: dict[int, int]       # company -> the benchmark its weight came from (value / growth, developed / emerging, the blend)
 
     def source(self, company_id: int) -> int:
         """The benchmark a company is measured against; one held but in no benchmark (weight 0)
@@ -221,8 +221,9 @@ def compute_active_weights(inputs: EtfInputs, universe: UniverseWeights | None =
         # market: each company's weight in the external large-cap benchmarks. Sibling rows
         # are deliberately absent from benchmark_holding (only the master is stored there), so
         # the lookup key here must already be the effective (master) id.
-        # Where the region has a style split (get_market_weights — US), a value company's weight is its
-        # weight in the value benchmark and a growth company's in the growth benchmark — all ranked together.
+        # Where the region's blend is split (get_market_weights — US by style, International by market),
+        # a value company's weight is its weight in the value benchmark, a growth company's in the growth
+        # one, an emerging company's in the emerging one, ... — all ranked together.
         grouped["benchmark_weight"] = grouped["ticker_id"].map(universe.weights).fillna(0.0)
         grouped["benchmark_id"] = grouped["ticker_id"].map(lambda t: universe.source(int(t))).astype(int)
     else:
@@ -298,33 +299,32 @@ def get_benchmark_weights(
 def get_market_weights(benchmark_id: int, as_of_date: date | None, cache: dict) -> UniverseWeights:
     """
     The market benchmark weights (best_idea.MODE_MARKET) of an ETF's benchmark (its region's blend)
-    as of as_of_date (or now), memoized in `cache`. Where the region has a value / growth split
-    (benchmark.fetch_style_split — US) each company is measured against the benchmark of its own style: a value company's weight
-    is its weight in the value benchmark, a growth company's in the growth benchmark, and a
-    company in neither (style blend / unknown, ~0.1% of US weight) keeps its blend weight. The ETF
-    itself needs no style: its holdings are each compared with their own style's benchmark and
-    ranked together. The split is used only when both style snapshots are dated as the blend's
-    (the benchmark generator forms them together); otherwise — e.g. a sim date before the split
-    was backfilled — the blend alone, with a notice. A region with no split (International) uses
-    its blend.
+    as of as_of_date (or now), memoized in `cache`. Where the blend is split (benchmark.fetch_split:
+    US by style - value / growth; International by market - developed / emerging) each company is
+    measured against the benchmark of its own part: a value company's weight is its weight in the
+    value benchmark, an emerging company's in the emerging benchmark, and a company in neither part
+    (style blend / unknown, ~0.1% of US weight; no market class) keeps its blend weight. The ETF
+    itself needs no style or market: its holdings are each compared with their own part's benchmark
+    and ranked together. The split is used only when it's complete and both snapshots are dated as
+    the blend's (the benchmark generator forms them together); otherwise — e.g. a sim date before
+    the split was backfilled — the blend alone, with a notice. A region with no split uses its blend.
     """
     key = ('universe', benchmark_id)
     if key not in cache:
         weights, holding_date = get_benchmark_weights(benchmark_id, as_of_date, cache)
         universe = UniverseWeights(benchmark_id=benchmark_id, holding_date=holding_date,
                                    weights=dict(weights), benchmark_of={cid: benchmark_id for cid in weights})
-        split = benchmark.fetch_style_split(benchmark_id) if weights else []
+        split = benchmark.fetch_split(benchmark_id) if weights else []
         if split:
             snapshots = [(b, *get_benchmark_weights(b.id, as_of_date, cache)) for b in split]
-            styles = {b.style_type for b in split}
-            if styles == set(benchmark.SPLIT_STYLES) and all(w and d == holding_date for _b, w, d in snapshots):
+            if benchmark.is_complete_split(split) and all(w and d == holding_date for _b, w, d in snapshots):
                 for b, style_weights, _d in snapshots:
                     for cid, w in style_weights.items():
                         universe.weights[cid] = w
                         universe.benchmark_of[cid] = b.id
             else:
                 log.record_notice(
-                    f"Benchmark {benchmark_id}: its value / growth split ({', '.join(f'{b.name} {d}' for b, _w, d in snapshots)}) "
+                    f"Benchmark {benchmark_id}: its split ({', '.join(f'{b.name} {d}' for b, _w, d in snapshots)}) "
                     f"doesn't match its snapshot of {holding_date} — the blend alone is used."
                 )
         cache[key] = universe
@@ -344,7 +344,7 @@ def build_analysis_rows(
     One fund_analysis row per company in `weights` (noting whether and why it did or didn't
     become a best idea), plus one per holding left out of the calculation for lack of a market
     cap or for being quarantined as an inconsistent duplicate. A company row records the
-    benchmark its weight came from (weights' benchmark_id — value / growth with a style split),
+    benchmark its weight came from (weights' benchmark_id — value / growth or developed / emerging where the blend is split),
     else benchmark_id.
     """
     rank_by_ticker = {int(t): rank for rank, t in enumerate(selected["ticker_id"], start=1)}

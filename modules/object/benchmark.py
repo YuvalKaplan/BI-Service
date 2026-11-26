@@ -14,6 +14,7 @@ class Benchmark:
     region: str
     cap_type: str
     style_type: str
+    market_class: str | None  # NULL: the whole region; 'developed' / 'emerging': a part of its blend (fetch_split)
     market_coverage: float  # its large-cap cutoff: the float cap at which its market reaches this share (market_breakpoint)
     disabled: bool
 
@@ -52,11 +53,12 @@ def fetch_by_ids(ids: list[int]) -> List[Benchmark]:
 
 
 def fetch_by_region_and_style(region: str, style_type: str) -> Benchmark | None:
+    """The region's enabled benchmark of the style - of the whole region (no market class)."""
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Benchmark)) as cur:
                 cur.execute(
-                    'SELECT * FROM public.benchmark WHERE region = %s AND style_type = %s AND disabled = false',
+                    'SELECT * FROM public.benchmark WHERE region = %s AND style_type = %s AND market_class IS NULL AND disabled = false',
                     (region, style_type)
                 )
                 return cur.fetchone()
@@ -64,12 +66,20 @@ def fetch_by_region_and_style(region: str, style_type: str) -> Benchmark | None:
         raise Exception(f"Error fetching benchmark by region/style: {e}")
 
 
+BLEND_STYLES = ('blend', 'core')     # a style_type with no style filter: the region's blend / core
 SPLIT_STYLES = ('value', 'growth')
+SPLIT_MARKETS = ('developed', 'emerging')
 
 
-def fetch_style_split(benchmark_id: int) -> List[Benchmark]:
-    """The enabled value / growth benchmarks that split this (blend / core) benchmark: same region,
-    cap_type and market_coverage. Empty when the region has no split (International)."""
+def is_blend(b: Benchmark) -> bool:
+    """A region's full-universe benchmark (large blend / core of the whole region), not a part of one."""
+    return b.style_type in BLEND_STYLES and b.market_class is None
+
+
+def fetch_split(benchmark_id: int) -> List[Benchmark]:
+    """The enabled benchmarks that split this (blend / core) benchmark: same region, cap_type and
+    market_coverage, and either a style (value / growth - US) or a market class (developed /
+    emerging - International). Empty when the region has no split."""
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(Benchmark)) as cur:
@@ -79,15 +89,27 @@ def fetch_style_split(benchmark_id: int) -> List[Benchmark]:
                     FROM public.benchmark b
                     JOIN public.benchmark s
                       ON s.region = b.region AND s.cap_type = b.cap_type AND s.market_coverage = b.market_coverage
-                     AND s.style_type = ANY(%s) AND s.disabled = false AND s.id <> b.id
+                     AND (s.style_type = ANY(%s) OR s.market_class = ANY(%s)) AND s.disabled = false AND s.id <> b.id
                     WHERE b.id = %s
                     ORDER BY s.id
                     """,
-                    (list(SPLIT_STYLES), benchmark_id)
+                    (list(SPLIT_STYLES), list(SPLIT_MARKETS), benchmark_id)
                 )
                 return cur.fetchall()
     except Error as e:
-        raise Exception(f"Error fetching the style split of benchmark {benchmark_id}: {e}")
+        raise Exception(f"Error fetching the split of benchmark {benchmark_id}: {e}")
+
+
+def split_part(b: Benchmark) -> str | None:
+    """The part of its blend a split benchmark is: its style (value / growth) or market class
+    (developed / emerging); None for a blend."""
+    return b.market_class or (b.style_type if b.style_type in SPLIT_STYLES else None)
+
+
+def is_complete_split(split: List[Benchmark]) -> bool:
+    """The split has every part of one kind: both styles, or both market classes."""
+    parts = {split_part(b) for b in split}
+    return parts == set(SPLIT_STYLES) or parts == set(SPLIT_MARKETS)
 
 
 def fetch_latest_holdings(benchmark_id: int, look_back_days: int, up_to_date: date | None = None) -> List[BenchmarkHolding]:

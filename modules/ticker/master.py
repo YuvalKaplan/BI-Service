@@ -379,6 +379,10 @@ def refresh_company_data() -> int:
       - region on every listing (standalone tickers included): 'US' | 'International'
         (company.region: the index funds holding it, else its country, else its ISIN, else its
         master's exchange; the index funds' stored snapshot, nothing downloaded).
+      - market_class on every listing: 'developed' | 'emerging' (company.market_class: US
+        companies developed; else the International index funds holding it - VWO emerging, VEA
+        developed - else its country's class among the companies they decide, else its ISIN's;
+        None when nothing decides).
     Returns the number of masters whose company cap was set.
     """
     all_tickers = ticker.fetch_all()
@@ -391,14 +395,18 @@ def refresh_company_data() -> int:
     latest = ticker_value.fetch_latest_values(grouped_ids) if grouped_ids else {}
     caps = {tid: cap for tid, (_d, cap) in latest.items()}
     latest_dates = {tid: d for tid, (d, _cap) in latest.items()}
-    held = index_funds.market_holdings()
+    by_fund, market_of = index_funds.fund_holdings()
+    held = index_funds.by_market(by_fund, market_of)
+    held_classes = index_funds.market_class_holdings(by_fund, market_of)
 
     cap_updates: list[tuple[int, float | None]] = []
     region_updates: list[tuple[int, str]] = []
     decided_by: dict[str, int] = {}
     changed: list[str] = []
+    regions: dict[int, str] = {}
     for root, members in members_of.items():
         region, how = company.region(members, root, latest_dates if len(members) > 1 else None, held.get(root))
+        regions[root] = region
         decided_by[how] = decided_by.get(how, 0) + 1
         region_updates.extend((t.id, region) for t in members)
         if root in by_id and by_id[root].region and by_id[root].region != region and not by_id[root].invalid:
@@ -406,16 +414,52 @@ def refresh_company_data() -> int:
         if len(members) > 1:
             cap_updates.append((root, company.company_market_cap(members, root, caps, latest_dates)))
 
+    class_updates, class_by, class_changed = _market_classes(members_of, by_id, regions, latest_dates, held_classes)
+
     ticker.update_company_market_cap_bulk(cap_updates)
     ticker.update_region_bulk(region_updates)
+    ticker.update_market_class_bulk(class_updates)
     cleared = ticker.clear_stale_company_market_caps()
     if changed:
         log.record_notice(f"Company region changed for {len(changed)} companies: " + "; ".join(changed[:50]))
+    if class_changed:
+        log.record_notice(f"Company market class changed for {len(class_changed)} companies: " + "; ".join(class_changed[:50]))
     log.record_status(
         f"Company data refresh: {len(cap_updates)} company cap(s), region checked on {len(region_updates)} ticker(s) "
-        f"(companies by {', '.join(f'{k} {v:,}' for k, v in sorted(decided_by.items()))}), {cleared} stale cap(s) cleared."
+        f"(companies by {', '.join(f'{k} {v:,}' for k, v in sorted(decided_by.items()))}), "
+        f"International market class by {', '.join(f'{k} {v:,}' for k, v in sorted(class_by.items()))}, {cleared} stale cap(s) cleared."
     )
     return len(cap_updates)
+
+
+def _market_classes(members_of: dict[int, list[Ticker]], by_id: dict[int, Ticker], regions: dict[int, str],
+                    latest_dates: dict, held_classes: dict[int, dict[str, float]]) -> tuple[list, dict[str, int], list[str]]:
+    """(updates [(ticker_id, market class)], {rule: International companies}, changes) - company.market_class
+    for every company: first the ones the index funds decide, whose countries then decide the rest
+    (company.index_country_classes)."""
+    def classify(root: int, members: list[Ticker], countries: dict[str, str] | None) -> tuple[str | None, str]:
+        return company.market_class(members, root, regions[root], latest_dates if len(members) > 1 else None,
+                                    held_classes.get(root), countries)
+
+    decided = []
+    for root, members in members_of.items():
+        cls, how = classify(root, members, None)
+        if how == 'index':
+            decided.append((company.company_country(members, root), cls, sum(held_classes[root].values())))
+    countries = company.index_country_classes(decided)
+
+    updates: list[tuple[int, str | None]] = []
+    by_rule: dict[str, int] = {}
+    changed: list[str] = []
+    for root, members in members_of.items():
+        cls, how = classify(root, members, countries)
+        updates.extend((t.id, cls) for t in members)
+        if how != 'us':
+            by_rule[how] = by_rule.get(how, 0) + 1
+        t = by_id.get(root)
+        if t and t.market_class and t.market_class != cls and not t.invalid and how != 'us':
+            changed.append(f"{t.symbol}:{t.exchange} {t.market_class} -> {cls} ({how})")
+    return updates, by_rule, changed
 
 
 def sync_masters_and_company_data() -> tuple[int, int, int]:

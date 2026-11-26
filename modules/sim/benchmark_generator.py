@@ -6,7 +6,7 @@ from modules.object.screener_listing import ScreenerListing
 from modules.ticker import company, pricing
 from modules.ticker import util as tu
 from modules.cron import schedule
-from modules.cron.benchmark_generator import (benchmark_cutoffs, company_float_factors, current_companies, company_styles,
+from modules.cron.benchmark_generator import (benchmark_cutoffs, company_float_factors, current_companies, company_classes,
                                               select_holdings, store_holdings)
 
 
@@ -149,7 +149,7 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
                 listing_order[cid] = order
 
         benchmarks = benchmark.fetch_all()
-        styles = company_styles(list(listing_order), benchmarks)
+        classes = company_classes(list(listing_order), benchmarks)   # today's style and market class
         float_factors = company_float_factors(list(listing_order))  # today's: no history of them is kept
         log.record_status(f"Backfilling {len(generation_days)} historical generation days from {inception_date} to {cutoff}.")
 
@@ -158,7 +158,7 @@ def run(inception_date: date) -> tuple[date, list[tuple[str, date, int]]]:
             rows = _company_caps_for_date(day, history, listing_order, region_lookup)
             # The breakpoints of the index funds' snapshot on or before the day - the earliest
             # stored one for a day before snapshots were kept.
-            selected = select_holdings(rows, benchmarks, benchmark_cutoffs(benchmarks, day), float_factors, styles)
+            selected = select_holdings(rows, benchmarks, benchmark_cutoffs(benchmarks, day), float_factors, classes)
             for b in benchmarks:
                 if selected[b.id]:
                     store_holdings(b, selected[b.id], day)

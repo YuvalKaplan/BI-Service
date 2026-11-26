@@ -41,7 +41,6 @@ from modules.ticker.resolver import FUND_REASONS, TickerResolver
 
 US = company.US
 INTERNATIONAL = company.INTERNATIONAL
-FULL_UNIVERSE_STYLES = ('blend', 'core')
 _PARTIAL_INCLUSION_SUFFIXES = ('.SS', '.SZ')
 
 
@@ -263,15 +262,48 @@ def market_holdings(as_of: date | None = None) -> dict[int, dict[str, float]]:
     it. The float caps are recomputed from the stored lines with today's company grouping
     (company_float_caps), not read from the snapshot: valued while Macy's was wrongly grouped under
     Mahindra, VWO's line FMP files under Macy's symbol carried Mahindra's whole float cap."""
+    return by_market(*fund_holdings(as_of))
+
+
+def by_market(by_fund: dict[int, dict[str, float]], market_of: dict[str, str]) -> dict[int, dict[str, float]]:
+    """fund_holdings' {company id: {fund: float cap}} as {company id: {market: float cap}}, the
+    largest float cap a fund of the market gives it."""
+    out: dict[int, dict[str, float]] = defaultdict(dict)
+    for cid, funds in by_fund.items():
+        for fund, cap in funds.items():
+            market = market_of[fund]
+            out[cid][market] = max(out[cid].get(market, 0.0), cap)
+    return out
+
+
+def fund_holdings(as_of: date | None = None) -> tuple[dict[int, dict[str, float]], dict[str, str]]:
+    """({company id: {fund: float cap}}, {fund: market}): each index fund holding each company in
+    the stored snapshot (no download) - market_holdings by fund, for the company's market class
+    (config.IndexFunds.EMERGING_FUNDS: VWO emerging, VEA developed)."""
     ls = our_listings()
     out: dict[int, dict[str, float]] = defaultdict(dict)
-    for _fund, (market, lines) in snapshot(as_of, refresh_stale=False).items():
+    market_of: dict[str, str] = {}
+    for fund, (market, lines) in snapshot(as_of, refresh_stale=False).items():
+        market_of[fund] = market
         if not lines:
             continue
         caps, _keys, _scale = company_float_caps(lines, ls)
         for key, cap in caps.items():
             if key[0] == 'c':
-                out[key[1]][market] = max(out[key[1]].get(market, 0.0), cap)
+                out[key[1]][fund] = max(out[key[1]].get(fund, 0.0), cap)
+    return out, market_of
+
+
+def market_class_holdings(by_fund: dict[int, dict[str, float]], market_of: dict[str, str]) -> dict[int, dict[str, float]]:
+    """{company id: {market class: float cap}} of the International index funds holding each company
+    (fund_holdings): an emerging fund's (config.IndexFunds.EMERGING_FUNDS) is emerging, the others' developed."""
+    out: dict[int, dict[str, float]] = defaultdict(dict)
+    for cid, funds in by_fund.items():
+        for fund, cap in funds.items():
+            if market_of.get(fund) == US:
+                continue
+            cls = company.EMERGING if fund in config.IndexFunds.EMERGING_FUNDS else company.DEVELOPED
+            out[cid][cls] = max(out[cid].get(cls, 0.0), cap)
     return out
 
 
@@ -294,7 +326,7 @@ def full_universe_coverage() -> dict[str, float]:
     core row) - the large-cap line the funds' filter and the screener share with it."""
     out: dict[str, float] = {}
     for b in benchmark.fetch_all():
-        if b.cap_type == 'large' and b.style_type in FULL_UNIVERSE_STYLES:
+        if b.cap_type == 'large' and benchmark.is_blend(b):
             out.setdefault(b.region, b.market_coverage)
     if not out:
         raise Exception("No enabled large-cap blend benchmark to take the large-cap coverage from.")

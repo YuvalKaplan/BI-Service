@@ -224,6 +224,7 @@ CREATE TABLE public.benchmark (
     region text NOT NULL,
     cap_type text NOT NULL,
     style_type text NOT NULL,
+    market_class text,
     market_coverage numeric(4,2) NOT NULL,
     disabled boolean DEFAULT false NOT NULL
 );
@@ -291,7 +292,7 @@ CREATE TABLE public.benchmark_split (
     weight double precision NOT NULL,
     CONSTRAINT benchmark_split_pkey PRIMARY KEY (id),
     CONSTRAINT benchmark_split_date_type_part_key UNIQUE (as_of_date, split_type, part),
-    CONSTRAINT benchmark_split_split_type_check CHECK (split_type IN ('region', 'style')),
+    CONSTRAINT benchmark_split_split_type_check CHECK (split_type IN ('region', 'style', 'market')),
     CONSTRAINT fk_benchmark_split_benchmark_id FOREIGN KEY (benchmark_id) REFERENCES public.benchmark(id) ON UPDATE CASCADE ON DELETE CASCADE
 );
 
@@ -1018,6 +1019,7 @@ CREATE TABLE public.ticker (
     free_float double precision,
     float_factor double precision,
     region text,
+    market_class text,
     invalid text,
     CONSTRAINT ticker_master_ticker_id_not_self CHECK (((master_ticker_id IS NULL) OR (master_ticker_id <> id)))
 );

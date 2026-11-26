@@ -6,8 +6,6 @@ from modules.object.benchmark import Benchmark
 from modules.object.screener_company import ScreenerCompany
 from modules.ticker import index_funds
 
-NO_STYLE_FILTER = ('blend', 'core')
-
 
 def current_companies(rows: list[ScreenerCompany]) -> list[tuple[int, str, float]]:
     """(company_ticker_id, region, market_cap) per screened company, read through the current
@@ -20,11 +18,11 @@ def current_companies(rows: list[ScreenerCompany]) -> list[tuple[int, str, float
     return list(out.values())
 
 
-def company_styles(company_ids: list[int], benchmarks: list[Benchmark]) -> dict[int, str | None]:
-    """{company_id: style_type} — only fetched when a benchmark filters on style."""
-    if all(b.style_type in NO_STYLE_FILTER for b in benchmarks):
+def company_classes(company_ids: list[int], benchmarks: list[Benchmark]) -> dict[int, tuple[str | None, str | None]]:
+    """{company_id: (style_type, market_class)} — only fetched when a benchmark filters on either."""
+    if all(b.style_type in benchmark.BLEND_STYLES and b.market_class is None for b in benchmarks):
         return {}
-    return {t.id: t.style_type for t in ticker.fetch_by_ids(company_ids)}
+    return {t.id: (t.style_type, t.market_class) for t in ticker.fetch_by_ids(company_ids)}
 
 
 def company_float_factors(company_ids: list[int]) -> dict[int, float | None]:
@@ -43,22 +41,29 @@ def select_holdings(
     benchmarks: list[Benchmark],
     cutoffs: dict[int, float],                # benchmark_id -> large-cap cutoff (benchmark_cutoffs)
     float_factors: dict[int, float | None],   # company_ticker_id -> float_factor
-    styles: dict[int, str | None] | None = None,
+    classes: dict[int, tuple[str | None, str | None]] | None = None,   # company_classes
 ) -> dict[int, list[tuple[int, float]]]:
     """
     {benchmark_id: [(company_ticker_id, market_cap)]}: the companies each benchmark row
     specifies — its region; a whole company cap at its market's breakpoint for its
     market_coverage and at least config.IndexFunds.MIN_FLOAT_FACTOR floating (index_funds.passes_large —
-    the S&P / Russell way); and its style_type ('blend'/'core': any style; 'value'/'growth': the
-    company's ticker.style_type).
+    the S&P / Russell way); its style_type ('blend'/'core': any style; 'value'/'growth': the
+    company's ticker.style_type); and its market_class (none: any; 'developed'/'emerging': the
+    company's ticker.market_class). A split's parts so hold exactly their blend's companies of
+    that style / market class, a company of neither being in the blend only.
     """
-    if styles is None:
-        styles = company_styles([cid for cid, _r, _mc in companies], benchmarks)
+    if classes is None:
+        classes = company_classes([cid for cid, _r, _mc in companies], benchmarks)
+
+    def fits(b: Benchmark, cid: int) -> bool:
+        style, market = classes.get(cid, (None, None))
+        return ((b.style_type in benchmark.BLEND_STYLES or style == b.style_type)
+                and (b.market_class is None or market == b.market_class))
+
     return {
         b.id: [
             (cid, mc) for cid, region, mc in companies
-            if region == b.region and index_funds.passes_large(mc, float_factors.get(cid), cutoffs[b.id])
-            and (b.style_type in NO_STYLE_FILTER or styles.get(cid) == b.style_type)
+            if region == b.region and index_funds.passes_large(mc, float_factors.get(cid), cutoffs[b.id]) and fits(b, cid)
         ]
         for b in benchmarks
     }
