@@ -82,6 +82,32 @@ class Strategy(BaseModel):
     # buys; the company's own style / market class picks its benchmark.
     benchmark: Literal['market_split', 'self'] = config.FundStrategy.BENCHMARK
     recalc_frequency_days: int = config.FundStrategy.RECALC_FREQUENCY_DAYS
+    # A holding is kept while it's within the top ceil(target x keep_buffer) of its bucket by score:
+    # 1.0 holds exactly each bucket's top list (a name below the cutoff is sold at once), 1.25 lets it
+    # slip a quarter of the bucket's places first.
+    keep_buffer: float = config.FundStrategy.KEEP_BUFFER
+    # Staggered rebalancing: the holdings are split into two halves (FundHolding.half) reviewed on
+    # alternate runs. The fund runs every recalc_frequency_days / 2 and each holding is reviewed every
+    # recalc_frequency_days, on its half's turn (review_half); new ideas can enter at every run.
+    staggered: bool = False
+
+    @field_validator('keep_buffer')
+    @classmethod
+    def _buffer_at_least_one(cls, v: float) -> float:
+        if v < 1.0:
+            raise ValueError(f"keep_buffer must be at least 1.0: {v}")
+        return v
+
+    @model_validator(mode='after')
+    def _staggered_in_whole_weeks(self) -> 'Strategy':
+        if self.staggered and (self.recalc_frequency_days < 14 or self.recalc_frequency_days % 14):
+            raise ValueError(f"a staggered fund needs recalc_frequency_days in whole two-week steps: {self.recalc_frequency_days}")
+        return self
+
+    @property
+    def run_interval_days(self) -> int:
+        """How often the fund runs: every recalc_frequency_days, or every half of it when staggered."""
+        return self.recalc_frequency_days // 2 if self.staggered else self.recalc_frequency_days
 
     @field_validator('rank_points')
     @classmethod
@@ -117,6 +143,7 @@ class FundHolding:
     max_delta: float | None
     weight: float | None = None
     score: int | None = None        # its consensus score (Strategy.rank_points) on the holding date
+    half: int | None = None         # a staggered fund's half (0 / 1) the holding is reviewed with; None otherwise
 
 
 @dataclass
@@ -404,7 +431,7 @@ def _fetch_and_select_by_style(
     (market_split_percents for this region on as_of), each divided by style with a style split
     (style_split_percents), else one per style, else one; `fetched` is every scored idea, in score
     order per bucket. Each bucket's keep_ids are its ideas within the top
-    ceil(target x config.FundStrategy.KEEP_BUFFER): a holding among them is kept. An emerging bucket
+    ceil(target x strategy.keep_buffer): a holding among them is kept. An emerging bucket
     short of ideas leaves its places to developed, a growth bucket to value.
     """
     markets = market_split_percents(strategy, as_of, country_type)
@@ -445,7 +472,7 @@ def _style_buckets(
         ))
 
     def keep(ideas: list[best_idea.BestIdeaRanked], target: int) -> set[int]:
-        return {i.ticker_id for i in ideas[:math.ceil(target * config.FundStrategy.KEEP_BUFFER)]}
+        return {i.ticker_id for i in ideas[:math.ceil(target * strategy.keep_buffer)]}
 
     def ids(ideas: list[best_idea.BestIdeaRanked]) -> set[int]:
         return {i.ticker_id for i in ideas}
@@ -624,7 +651,7 @@ def generate(
         )
     else:
         # A holding is kept while it's within its bucket's keep buffer (the top
-        # ceil(target x config.FundStrategy.KEEP_BUFFER) by score), else sold. Kept holdings carry today's score.
+        # ceil(target x strategy.keep_buffer) by score), else sold. Kept holdings carry today's score.
         for ph in previous_holdings:
             now = fetched_by_id.get(ph.ticker_id)
             if now is None or ph.ticker_id not in keep_ids:
@@ -670,12 +697,93 @@ def generate(
                 room -= 1
                 missing -= 1
 
+        if strategy.staggered:
+            _apply_stagger(today, strategy, previous_holdings, todays_holdings, holdings_changed, buckets, fetched)
+
     if strategy.allocation == 'market_cap':
         apply_market_cap_weights(todays_holdings, mc_map)
     else:
         apply_equal_weights(todays_holdings)
 
     return FundChangesResult(fund=fund, holdings=todays_holdings, changes=holdings_changed)
+
+
+def review_half(strategy: Strategy, today: date) -> int:
+    """The half (0 / 1) a staggered fund reviews on today's run. The turns follow the calendar -
+    run weeks counted from config.FundStrategy.STAGGER_EPOCH (a Monday), one run every
+    run_interval_days - so a skipped run (an outage) can't put the halves out of step, and a
+    generation day moved around a holiday stays in its week."""
+    week_start = today - timedelta(days=today.weekday())
+    weeks = (week_start - config.FundStrategy.STAGGER_EPOCH).days // 7
+    return (weeks // (strategy.run_interval_days // 7)) % 2
+
+
+def _apply_stagger(
+    today: date,
+    strategy: Strategy,
+    previous_holdings: List[FundHolding],
+    todays_holdings: List[FundHolding],
+    holdings_changed: List[FundHoldingChange],
+    buckets: list[Bucket],
+    fetched: list,
+) -> None:
+    """
+    Staggered rebalancing (Strategy.staggered), applied to generate's result in place. Only the half
+    whose turn it is (review_half) is reviewed: a holding of the other half that the selection sold
+    below the score buffer is kept until its own half's turn, and one of today's buys in its bucket -
+    the lowest-scored - is cancelled to make room (any bucket's when its own has none; with no buy to
+    cancel it is sold after all). A holding no longer among any manager's best ideas is sold at
+    once, whichever half it is in. Today's buys join the reviewed half. A first build, and holdings carried from before
+    the fund was staggered, are split into halves alternately down each bucket's ranking (ranks 1, 3,
+    5, ... in half 0).
+    """
+    turn = review_half(strategy, today)
+    bucket_of: dict[int, int] = {}
+    for i, b in enumerate(buckets):
+        for t in b.fetched_ids:
+            bucket_of.setdefault(t, i)
+    order = {i.ticker_id: n for n, i in enumerate(fetched)}   # score order within each bucket
+
+    def assign_alternately(holdings: List[FundHolding]) -> None:
+        by_bucket: dict[int, list[FundHolding]] = {}
+        for h in holdings:
+            by_bucket.setdefault(bucket_of.get(h.ticker_id, -1), []).append(h)
+        for hs in by_bucket.values():
+            for n, h in enumerate(sorted(hs, key=lambda h: order.get(h.ticker_id, len(order)))):
+                h.half = n % 2
+
+    if not previous_holdings:
+        assign_alternately(todays_holdings)
+        return
+    unassigned = [ph for ph in previous_holdings if getattr(ph, 'half', None) is None]
+    if unassigned:
+        assign_alternately(unassigned)
+
+    previous = {ph.ticker_id: ph for ph in previous_holdings}
+    held = {h.ticker_id: h for h in todays_holdings}
+    fetched_by_id = {i.ticker_id: i for i in fetched}
+    buys = [c for c in holdings_changed if c.direction == "buy"]
+    for sell in [c for c in holdings_changed if c.direction == "sell"]:
+        ph = previous[sell.ticker_id]
+        # Reviewed today, or no longer any manager's best idea (no bucket to hold it in): sold now.
+        if ph.half == turn or sell.ticker_id not in bucket_of:
+            continue
+        same = [b for b in buys if bucket_of.get(b.ticker_id) == bucket_of[sell.ticker_id]]
+        pool = same or buys
+        if not pool:
+            continue
+        cancel = min(pool, key=lambda b: b.score or 0)
+        buys.remove(cancel)
+        holdings_changed.remove(cancel)
+        todays_holdings.remove(held.pop(cancel.ticker_id))
+        holdings_changed.remove(sell)
+        now = fetched_by_id.get(ph.ticker_id)
+        ph.holding_date = today
+        if now:
+            ph.score, ph.ranking, ph.max_delta, ph.source_etf_id = now.score, now.ranking, now.max_delta, now.source_etf_id
+        todays_holdings.append(ph)
+    for b in buys:
+        held[b.ticker_id].half = turn
 
 
 def apply_equal_weights(holdings: List[FundHolding]) -> None:

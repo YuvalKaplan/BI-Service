@@ -36,7 +36,7 @@ The fund applies this across the population of US-listed, actively managed, dive
 2. read each one's holdings every week;
 3. for each, measure each holding's **active weight** – its weight in the ETF minus its weight in the relevant large-cap benchmark – and keep the top overweights as that manager's best ideas (a global manager's US and international holdings separately);
 4. combine the best ideas of all managers in each region into a consensus score – points for each manager's rank, summed – so the stocks that several managers rank highly come first;
-5. split the 50 holdings between the US and international, the US holdings between growth and value, and the international holdings between developed and emerging markets, by their float-adjusted weight in the reference benchmarks (19 US growth, 14 US value, and 17 international – 13 developed and 4 emerging, as of November 2026), hold each part's top large-cap companies at equal weight, and rebalance every two weeks with turnover controls.
+5. split the 50 holdings between the US and international, the US holdings between growth and value, and the international holdings between developed and emerging markets, by their float-adjusted weight in the reference benchmarks (19 US growth, 14 US value, and 17 international – 13 developed and 4 emerging, as of November 2026), hold each part's top large-cap companies at equal weight, and rebalance on a staggered two-week schedule: half the holdings are reviewed each week, so each holding is reviewed every two weeks against its part's current top list.
 
 Active ETFs are used rather than mutual funds because they publish their holdings far more often (most daily; we read them weekly – [§5](#5-holdings)), so the ideas are recent rather than a quarter old.
 
@@ -53,7 +53,7 @@ Active ETFs are used rather than mutual funds because they publish their holding
 | **Developed / emerging** | International holdings by number: each market's float-adjusted weight in the International developed and emerging benchmarks, recalculated quarterly – 73.5% developed / 26.5% emerging as of November 2026, so 13 and 4 of the 17 |
 | **Holdings** | 50 |
 | **Weighting** | Equal (2% each) |
-| **Rebalancing** | Every two weeks, with turnover controls |
+| **Rebalancing** | Staggered two-weekly: half the holdings reviewed each week, each holding every two weeks, against its part's current top list (keep buffer 1.0) |
 
 **Weekly timing.** Benchmarks and best ideas are rebuilt every Wednesday on **Tuesday's closing data**, and the fund is rebalanced on every second such day. All of them use the same close; a market closed that day (a local holiday) uses its last close. When Tuesday is an NYSE holiday, the weekly run moves a day later (Thursday, on Wednesday's close), else a day earlier, staying in the same week. The two-week rebalancing period is counted in calendar weeks, so a moved run never makes the fund skip a rebalance.
 
@@ -341,19 +341,23 @@ Every holding is held at **equal weight**: 1/50, or 2%. So the split by number o
 
 ## 11. Maintaining the portfolio: rebalancing and turnover
 
-The fund is rebalanced every two weeks, on the weekly run. Starting from the current holdings:
+The fund is re-evaluated every week, on the weekly run, and its holdings are reviewed on a **staggered two-week schedule** (below): each week, the holdings of one half. Starting from the current holdings of the half under review:
 
 | Current holding | Action |
 |-----------------|--------|
-| Within the top 1.25 × its part's target by its part's score – the top 24 US growth, 18 US value, 17 international developed and 5 international emerging at 19 / 14 / 13 / 4 – the line moves with the targets | **Keep** – a holding that drifts a few places below its part's cut-off is tolerated, to limit turnover |
-| Still scored, but below that line | **Sell** – "below the score buffer" |
+| Within its part's top list by its part's score – the top 19 US growth, 14 US value, 13 international developed and 4 international emerging at the November 2026 targets – the line moves with the targets | **Keep** |
+| Still scored, but below its part's cut-off | **Sell** – "below the score buffer" |
 | No longer among any of its region's managers' best ideas | **Sell** – "no longer a best idea" |
 
-Free positions are then filled **part by part** (**buys**): each part's from its own ideal holdings, in score order, up to its target (19, 14, 13 or 4). A sold emerging-market holding is replaced by an emerging-market idea, a sold US value holding by a US value idea. A held stock is not replaced merely because a higher-scoring idea has appeared: positions are only freed by sells, so a new idea that scores inside its part's top can wait outside the fund until a position frees up. That delay is the price of the lower turnover. All holdings are then reset to equal weight.
+The fund's **keep buffer is 1.0**: the keep line is each part's cut-off itself, so the fund holds exactly each part's current top list. Free positions are then filled **part by part** (**buys**): each part's from its own ideal holdings, in score order, up to its target (19, 14, 13 or 4). A sold emerging-market holding is replaced by an emerging-market idea, a sold US value holding by a US value idea. An idea that rises into its part's top list replaces that part's lowest holding when that holding's half is next reviewed. All holdings are then reset to equal weight.
 
-**The split between rebalances.** Each part buys only up to its target less the holdings it kept, so the fund holds exactly its targets (19 US growth, 14 US value, 13 international developed and 4 international emerging at the splits above). Holdings are never sold to make room. A part short of eligible ideas holds fewer, and the shortfall is not made up from another part – except that an emerging part's goes to the developed part.
+**Staggered rebalancing.** The holdings are split into two halves, and the halves take turns week by week, so each holding is reviewed every two weeks on its own half's week. On a half's week, its holdings that fell below their part's cut-off are sold and replaced by the part's best ideas not yet held. A holding of the other half that has slipped below its cut-off waits for its own week: one of that week's buys in its part, the lowest-scored, is deferred to make room. A holding that is no longer among any of its region's managers' best ideas is sold at once, whichever half it is in. At the start, each part is split by alternating down its ranking (ranks 1, 3, 5 … in one half), and a new holding joins the half whose place it fills. New ideas can therefore enter every week while each holding gets the full two weeks, and the trades are spread over every week instead of every other one.
 
-**When the quarterly split changes.** A new split can move positions between the targets, and the keep lines move with them. No holding is sold to rebalance: the part now above its target makes no buys until its own sells bring it down, and each freed position goes to the part below its target. The fund reaches the new split through normal turnover. A US company whose style changes moves to the other style's part, where it is measured against the other benchmark and kept only while it stays within that part's keep line; likewise an international company the index provider reclassifies between developed and emerging.
+**Why a buffer of 1.0 and a staggered schedule.** A wider buffer would tolerate a holding a few places below its cut-off, to limit turnover. A replay of March–October 2026 – the US holdings of the active ETFs that pass today's selection, the fund's own rules, actual prices and trading costs, with weekly, two-weekly and four-weekly rebalancing – found that a buffer of 1.0 gave the highest return against the S&P 500 Equal Weight at every interval. Buffers of 1.25 and 1.5 cut trading by 9–42 basis points a year but kept names whose managers' consensus had weakened, and those names lagged by more than the saving. The same replay found the staggered two-week schedule gave the highest return of the schedules tested (weekly, two-weekly, staggered two-weekly, four-weekly), at about the turnover of plain two-weekly rebalancing: holdings that slip briefly below their cut-off often recover within a week, and the staggered schedule sells only half of them before they can. The evidence covers one short period and is not statistically significant, so the choice is reviewed as more history accumulates.
+
+**The split between rebalances.** Each part buys only up to its target less the holdings it kept, so the fund holds exactly its targets (19 US growth, 14 US value, 13 international developed and 4 international emerging at the splits above). A part short of eligible ideas holds fewer, and the shortfall is not made up from another part – except that an emerging part's goes to the developed part.
+
+**When the quarterly split changes.** A new split can move positions between the targets, and the keep lines move with them. A part now above its target sells its lowest-scored holdings beyond the new target as each half's week comes, and the freed positions go to the part below its target, so the fund reaches the new split within two weeks. A US company whose style changes moves to the other style's part, where it is measured against the other benchmark and kept only while it stays within that part's keep line; likewise an international company the index provider reclassifies between developed and emerging.
 
 Other maintenance rules:
 
@@ -390,7 +394,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 
 **Limitations**
 
-- **The split is kept through buys,** not by forced sales: each part fills only its own free positions, so the split stays exact – and a new quarterly split is reached the same way, through freed positions; a part can only fall below its target when it runs short of eligible ideas ([§11](#11-maintaining-the-portfolio-rebalancing-and-turnover)).
+- **Turnover is high.** With a keep buffer of 1.0, every idea that falls out of its part's top list is sold when its half is next reviewed and many return later, so a large share of the holdings changes each year, and the trading cost that comes with it ([§11](#11-maintaining-the-portfolio-rebalancing-and-turnover)). Each part fills only its own free positions, so the split stays exact; a part can only fall below its target when it runs short of eligible ideas.
 - **Holdings lag.** Although active ETFs publish daily, the data vendor refreshes most funds weekly; ideas are typically several days old, and up to two weeks, when used.
 - **New funds join late.** A fund appears on the active list only after its trust's first N-CEN filing after launch (up to a year), and the list is refreshed monthly.
 - **Active ETFs only.** Mutual funds and separately managed accounts, which hold most active assets, are not covered; the manager population is younger and skewed toward sponsors that have launched ETFs, and international managers are fewer than US ones.
@@ -455,6 +459,6 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Fund: international developed / emerging | By the international developed and emerging benchmarks' float-adjusted totals, recalculated quarterly (73.5% / 26.5% → 13 / 4, November 2026) |
 | Fund: rank points, ranks 1–10 | 512, 256, 128, 64, 32, 16, 8, 4, 2, 1 |
 | Fund: weighting | Equal (2%) |
-| Fund: rebalancing | Every two weeks |
-| Fund: keep buffer | Top 1.25 × each part's target by score (top 24 US growth / 18 US value / 17 international developed / 5 international emerging at 19 / 14 / 13 / 4) |
+| Fund: rebalancing | Staggered two-weekly: two halves reviewed on alternate weeks, each holding every two weeks |
+| Fund: keep buffer | 1.0 – each part's top list by score (top 19 US growth / 14 US value / 13 international developed / 4 international emerging at the November 2026 targets) |
 | Weekly run | Wednesday on Tuesday's close (moved around NYSE holidays) |

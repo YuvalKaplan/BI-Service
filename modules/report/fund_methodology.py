@@ -452,7 +452,7 @@ def _write_fund_file(ctx: _Context, out_dir: str) -> str:
             ('Score = ', f"the points each fund ETF gives a company for its rank there (rank 1..{len(s.rank_points)}: "
                          f"{', '.join(map(str, s.rank_points))}), summed (each ETF's latest best ideas from the last {s.recalc_frequency_days} days)"),
             ('Order', 'score desc, appearances desc, max delta desc (per region / market / style bucket)'),
-            ('Keep buffer', f"a holding is kept while within the top {config.FundStrategy.KEEP_BUFFER} x its bucket's target by score"),
+            ('Keep buffer', f"a holding is kept while within the top {s.keep_buffer} x its bucket's target by score"),
         ] + _split_rows(s, ctx.as_of_date) + [
             ('Buckets (target holdings)', ", ".join(f"{b.label} {b.target}" for b in ctx.buckets)),
             ('MC weight alpha / cap / floor', f"{config.FundStrategy.MC_WEIGHT_ALPHA} / {config.FundStrategy.MC_WEIGHT_CAP:.0%} / {config.FundStrategy.MC_WEIGHT_FLOOR:.0%}"),
@@ -535,7 +535,7 @@ def _write_readme(ctx: _Context, out_dir: str, etf_files: list[str]) -> str:
         f"rank there ({', '.join(map(str, s.rank_points))} for ranks 1..{len(s.rank_points)}), summed across the fund's ETFs. "
         "Companies are ordered by score, then the number of ETFs scoring it (appearances), then its largest delta, and each "
         f"region / market / style bucket takes its top share of the {s.holdings} holdings. A current holding is kept while it stays within "
-        f"the top {config.FundStrategy.KEEP_BUFFER}x its bucket's target; sold places are filled from the same bucket. "
+        f"the top {s.keep_buffer}x its bucket's target; sold places are filled from the same bucket. "
         f"Weights: {'market-cap based (square-root compressed, capped and floored)' if s.allocation == 'market_cap' else 'equal'}. "
         "See `fund.xlsx` — *Holdings* shows the justification per holding, *Candidates* shows who wasn't selected and why.",
         "",

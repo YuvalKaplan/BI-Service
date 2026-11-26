@@ -340,8 +340,12 @@ class FundStrategy:
     # Which best ideas the fund draws on (best_idea.benchmark_mode): 'market_split' | 'self'
     BENCHMARK = 'market_split'
     RECALC_FREQUENCY_DAYS = 7
-    # A holding is kept while it's within the top ceil(target x KEEP_BUFFER) of its bucket by score.
+    # A holding is kept while it's within the top ceil(target x keep buffer) of its bucket by score:
+    # the default for a fund whose strategy sets no keep_buffer (fund 11 sets 1.0 - the Nov 2026
+    # rebalancing study, .output/rebalancing_study/).
     KEEP_BUFFER = 1.25
+    # A staggered fund's halves take turns by run week counted from this Monday (model_fund.review_half).
+    STAGGER_EPOCH = date(2024, 1, 1)
     # Market-cap weighting
     MC_WEIGHT_ALPHA = 0.5       # power-law exponent: 1.0 = pure market-cap, 0.0 = equal-weight
     MC_WEIGHT_CAP = 0.10        # maximum weight per holding
