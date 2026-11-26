@@ -238,7 +238,7 @@ Six synthetic benchmarks are rebuilt weekly from the full screened universe (eve
 | **International Large Cap Developed** | The International blend's developed-market companies |
 | **International Large Cap Emerging** | The International blend's emerging-market companies |
 
-Membership follows the S&P / Russell convention – size measured on the whole company, with a minimum float. **Weights are proportional to the whole company's market cap** – the size the managers themselves see and size positions against ([§14](#14-design-decisions-and-known-limitations)). In the style and market halves each company belongs wholly to one side and each side is re-weighted to 100%. The International blend splits by market, not by style: the style reference data is US-only, and about a third of the international benchmark has no reliable style, whereas every company's market is known from the index provider. Emerging markets are about 38% of the International blend by whole market cap (29% float-adjusted, September 2026).
+Membership follows the S&P / Russell convention – size measured on the whole company, with a minimum float. **Weights are proportional to the whole company's market cap** – the size the managers themselves see and size positions against ([§14](#14-design-decisions-and-known-limitations)). In the style and market halves each company belongs wholly to one side and each side is re-weighted to 100%. The International blend splits by market, not by style: the style reference data is US-only, and about a third of the international benchmark has no reliable style, whereas every company's market is known from the index provider. Emerging markets are about 35% of the International blend by whole market cap (26.5% float-adjusted, November 2026).
 
 Each ETF is linked to its region's blend benchmark – through it, to the blend's halves its holdings are measured against: value and growth in the US, developed and emerging internationally ([§9](#9-measuring-a-managers-best-ideas)).
 
@@ -443,7 +443,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 | Best ideas: maximum active weight | 20% |
 | Best ideas: per ETF | 10 |
 | Fund: rank points, ranks 1–10 | 512, 256, 128, 64, 32, 16, 8, 4, 2, 1 |
-| Fund: market split (US / International; growth / value, US; developed / emerging, International) | Float-adjusted reference benchmark totals, recalculated quarterly – 65.0% / 35.0%; 57.5% / 42.5% (November 2026); 71.5% / 28.5% (September 2026 benchmarks) |
+| Fund: market split (US / International; growth / value, US; developed / emerging, International) | Float-adjusted reference benchmark totals, recalculated quarterly – 65.0% / 35.0%; 57.5% / 42.5% (November 2026); 73.5% / 26.5% (November 2026) |
 | Company market: held by both international index funds | One fund's float-adjusted holding ≥ 2× the other's decides |
 | Fund: keep buffer | Top 1.25 × the bucket's share of holdings, by score |
 | Fund weighting: exponent / cap / floor | 0.5 (square root) / 10% / 1% |
