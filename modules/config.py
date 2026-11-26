@@ -33,6 +33,7 @@ class Api:
 class Edgar:
     """SEC EDGAR client (modules/sec/edgar.py)."""
     EDGAR_ARCHIVES_URL = 'https://www.sec.gov/Archives/edgar'
+    FULL_TEXT_SEARCH_URL = 'https://efts.sec.gov/LATEST/search-index'   # EDGAR full-text search (filings since 2001)
     MIN_REQUEST_INTERVAL = 0.2  # seconds between requests: 5 per second
     API_RETRIES = 3
     API_RETRY_DELAY = 2.0       # seconds; doubles on each subsequent attempt
@@ -71,6 +72,15 @@ class Ncen:
     PROGRESS_EVERY = 250        # filings between progress lines
     DOWNLOAD_WORKERS = 4        # parallel filing downloads, all under edgar's 5-requests-per-second throttle
     FAILED_XML_DIR = os.path.join('.output', 'downloads', 'ncen')   # filings that failed to parse, kept for debugging
+
+
+class Prospectus:
+    """Non-transparent ETFs, from the legend their prospectuses carry (modules/sec/prospectus.py)."""
+    LEGEND = 'This ETF is different from traditional ETFs'   # the cover legend the SEC's non-transparent ETF orders require
+    FORMS = ('497K', '497')     # single-fund prospectus filings (a 485BPOS covers a whole trust, transparent series too)
+    WINDOW_DAYS = 455           # a legend filed within ~15 months (prospectuses are renewed yearly): non-transparent
+    MAX_FAILED_SHARE = 0.1      # more new filings whose header can't be read than this fails the run...
+    MIN_FAILED_TO_RAISE = 5     # ... but a handful never does
 
 
 class EtfProfile:

@@ -4,9 +4,9 @@ Which provider ETFs feed best ideas: the selection rules, applied to every provi
 
 The rules keep out the funds whose holdings wouldn't express a manager's stock picks within a
 broad large-cap market: derivative strategies, funds named after an index, equal-weighted funds,
-single-country and emerging-market funds, sector themes and funds mostly outside the large-cap
-universe our benchmarks measure. Each is a test
-with a round level, not one fitted to the pool of the day. An ETF is active when it is still on
+non-transparent funds (whose holdings are months old), single-country and emerging-market funds,
+sector themes and funds mostly outside the large-cap universe our benchmarks measure. Each is a
+test with a round level, not one fitted to the pool of the day. An ETF is active when it is still on
 the current SEC list, its profile still finds it an equity fund, and:
   1. its holdings have never shown a derivative contract (contracts): an option - FMP lists
      them as "AAPL US 10/16/26 C340", "SPY 11/17/2026 762.29 C", "SPY CALL USD 12/04/2026",
@@ -67,7 +67,12 @@ the current SEC list, its profile still finds it an equity fund, and:
      (ROE). The text alone isn't enough - FMP paraphrases (CBSE "mirrors" an equal-weight world
      index it can't, with 38 US stocks), and some funds equal-weight only part of the book (ROPE)
      or drift far from it (GPT) - and flat holdings alone aren't either: many concentrated managers
-     size their 20-40 picks about the same, by choice (Parnassus, Touchstone, Segall Bryant).
+     size their 20-40 picks about the same, by choice (Parnassus, Touchstone, Segall Bryant);
+ 13. it publishes its holdings daily (transparent): no prospectus of its own filed within
+     config.Prospectus.WINDOW_DAYS carries the non-transparent ETF legend (modules/sec/prospectus.py).
+     A non-transparent fund (ActiveShares, proxy portfolio, tracking basket: Fidelity FBCG, T. Rowe
+     Price TCHP, American Century FDG) discloses its holdings quarterly, a month or two late, and
+     FMP re-dates that file with every refresh - rule 9 can't see its holdings are months old.
 A fund that moved to another trust is on the list twice under one ticker until its old series
 drops off (BRIF, TGLR): only the one with the latest filing can be active - the other fails
 'duplicate' (they'd download the same holdings and count twice in the funds).
@@ -94,12 +99,12 @@ from datetime import date, timedelta
 from modules import config
 from modules.object import benchmark, provider, provider_etf, provider_etf_holding, sec_active_etf
 from modules.object.provider_etf import ProviderEtf, ACTIVE, INACTIVE, PENDING
-from modules.sec import ncen
+from modules.sec import ncen, prospectus
 from modules.ticker import company, index_funds
 
 
 EQUITY = 'equity'   # the profile's strategy for an actively managed equity fund (etf_profile.classify)
-RULES = ('sec', 'duplicate', 'equity', 'index', 'contracts', 'region', 'cap', 'holdings', 'parts', 'sector',
+RULES = ('sec', 'duplicate', 'equity', 'index', 'transparent', 'contracts', 'region', 'cap', 'holdings', 'parts', 'sector',
          'country', 'emerging', 'coverage', 'equal_weight', 'fresh')
 HOLDINGS_RULES = {'fresh', 'sector', 'coverage', 'parts', 'equal_weight'}    # decided by the stored holdings: checked again on each download
 
@@ -197,10 +202,11 @@ def coverage_level(etf: ProviderEtf) -> float:
 
 def failed_rules(etf: ProviderEtf, current_series: set[str], latest: date | None, as_of: date,
                  superseded: bool = False, measures: HoldingsMeasures | None = None,
-                 provider_name: str | None = None) -> list[str]:
+                 provider_name: str | None = None, non_transparent: bool = False) -> list[str]:
     """The rules the ETF fails (RULES order); an unknown value fails, except that the holdings
     measures wait for the first holdings download. superseded: another ETF with its ticker has a
-    later filing. provider_name: its provider's, left out of the index-name test."""
+    later filing. provider_name: its provider's, left out of the index-name test. non_transparent:
+    its prospectus carries the non-transparent ETF legend (prospectus.non_transparent_series)."""
     m = measures or HoldingsMeasures()
     failed = []
     if not etf.sec_series_id or etf.sec_series_id not in current_series:
@@ -211,6 +217,8 @@ def failed_rules(etf: ProviderEtf, current_series: set[str], latest: date | None
         failed.append('equity')
     if names_index(etf.name, provider_name):
         failed.append('index')
+    if non_transparent:
+        failed.append('transparent')
     if etf.contracts_found is not None:
         failed.append('contracts')
     if etf.region not in config.EtfSelection.REGIONS:
@@ -376,6 +384,7 @@ def evaluate(as_of: date | None = None) -> list[Evaluated]:
     """Every provider ETF with the rules it fails and the status and benchmark they give it."""
     today = as_of or date.today()
     filed = {e.series_id: e.filing_date for e in sec_active_etf.fetch_current(ncen.filed_since(today))}
+    non_transparent = prospectus.non_transparent_series(today)
     latest_dates = provider_etf_holding.fetch_latest_dates()
     benchmarks = benchmark_ids()
     measures = holdings_measures(today)
@@ -387,7 +396,8 @@ def evaluate(as_of: date | None = None) -> list[Evaluated]:
         latest = latest_dates.get(etf.id) if etf.id is not None else None
         m = measures.get(etf.id, HoldingsMeasures()) if etf.id is not None else HoldingsMeasures()
         superseded = bool(etf.ticker) and newest.get((etf.ticker or '').upper()) != etf.id
-        failed = failed_rules(etf, set(filed), latest, today, superseded, m, providers.get(etf.provider_id))
+        failed = failed_rules(etf, set(filed), latest, today, superseded, m, providers.get(etf.provider_id),
+                              etf.sec_series_id in non_transparent)
         out.append(Evaluated(etf=etf, failed=failed, latest=latest, status=status_for(failed, latest),
                              benchmark_id=benchmarks.get(etf.region or ''), measures=m))
     return out

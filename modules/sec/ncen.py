@@ -293,7 +293,7 @@ def reminder(as_of: date | None = None) -> str:
         "Update the SEC active ETF list",
         "- The SEC blocks the Render hosted cron's IP, so for now we manually activate this from our local desktop.",
         f"- From the project root on your machine: {UPDATE_COMMAND}",
-        "- It reads the filings not read yet, profiles the funds due on FMP and applies the selection rules",
+        "- It reads the filings not read yet, finds the non-transparent ETFs' prospectuses, profiles the funds due on FMP and applies the selection rules",
         last_line,
     ])
 

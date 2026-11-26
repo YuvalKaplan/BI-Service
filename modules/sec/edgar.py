@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import date
 from threading import Lock
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from modules import config
 
@@ -124,6 +125,46 @@ def form_index(year: int, quarter: int, form_types: tuple[str, ...]) -> list[Ind
             accession=path.rsplit('/', 1)[-1].removesuffix('.txt'),
         ))
     return entries
+
+
+@dataclass
+class FullTextHit:
+    """One filing that EDGAR's full-text search found."""
+    form_type: str
+    cik: str            # the first filer's
+    filed: date
+    accession: str
+
+
+_FULL_TEXT_PAGE = 100   # hits per page of EDGAR's full-text search (fixed by the SEC)
+
+
+def full_text_search(phrase: str, forms: tuple[str, ...], start: date, end: date) -> list[FullTextHit]:
+    """The filings of the given form types filed from start to end whose text contains the exact
+    phrase, once each (a filing's documents are separate hits)."""
+    query = urlencode({'q': f'"{phrase}"', 'forms': ','.join(forms), 'dateRange': 'custom',
+                       'startdt': start.isoformat(), 'enddt': end.isoformat()})
+    out: dict[str, FullTextHit] = {}
+    offset = 0
+    while True:
+        page = json.loads(get(f"{config.Edgar.FULL_TEXT_SEARCH_URL}?{query}&from={offset}"))
+        hits = page.get('hits', {}).get('hits', [])
+        for hit in hits:
+            source = hit.get('_source', {})
+            accession, ciks = source.get('adsh'), source.get('ciks') or []
+            if accession and ciks and source.get('form') in forms and accession not in out:
+                out[accession] = FullTextHit(form_type=source['form'], cik=ciks[0],
+                                             filed=date.fromisoformat(source['file_date']), accession=accession)
+        offset += len(hits)
+        if len(hits) < _FULL_TEXT_PAGE or offset >= page.get('hits', {}).get('total', {}).get('value', 0):
+            return list(out.values())
+
+
+def filing_series(cik: str, accession: str) -> list[str]:
+    """The SEC series ids a filing covers, from its header (one for a single fund's prospectus)."""
+    folder = f"{config.Edgar.EDGAR_ARCHIVES_URL}/data/{int(cik)}/{accession.replace('-', '')}"
+    header = get(f"{folder}/{accession}.hdr.sgml").decode('latin-1')
+    return list(dict.fromkeys(re.findall(r'<SERIES-ID>\s*(S\d+)', header)))
 
 
 def filing_xml(cik: str, accession: str) -> bytes:
