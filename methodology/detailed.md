@@ -135,7 +135,7 @@ The rules aim to remove the fund types that don't express stock selection within
 
 ## 4. Holdings
 
-**Frequency and dating.** Holdings are read from FMP every weekday run. FMP refreshes most funds once a week (dated Sunday), some on other days; each holding set is stored under FMP's own date. A fund's holdings are used for up to 14 days.
+**Frequency and dating.** Holdings are read from FMP every weekday run. FMP refreshes most funds every trading day, some a few times a week or weekly; each holding set is stored under FMP's own date. FMP publishes a day's file during that day's US session, after the early-morning run, so each run uses the previous day's file, which reflects the fund's positions one to two trading days earlier. A fund's holdings are used for up to 14 days.
 
 **Identifying each line.** Every holding line is matched to a company:
 
@@ -440,7 +440,7 @@ A **simulation** replays the same rules week by week over the holdings collected
 
 **Limitations**
 
-- **Holdings lag.** Although active ETFs publish daily, the data vendor refreshes most funds weekly; ideas are typically several days old, and up to two weeks, when used.
+- **Holdings lag.** Active ETFs publish their holdings daily and the data vendor carries most of them daily, but a day or two behind the fund's own file, and the recalculation runs before that day's file arrives: the positions used are typically one to two trading days old, and up to two weeks old for the funds the vendor refreshes less often.
 - **New funds join late.** A fund appears on the active list only after its trust's first N-CEN filing after launch (up to a year), and the list is refreshed monthly.
 - **Active ETFs only.** Mutual funds and separately managed accounts, which hold most active assets, are not covered; the manager population is younger and skewed toward sponsors that have launched ETFs.
 - **Vendor data.** Holdings, prices, share counts, style factors and ESG come from one vendor (FMP); the validation in [§5](#5-company-data-and-data-quality) catches known failure modes but cannot rule out every error. Lines that cannot be identified (a small share of weight, mostly emerging-market names) take no part.

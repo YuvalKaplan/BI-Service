@@ -72,14 +72,15 @@ def _part(inputs: EtfInputs, region: str, benchmark_id: int | None) -> EtfInputs
     )
 
 
-def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = None) -> EtfInputs | None:
+def prepare_etf_inputs(pe: provider_etf.ProviderEtf, up_to_date: date | None = None,
+                       before: date | None = None) -> EtfInputs | None:
     """
-    Loads an ETF's latest holdings (as of up_to_date, or now) and the market data needed to
-    compute its active weights. Returns None if no holdings were downloaded within
-    config.BestIdeas.LOOK_BACK_WINDOW. Shared by run() and the per-fund analysis snapshot so both see exactly
-    the same inputs.
+    Loads an ETF's latest holdings (as of up_to_date, dated before `before`, or now) and the
+    market data needed to compute its active weights. Returns None if no holdings were downloaded
+    within config.BestIdeas.LOOK_BACK_WINDOW. Shared by run() and the per-fund analysis snapshot so
+    both see exactly the same inputs.
     """
-    raw_holdings = fetch_latest_holdings_for_etf(pe.id, config.BestIdeas.LOOK_BACK_WINDOW, up_to_date=up_to_date)
+    raw_holdings = fetch_latest_holdings_for_etf(pe.id, config.BestIdeas.LOOK_BACK_WINDOW, up_to_date=up_to_date, before=before)
     if not raw_holdings:
         return None
 
@@ -438,9 +439,10 @@ def run(as_of_date: date | None = None) -> RunStats:
     """
     Generates best ideas for every active provider ETF (status 'active' - the selection rules,
     modules/sec/etf_selection.py). When as_of_date is None (live),
-    holdings and the market benchmarks are resolved as of "now". When given (sim),
-    they're resolved as of that historical date instead — both fetches already support
-    this natively via their up_to_date param.
+    holdings and the market benchmarks are resolved as of "now". When given (the sim, the
+    replay), the benchmarks are resolved as of that date and the holdings are those dated
+    before it - what the cron's early run that day has (FMP publishes a day's file in the
+    afternoon or evening UTC), so a replayed day never uses a file the live run couldn't.
     """
     process_name = 'best_ideas_generator' if as_of_date is None else 'sim_best_ideas_gen'
     log_prefix = '' if as_of_date is None else f'[sim {as_of_date}] '
@@ -470,7 +472,7 @@ def run(as_of_date: date | None = None) -> RunStats:
                 try:
                     # 1. Holdings for the latest holding date within the look-back window, with
                     #    duplicate lines summed or quarantined, plus market caps and master info.
-                    inputs = prepare_etf_inputs(pe, as_of_date)
+                    inputs = prepare_etf_inputs(pe, before=as_of_date)
                     if inputs is None:
                         record_problem(batch_run_id=batch_run_id, provider=p, etf=pe, error=f"No holdings have been downloaded for the past {config.BestIdeas.LOOK_BACK_WINDOW} days", message=None)
                         etf_stats.notes.append(f"no holdings in {config.BestIdeas.LOOK_BACK_WINDOW} days")
