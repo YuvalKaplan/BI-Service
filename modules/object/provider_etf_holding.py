@@ -98,43 +98,34 @@ def fetch_valid_holdings_by_provider_etf_id(provider_etf_id: int, holding_date: 
         raise Exception(f"Error fetching holdings for provider ETF ID from the DB: {e}")
 
 
-def fetch_latest_holdings_for_etf(provider_etf_id: int, look_back_days: int, up_to_date: date | None = None) -> List[ProviderEtfHolding]:
+def fetch_latest_holdings_for_etf(provider_etf_id: int, look_back_days: int, up_to_date: date | None = None,
+                                  before: date | None = None) -> List[ProviderEtfHolding]:
+    """The ETF's lines on its latest holding date within look_back_days: of now (neither date
+    given), on or before up_to_date, or - before - dated before that day, as the cron's early
+    run that day sees them (FMP publishes a day's file in the afternoon or evening UTC, so the
+    morning run has the previous day's; the sim and the replay pass the generation day)."""
+    if before is not None:
+        window, params = "holding_date < %s AND holding_date > %s - (%s * INTERVAL '1 day')", (before, before, look_back_days)
+    elif up_to_date is not None:
+        window, params = "holding_date <= %s AND holding_date > %s - (%s * INTERVAL '1 day')", (up_to_date, up_to_date, look_back_days)
+    else:
+        window, params = "holding_date > NOW() - (%s * INTERVAL '1 day')", (look_back_days,)
     try:
         with db_pool_instance.get_connection() as conn:
             with conn.cursor(row_factory=class_row(ProviderEtfHolding)) as cur:
-                if up_to_date is None:
-                    query_str = """
-                        SELECT peh.*
-                        FROM provider_etf_holding AS peh
-                        INNER JOIN ticker AS t ON peh.ticker_id = t.id
-                        WHERE t.invalid IS NULL
-                          AND peh.provider_etf_id = %s
-                          AND peh.holding_date = (
-                              SELECT MAX(holding_date)
-                              FROM provider_etf_holding
-                              WHERE provider_etf_id = %s
-                                AND holding_date > NOW() - (%s * INTERVAL '1 day')
-                          )
-                        ORDER BY peh.id;
-                    """
-                    cur.execute(query_str, (provider_etf_id, provider_etf_id, look_back_days))
-                else:
-                    query_str = """
-                        SELECT peh.*
-                        FROM provider_etf_holding AS peh
-                        INNER JOIN ticker AS t ON peh.ticker_id = t.id
-                        WHERE t.invalid IS NULL
-                          AND peh.provider_etf_id = %s
-                          AND peh.holding_date = (
-                              SELECT MAX(holding_date)
-                              FROM provider_etf_holding
-                              WHERE provider_etf_id = %s
-                                AND holding_date <= %s
-                                AND holding_date > %s - (%s * INTERVAL '1 day')
-                          )
-                        ORDER BY peh.id;
-                    """
-                    cur.execute(query_str, (provider_etf_id, provider_etf_id, up_to_date, up_to_date, look_back_days))
+                cur.execute(f"""
+                    SELECT peh.*
+                    FROM provider_etf_holding AS peh
+                    INNER JOIN ticker AS t ON peh.ticker_id = t.id
+                    WHERE t.invalid IS NULL
+                      AND peh.provider_etf_id = %s
+                      AND peh.holding_date = (
+                          SELECT MAX(holding_date)
+                          FROM provider_etf_holding
+                          WHERE provider_etf_id = %s AND {window}
+                      )
+                    ORDER BY peh.id;
+                """, (provider_etf_id, provider_etf_id, *params))
                 return cur.fetchall()
     except Error as e:
         raise Exception(f"Error fetching latest holdings for provider ETF {provider_etf_id}: {e}")
